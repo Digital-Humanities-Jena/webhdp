@@ -1,0 +1,49 @@
+steps:
+  backend:
+    image: ghcr.io/astral-sh/uv:python3.11-bookworm-slim
+    commands:
+      - uv sync --frozen --group dev
+      - uv run pytest
+
+  frontend:
+    image: node:22.12
+    commands:
+      - cd frontend
+      - npm ci
+      - npm run test:unit
+      - npm run build
+      - npm audit --omit=dev --audit-level=moderate
+
+  hpc-link:
+    image: ghcr.io/astral-sh/uv:python3.11-bookworm-slim
+    commands:
+      - cd hpc-link
+      - uv run --with pytest --with-requirements requirements.txt python -m pytest
+
+  hpc-link-frontend:
+    image: node:22.12
+    commands:
+      - cd hpc-link/frontend
+      - npm ci
+      - npm run lint
+      - npm run build
+      - npm audit --omit=dev --audit-level=moderate
+
+  compose:
+    image: docker:cli
+    commands:
+      - |
+        created_env=0
+        if [ ! -e .env ]; then cp .env.example .env; created_env=1; fi
+        trap 'if [ "$created_env" -eq 1 ]; then rm -f .env; fi' EXIT
+        docker compose config --quiet
+        docker compose -f docker-compose.prod.yml config --quiet
+
+  developer-onboarding:
+    image: ghcr.io/astral-sh/uv:python3.11-bookworm-slim
+    commands:
+      - uv sync --frozen --group dev
+      - make docs-check
+      - make release-assets-check
+      - make api-contract-check
+      - make hdp-components-check

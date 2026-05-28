@@ -1,0 +1,10 @@
+diff --git a/metis-sandbox-rest/Dockerfile.local b/metis-sandbox-rest/Dockerfile.local
+index 726da06..fdb027c 100644
+--- a/metis-sandbox-rest/Dockerfile.local
++++ b/metis-sandbox-rest/Dockerfile.local
+@@ -14 +14 @@ COPY metis-sandbox-rest metis-sandbox-rest
+-RUN --mount=type=cache,target=/root/.m2 mvn -B -DskipTests -DskipITs package
++RUN mvn -B -DskipTests -DskipITs package
+@@ -16 +16 @@ RUN --mount=type=cache,target=/root/.m2 mvn -B -DskipTests -DskipITs package
+-FROM eclipse-temurin:21-jre
++FROM eclipse-temurin:21-jre-noble

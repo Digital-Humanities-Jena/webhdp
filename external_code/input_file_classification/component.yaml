@@ -1,0 +1,88 @@
+metadata:
+  name: input_file_classification
+  label: Input File Classification
+  description: >
+    Classifies an input file conservatively for constructor triggers and pipeline branching.
+    This component emits stable JSON facts about the file and asset kind without guessing.
+  tags:
+    - classification
+    - trigger
+    - pipeline
+    - 3d
+  keywords:
+    - input classification
+    - point cloud
+    - mesh
+    - trigger rules
+  category: Pipeline Utilities
+  version: "1.0.0"
+  status: alpha
+  component_schema: "0.1.0-alpha.1"
+
+inputs:
+  - name: input_file
+    label: Input File
+    description: Source file to classify.
+    type: file_path
+    required: true
+
+outputs:
+  - name: classification_json
+    label: Classification JSON
+    description: Structured classification facts for pipeline triggers.
+    type: json
+    required: true
+
+parameter_groups: []
+
+ui:
+  playground:
+    fields:
+      input_file:
+        widget: model_input
+        help_text: Select a file to classify for trigger development and testing.
+    result:
+      artifact_views:
+        - id: classification-json
+          label: Classification Output
+          widget: file_download
+          extensions:
+            - ".json"
+      show_result_json: true
+      show_logs: false
+  constructor:
+    outputs:
+      classification_json:
+        trigger_fields:
+          - path: "$.file.extension"
+            label: File Extension
+            value_type: string
+            operators: ["eq", "neq", "in", "not_in", "exists", "truthy"]
+          - path: "$.file.mime_type"
+            label: MIME Type
+            value_type: string
+            operators: ["eq", "neq", "in", "not_in", "exists", "truthy"]
+          - path: "$.file.size_bytes"
+            label: File Size (bytes)
+            value_type: number
+            operators: ["eq", "neq", "gte", "lte", "between", "exists"]
+          - path: "$.asset.kind"
+            label: Asset Kind
+            value_type: string
+            operators: ["eq", "neq", "in", "not_in", "exists", "truthy"]
+            options:
+              - "3d_model"
+              - "unknown"
+          - path: "$.asset.model_kind"
+            label: Model Kind
+            value_type: string
+            operators: ["eq", "neq", "in", "not_in", "exists", "truthy"]
+            options:
+              - "mesh"
+              - "point_cloud"
+              - "unknown"
+        selector_examples:
+          - "$.file.extension"
+          - "$.file.size_bytes"
+          - "$.asset.kind"
+          - "$.asset.model_kind"

@@ -1,0 +1,25 @@
+# Simple Model to Image - Minimal Dependencies
+# Optimized for maximum speed with minimal overhead
+
+# No external Python dependencies required for maximum speed
+# Component uses only built-in Python modules:
+# - subprocess (built-in)
+# - tempfile (built-in)
+# - pathlib (built-in)
+# - json (built-in)
+# - time (built-in)
+# - logging (built-in)
+# - argparse (built-in)
+# - os, sys (built-in)
+
+# System Requirements:
+# - Python 3.8+
+# - Blender 3.0+ (system installation)
+
+# Optional for development/testing:
+# pytest>=6.0.0
+# black>=21.0.0
+
+# Note: This component is designed for maximum computational efficiency
+# by avoiding all external Python dependencies that could slow down processing.
+# All functionality uses built-in Python modules only.

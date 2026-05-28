@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale-1.0">
+    <title>WebHDP (Review Version)</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+    <header>
+        Heritage Data Uploader
+    </header>
+
+    <main>
+        <div class="content-wrapper">
+
+            <div class="action-bar">
+                <h2>Start a New Scan</h2>
+                <div class="button-container">
+                    <button id="upload-btn">
+                        Select Directory
+                    </button>
+                    <button id="upload-file-btn">
+                        Select Single File
+                    </button>
+                </div>
+            </div>
+
+            <div class="results-container">
+                <div class="file-list-header" id="file-list-header">
+                    <h2 style="margin: 0;">Scanned Files</h2>
+                </div>
+                <div id="file-list-container">
+                    <div id="file-list-placeholder">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 16 16">
+                          <path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/>
+                          <path d="M7.646 1.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1-.708.708L8.5 2.707V11.5a.5.5 0 0 1-1 0V2.707L5.354 4.854a.5.5 0 1 1-.708-.708l3-3z"/>
+                        </svg>
+                        <h3>Ready to scan</h3>
+                        <p>Select a directory or upload a file to begin.</p>
+                    </div>
+                    </div>
+            </div>
+
+        </div> </main>
+
+    <div class="modal-backdrop" id="progress-modal">
+        <div class="modal-content">
+            <div id="modal-spinner" class="spinner"></div>
+            <div id="modal-icon-error" class="modal-icon-error" style="display: none;">&#10008;</div>
+            <div id="modal-icon-success" class="modal-icon-success" style="display: none;">&#10004;</div>
+            <h3 id="modal-message">Scanning...</h3>
+            <p id="modal-sub-message">Please wait while your files are being analyzed.</p>
+            <button id="modal-close-btn" style="display: none;">Close</button>
+        </div>
+    </div>
+
+    <div class="modal-backdrop" id="path-modal">
+        <div class="modal-content">
+            <h3 id="path-modal-title">Select Path</h3>
+            <p id="path-modal-desc">
+                For processing, the application requires the full, absolute path to your file or directory.
+            </p>
+            <input type="text" id="path-modal-input" placeholder="e.g., C:\Users\YourName\Desktop\MyData">
+            <div id="path-modal-buttons">
+                <button id="path-modal-cancel-btn" class="btn-secondary">Cancel</button>
+                <button id="path-modal-submit-btn">Submit</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-backdrop" id="validation-modal">
+        <div class="modal-content">
+            <h3 id="validation-modal-title">filename.obj</h3>
+            <span id="validation-modal-status-badge" class="status-Valid">Valid</span>
+
+            <div id="validation-modal-details-container" style="margin-top: 1.5rem; display: none;">
+                <p id="validation-modal-details-title" style="text-align: left; font-weight: 600; margin-bottom: 0.5rem;">Validation Details:</p>
+                <ul id="validation-modal-details-list" style="text-align: left; padding-left: 0; list-style: none; background-color: var(--color-bg); border: 1px solid var(--color-border); border-radius: 0.25rem; max-height: 200px; overflow-y: auto;">
+                    </ul>
+            </div>
+            <div id="validation-modal-children-container">
+                <p id="validation-modal-children-title">Bundled Files:</p>
+                <ul id="validation-modal-children">
+                    <li>file1.mtl</li>
+                    <li>texture.png</li>
+                </ul>
+            </div>
+
+            <div id="validation-modal-buttons" style="display: flex; justify-content: flex-end; margin-top: 1.5rem;">
+                <button id="validation-modal-close-btn">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

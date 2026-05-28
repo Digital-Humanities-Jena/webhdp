@@ -1,0 +1,39 @@
+name: Feature request
+description: Propose a new user, operator, or developer capability.
+title: "[Feature]: "
+labels: ["enhancement", "triage"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or opportunity
+      description: What user, operator, or contributor problem should this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the smallest useful version.
+    validations:
+      required: true
+  - type: dropdown
+    id: audience
+    attributes:
+      label: Primary audience
+      options:
+        - End user
+        - Operator/admin
+        - Developer/contributor
+        - Integrator/API consumer
+        - Public viewer
+  - type: textarea
+    id: affected
+    attributes:
+      label: Likely affected surfaces
+      description: Routes, services, tasks, database, frontend views, docs, deployment, or HPC Link.
+  - type: textarea
+    id: risks
+    attributes:
+      label: Risks or compatibility concerns
+      description: Mention workflow state, `.hdpc`, migrations, credentials, public data, or external APIs if relevant.

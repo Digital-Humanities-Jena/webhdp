@@ -1,0 +1,43 @@
+{
+  "leadDeveloper": {
+    "name": "Dominik Ukolov",
+    "role": "Initiator and lead developer",
+    "email": "dominik.ukolov@uni-jena.de",
+    "orcid": "0000-0002-7904-3892",
+    "orcidUrl": "https://orcid.org/0000-0002-7904-3892",
+    "affiliations": [
+      {
+        "text": "Professorship for Digital Humanities (Image/Object), Friedrich Schiller University Jena"
+      },
+      {
+        "text": "Research Group DIGITAL ORGANOLOGY, Leipzig University",
+        "emphasis": true
+      }
+    ]
+  },
+  "contributors": [],
+  "projects": [
+    {
+      "id": "3dbigdataspace",
+      "name": "3DBigDataSpace",
+      "officialName": "3D Big Data for the Data Space for Cultural Heritage",
+      "relationship": "WebHDP was developed as part of 3DBigDataSpace.",
+      "grantAgreement": "101173385",
+      "funder": "European Union",
+      "programme": "Digital Europe Programme",
+      "url": "https://3dbigdataspace.eu/",
+      "disclaimer": "This work received funding from the European Union under Grant Agreement No. 101173385. Views and opinions expressed are those of the author(s) only and do not necessarily reflect those of the European Union or HADEA. Neither the European Union nor the granting authority can be held responsible for them."
+    },
+    {
+      "id": "infinity",
+      "name": "INFINITY",
+      "officialName": "Multidimensional knowledge-based annotation for ethical context-aware heritage data life cycles",
+      "relationship": "WebHDP will continue to be developed as part of INFINITY.",
+      "grantAgreement": "101233051",
+      "funder": "European Commission",
+      "programme": "Horizon Europe",
+      "url": "https://cordis.europa.eu/project/id/101233051",
+      "disclaimer": "INFINITY is funded by the European Commission under Grant Agreement No. 101233051. Views and opinions expressed are those of the author(s) only and do not necessarily reflect those of the European Union."
+    }
+  ]
+}

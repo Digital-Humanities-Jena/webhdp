@@ -1,0 +1,16 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:07.000
+Open masked integration status and inspect the Dropbox readiness row.
+
+00:00:07.000 --> 00:00:17.000
+Run a safe Dropbox check in the clone; it reports missing local configuration only.
+
+00:00:17.000 --> 00:00:29.000
+Filter API activity to cloud-storage server errors for the same symptom.
+
+00:00:29.000 --> 00:00:41.000
+Open notification delivery evidence and filter to failed attempts.
+
+00:00:41.000 --> 00:00:50.000
+The admin sees an actionable troubleshooting trail without secrets or private endpoints.

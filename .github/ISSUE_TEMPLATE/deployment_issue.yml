@@ -1,0 +1,40 @@
+name: Deployment or operations issue
+description: Report a Docker, configuration, backup, readiness, or runtime operations problem.
+title: "[Ops]: "
+labels: ["operations", "triage"]
+body:
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Deployment mode
+      options:
+        - Docker Compose
+        - Production Compose
+        - Low-resource Compose
+        - HPC/Singularity
+        - Local Flask/Vite
+        - Unknown
+    validations:
+      required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+    validations:
+      required: true
+  - type: textarea
+    id: commands
+    attributes:
+      label: Commands run
+      render: shell
+  - type: textarea
+    id: output
+    attributes:
+      label: Relevant output
+      description: Remove credentials, private paths, and tokens.
+      render: shell
+  - type: textarea
+    id: config
+    attributes:
+      label: Relevant configuration
+      description: Include variable names and non-secret values only.

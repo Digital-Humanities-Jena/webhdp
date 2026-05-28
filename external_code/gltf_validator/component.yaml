@@ -1,0 +1,151 @@
+metadata:
+  name: gltf_validator
+  label: glTF/GLB Validator
+  description: Validate glTF and GLB assets before publication or conversion.
+  tags:
+    - 3d
+    - gltf
+    - glb
+    - validation
+  keywords:
+    - gltf validation
+    - glb validation
+    - 3d model qa
+  category: 3D QA
+  version: "1.0.0"
+  status: alpha
+  component_schema: "0.1.0-alpha.1"
+
+sources:
+  git: "https://github.com/hdp-components/gltf_validator"
+
+distribution:
+  tier: external_installable
+  bundled_with_webhdp: false
+  installation_scope:
+    - local_container
+    - hpc_sif
+
+inputs:
+  - name: input_file
+    label: Input glTF/GLB
+    description: Source .gltf or .glb file to validate.
+    type: file_path
+    required: true
+
+outputs:
+  - name: validation_report
+    label: Validation Report
+    description: JSON report with file facts, errors, and warnings.
+    type: file_path
+    required: false
+
+parameter_groups:
+  - title: Validation
+    description: Configure validation strictness.
+    parameters:
+      - name: strict
+        label: Strict Mode
+        type: boolean
+        default: false
+        description: Treat warnings as failures.
+      - name: max_file_size_mb
+        label: Max File Size Warning
+        type: integer
+        default: 512
+        description: Warn when the asset is larger than this size in MB.
+      - name: require_textures
+        label: Require Textures
+        type: boolean
+        default: false
+        description: Warn when the asset does not declare image textures.
+
+execution:
+  profiles:
+    - id: local_docker
+      adapter: container_cli
+      runtime: docker
+      image: webhdp-gltf-validator:local
+      entrypoint:
+        - python
+        - /app/validator.py
+      resources:
+        gpu_count: 0
+        cpus: 1
+        memory_mb: 2048
+    - id: hpc_singularity
+      adapter: hpc_link
+      handler: generic_singularity_component
+      runtime: singularity
+      image: ""
+      entrypoint:
+        - python
+        - /app/validator.py
+      resources:
+        gpu_count: 0
+        cpus: 1
+        memory_mb: 2048
+
+compatibility:
+  playground:
+    enabled: true
+
+install:
+  strategies:
+    - id: local_container
+      runtime: docker
+      profile: local_docker
+      image: webhdp-gltf-validator:local
+    - id: hpc_sif
+      runtime: singularity
+      profile: hpc_singularity
+  test:
+    files:
+      - name: sample.glb
+        content_base64: "Z2xURgIAAAAwAAAAHAAAAEpTT057ImFzc2V0Ijp7InZlcnNpb24iOiIyLjAifX0g"
+    inputs:
+      input_file: sample.glb
+    parameters:
+      strict: false
+      max_file_size_mb: 512
+      require_textures: false
+
+ui:
+  playground:
+    fields:
+      input_file:
+        widget: model_input
+        accept_extensions:
+          - ".glb"
+          - ".gltf"
+        help_text: Select a staged glTF or GLB file.
+      strict:
+        widget: checkbox
+      max_file_size_mb:
+        widget: number_input
+      require_textures:
+        widget: checkbox
+    result:
+      artifact_views:
+        - id: validation-report
+          label: Validation Report
+          widget: file_download
+          extensions:
+            - ".json"
+      show_result_json: true
+      show_logs: true
+
+hpc:
+  install:
+    runtime: singularity
+    sif_required: true
+  test:
+    files:
+      - name: sample.glb
+        content_base64: "Z2xURgIAAAAwAAAAHAAAAEpTT057ImFzc2V0Ijp7InZlcnNpb24iOiIyLjAifX0g"
+    inputs:
+      input_file: sample.glb
+    parameters:
+      strict: false
+      max_file_size_mb: 512
+      require_textures: false

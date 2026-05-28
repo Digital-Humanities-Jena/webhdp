@@ -1,0 +1,16 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:06.000
+Open Review Files for a real local session with simulated cloud mirror metadata.
+
+00:00:06.000 --> 00:00:16.000
+Inspect available Cloud Storage downloads for the batch ZIP and MSF artifacts.
+
+00:00:16.000 --> 00:00:26.000
+Refresh the mirror check and confirm both synthetic Dropbox objects are available.
+
+00:00:26.000 --> 00:00:38.000
+Open a temporary provider download URL served by the safe recording fixture.
+
+00:00:38.000 --> 00:00:46.000
+No cloud token, refresh token, private link, or production account is exposed.

@@ -1,0 +1,41 @@
+metadata:
+  name: zenodo_upload
+  label: Zenodo Upload
+  description: Uploads prepared files to Zenodo using WebHDP project services.
+  tags:
+    - zenodo
+    - upload
+    - publish
+  keywords:
+    - zenodo upload
+    - publish
+  category: Pipeline Publishing
+  version: "1.0.0"
+  status: alpha
+  component_schema: "0.1.0-alpha.1"
+
+inputs:
+  - name: record_id
+    label: Record ID
+    type: integer
+    required: false
+
+outputs:
+  - name: upload
+    label: Upload Payload
+    type: json
+
+parameter_groups:
+  - title: Upload
+    parameters:
+      - name: publish
+        type: boolean
+        default: false
+
+ui:
+  constructor:
+    outputs:
+      upload:
+        selector_examples:
+          - "$.success"
+          - "$.id"

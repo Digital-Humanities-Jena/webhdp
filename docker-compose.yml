@@ -1,0 +1,269 @@
+services:
+  # Flask Backend
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-sqlite:////app/instance/hdp_web.db}
+      - FLASK_ENV=${FLASK_ENV:-production}
+      - SHARED_SESSION_PATH=/shared/sessions
+      - FAST_RENDERER_URL=http://fast-renderer:5002
+      - ANY_TO_USDZ_URL=http://any-to-usdz:5003
+      - LOCAL_EDM_VALIDATOR_URL=${LOCAL_EDM_VALIDATOR_URL:-http://host.docker.internal:18080}
+      - ENABLE_LOCAL_EDM_VALIDATION=${ENABLE_LOCAL_EDM_VALIDATION:-true}
+      - LOCAL_EDM_VALIDATOR_REQUIRED=${LOCAL_EDM_VALIDATOR_REQUIRED:-true}
+      - LOCAL_EDM_VALIDATOR_CONTINUE_ON_ERROR=${LOCAL_EDM_VALIDATOR_CONTINUE_ON_ERROR:-true}
+      - HOST_PROJECT_PATH=${HOST_PROJECT_PATH:-.}
+      - GOOGLE_APPLICATION_CREDENTIALS=/run/secrets/google-credentials.json
+      - STORAGE_MODE=${STORAGE_MODE:-pure_cloud}
+      - WEBHDP_SESSIONS_PATH=/shared/sessions
+      - LOCAL_INPUT_PATH=/data/local_input
+      - LOCAL_OUTPUT_PATH=/data/local_output
+      - LOCAL_INPUT_HOST_PATH=/data/local_input
+      - LOCAL_OUTPUT_HOST_PATH=/data/local_output
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - RUN_DB_BOOTSTRAP=1
+      - MAX_CONTENT_LENGTH=${MAX_CONTENT_LENGTH:-53687091200}
+      - MIN_UPLOAD_FREE_BYTES=${MIN_UPLOAD_FREE_BYTES:-5368709120}
+      - MIN_UPLOAD_FREE_MULTIPLIER=${MIN_UPLOAD_FREE_MULTIPLIER:-1.5}
+      - SESSION_ARTIFACT_CLEANUP_ENABLED=${SESSION_ARTIFACT_CLEANUP_ENABLED:-false}
+      - SESSION_ARTIFACT_RETENTION_SECONDS=${SESSION_ARTIFACT_RETENTION_SECONDS:-2592000}
+      - MAINTENANCE_FLAG_PATH=/app/instance/maintenance.json
+    volumes:
+      - ./instance:/app/instance
+      - hdp_logs:/app/logs
+      - ${WEBHDP_SESSIONS_PATH:-./hdp-shared/sessions}:/shared/sessions
+      - .:/data
+      - ${CREDENTIALS_HOST_PATH:-./credentials}:/run/secrets:ro
+      - ${LOCAL_INPUT_HOST_PATH:-./local_input}:/data/local_input
+      - ${LOCAL_OUTPUT_HOST_PATH:-./local_output}:/data/local_output
+    depends_on:
+      redis:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - hdp-network
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/api/v1/health', timeout=5)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          memory: 256M
+
+  # Vue Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_LEGAL_PROVIDER_NAME: ${VITE_LEGAL_PROVIDER_NAME:-Example Research Institution}
+        VITE_LEGAL_PROVIDER_ADDRESS: ${VITE_LEGAL_PROVIDER_ADDRESS:-Example Street 1|12345 Example City|Country}
+        VITE_LEGAL_PROVIDER_REPRESENTATIVE: ${VITE_LEGAL_PROVIDER_REPRESENTATIVE:-its authorized representative}
+        VITE_LEGAL_SUPERVISORY_AUTHORITY_NAME: ${VITE_LEGAL_SUPERVISORY_AUTHORITY_NAME:-Competent supervisory authority}
+        VITE_LEGAL_SUPERVISORY_AUTHORITY_ADDRESS: ${VITE_LEGAL_SUPERVISORY_AUTHORITY_ADDRESS:-Authority address configured by the operator}
+        VITE_LEGAL_VAT_ID: ${VITE_LEGAL_VAT_ID:-configured by the operator}
+        VITE_LEGAL_PROJECT_CONTACT_NAME: ${VITE_LEGAL_PROJECT_CONTACT_NAME:-WebHDP project team}
+        VITE_LEGAL_PROJECT_CONTACT_ADDRESS: ${VITE_LEGAL_PROJECT_CONTACT_ADDRESS:-Project contact address configured by the operator}
+        VITE_LEGAL_PROJECT_CONTACT_EMAIL: ${VITE_LEGAL_PROJECT_CONTACT_EMAIL:-webhdp@3drepo.eu}
+        VITE_LEGAL_DPO_EMAIL: ${VITE_LEGAL_DPO_EMAIL:-privacy@example.org}
+        VITE_LEGAL_DPO_LABEL: ${VITE_LEGAL_DPO_LABEL:-data protection officer}
+        VITE_LEGAL_COMPLAINT_AUTHORITY_NAME: ${VITE_LEGAL_COMPLAINT_AUTHORITY_NAME:-the competent data protection supervisory authority}
+        VITE_LEGAL_COMPLAINT_AUTHORITY_ADDRESS: ${VITE_LEGAL_COMPLAINT_AUTHORITY_ADDRESS:-Supervisory authority address configured by the operator}
+    restart: unless-stopped
+    environment:
+      - OEMBED_FRAME_ANCESTORS=${OEMBED_FRAME_ANCESTORS:-'self'}
+      - NGINX_CLIENT_MAX_BODY_SIZE=${NGINX_CLIENT_MAX_BODY_SIZE:-50G}
+    ports:
+      - "${WEBHDP_HTTP_PORT:-8080}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - hdp-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128M
+        reservations:
+          memory: 64M
+
+  # Fast Renderer Microservice
+  fast-renderer:
+    profiles:
+      - local-hdp-components
+    build:
+      context: ./external_code/fast_renderer
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${FAST_RENDERER_PORT:-5002}:5002"
+    volumes:
+      - ${WEBHDP_SESSIONS_PATH:-./hdp-shared/sessions}:/shared/sessions
+      - .:/data
+      - ${LOCAL_INPUT_HOST_PATH:-./local_input}:/data/local_input
+      - ${LOCAL_OUTPUT_HOST_PATH:-./local_output}:/data/local_output
+    networks:
+      - hdp-network
+    environment:
+      - LIBGL_ALWAYS_SOFTWARE=1
+      - GALLIUM_DRIVER=llvmpipe
+      - NVIDIA_VISIBLE_DEVICES=none
+      - BLENDER_EGL_SURFACELESS=1
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:5002/health >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 4G
+        reservations:
+          memory: 1G
+
+  # Any To USDZ Converter
+  any-to-usdz:
+    profiles:
+      - local-hdp-components
+    platform: ${ANY_TO_USDZ_PLATFORM:-linux/amd64}
+    build:
+      context: ./external_code/any_to_usdz
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${ANY_TO_USDZ_PORT:-5003}:5003"
+    volumes:
+      - ${WEBHDP_SESSIONS_PATH:-./hdp-shared/sessions}:/shared/sessions
+      - ${LOCAL_INPUT_HOST_PATH:-./local_input}:/data/local_input
+      - ${LOCAL_OUTPUT_HOST_PATH:-./local_output}:/data/local_output
+    networks:
+      - hdp-network
+    environment:
+      - PYTHONUNBUFFERED=1
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:5003/health >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 30s
+      retries: 5
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
+        reservations:
+          memory: 512M
+
+  # Redis Message Broker
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes --appendfsync everysec
+    restart: unless-stopped
+    volumes:
+      - hdp_redis:/data
+    networks:
+      - hdp-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          memory: 64M
+
+  # Celery Worker
+  worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command: celery -A celery_app.celery worker --loglevel=info --time-limit=${CELERY_TASK_TIME_LIMIT:-3600} --soft-time-limit=${CELERY_TASK_SOFT_TIME_LIMIT:-3300}
+    restart: unless-stopped
+    stop_grace_period: 10m
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-sqlite:////app/instance/hdp_web.db}
+      - FLASK_ENV=${FLASK_ENV:-production}
+      - SHARED_SESSION_PATH=/shared/sessions
+      - FAST_RENDERER_URL=http://fast-renderer:5002
+      - ANY_TO_USDZ_URL=http://any-to-usdz:5003
+      - LOCAL_EDM_VALIDATOR_URL=${LOCAL_EDM_VALIDATOR_URL:-http://host.docker.internal:18080}
+      - ENABLE_LOCAL_EDM_VALIDATION=${ENABLE_LOCAL_EDM_VALIDATION:-true}
+      - LOCAL_EDM_VALIDATOR_REQUIRED=${LOCAL_EDM_VALIDATOR_REQUIRED:-true}
+      - LOCAL_EDM_VALIDATOR_CONTINUE_ON_ERROR=${LOCAL_EDM_VALIDATOR_CONTINUE_ON_ERROR:-true}
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - RUN_DB_BOOTSTRAP=0
+      - MAX_CONTENT_LENGTH=${MAX_CONTENT_LENGTH:-53687091200}
+      - MIN_UPLOAD_FREE_BYTES=${MIN_UPLOAD_FREE_BYTES:-5368709120}
+      - MIN_UPLOAD_FREE_MULTIPLIER=${MIN_UPLOAD_FREE_MULTIPLIER:-1.5}
+      - SESSION_ARTIFACT_CLEANUP_ENABLED=${SESSION_ARTIFACT_CLEANUP_ENABLED:-false}
+      - SESSION_ARTIFACT_RETENTION_SECONDS=${SESSION_ARTIFACT_RETENTION_SECONDS:-2592000}
+      - MAINTENANCE_FLAG_PATH=/app/instance/maintenance.json
+      - GOOGLE_APPLICATION_CREDENTIALS=/run/secrets/google-credentials.json
+      - STORAGE_MODE=${STORAGE_MODE:-pure_cloud}
+      - WEBHDP_SESSIONS_PATH=/shared/sessions
+      - LOCAL_INPUT_PATH=/data/local_input
+      - LOCAL_OUTPUT_PATH=/data/local_output
+      - LOCAL_INPUT_HOST_PATH=/data/local_input
+      - LOCAL_OUTPUT_HOST_PATH=/data/local_output
+    volumes:
+      - ./instance:/app/instance
+      - hdp_logs:/app/logs
+      - ${WEBHDP_SESSIONS_PATH:-./hdp-shared/sessions}:/shared/sessions
+      - .:/data
+      - ${CREDENTIALS_HOST_PATH:-./credentials}:/run/secrets:ro
+      - ${LOCAL_INPUT_HOST_PATH:-./local_input}:/data/local_input
+      - ${LOCAL_OUTPUT_HOST_PATH:-./local_output}:/data/local_output
+    depends_on:
+      backend:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - hdp-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          memory: 256M
+
+volumes:
+  hdp_logs:
+  hdp_redis:
+
+networks:
+  hdp-network:
+    driver: bridge

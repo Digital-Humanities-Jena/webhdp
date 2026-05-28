@@ -1,0 +1,132 @@
+{
+  "version": 1,
+  "updated": "2026-05-29",
+  "entries": [
+    {
+      "id": "webhdp_real_01_hdp_component_playground_tests",
+      "title": "HDP Component Playground And Component Tests",
+      "kind": "real-alpha-recording",
+      "source_document": "docs/guides/video_guides/release_walkthroughs.md",
+      "webm": "docs/assets/screen_recordings/raw/webhdp_real_01_hdp_component_playground_tests.webm",
+      "video": "docs/assets/screen_recordings/raw/webhdp_real_01_hdp_component_playground_tests.mp4",
+      "subtitles": "docs/assets/screen_recordings/subtitles/webhdp_real_01_hdp_component_playground_tests.en.vtt"
+    },
+    {
+      "id": "webhdp_real_08_public_record_and_oembed",
+      "title": "Public Record Page And oEmbed",
+      "kind": "real-alpha-recording",
+      "source_document": "docs/guides/video_guides/release_walkthroughs.md",
+      "webm": "docs/assets/screen_recordings/raw/webhdp_real_08_public_record_and_oembed.webm",
+      "video": "docs/assets/screen_recordings/raw/webhdp_real_08_public_record_and_oembed.mp4",
+      "subtitles": "docs/assets/screen_recordings/subtitles/webhdp_real_08_public_record_and_oembed.en.vtt"
+    },
+    {
+      "id": "webhdp_real_09_zenodo_oai_harvest_collection",
+      "title": "Zenodo OAI Harvest Collection",
+      "kind": "real-alpha-recording",
+      "source_document": "docs/guides/video_guides/release_walkthroughs.md",
+      "webm": "docs/assets/screen_recordings/raw/webhdp_real_09_zenodo_oai_harvest_collection.webm",
+      "video": "docs/assets/screen_recordings/raw/webhdp_real_09_zenodo_oai_harvest_collection.mp4",
+      "subtitles": "docs/assets/screen_recordings/subtitles/webhdp_real_09_zenodo_oai_harvest_collection.en.vtt"
+    },
+    {
+      "id": "webhdp_real_11_clone_docker_installation",
+      "title": "Clone And Docker Installation",
+      "kind": "real-alpha-recording",
+      "source_document": "docs/guides/video_guides/release_walkthroughs.md",
+      "webm": "docs/assets/screen_recordings/raw/webhdp_real_11_clone_docker_installation.webm",
+      "video": "docs/assets/screen_recordings/raw/webhdp_real_11_clone_docker_installation.mp4",
+      "subtitles": "docs/assets/screen_recordings/subtitles/webhdp_real_11_clone_docker_installation.en.vtt"
+    },
+    {
+      "id": "webhdp_real_12_edm_template_validation_report",
+      "title": "EDM Template Validation Report",
+      "kind": "real-alpha-recording",
+      "source_document": "docs/guides/video_guides/release_walkthroughs.md",
+      "webm": "docs/assets/screen_recordings/raw/webhdp_real_12_edm_template_validation_report.webm",
+      "video": "docs/assets/screen_recordings/raw/webhdp_real_12_edm_template_validation_report.mp4",
+      "subtitles": "docs/assets/screen_recordings/subtitles/webhdp_real_12_edm_template_validation_report.en.vtt"
+    },
+    {
+      "id": "webhdp_real_13_first_time_setup_wizard",
+      "title": "First-Time Setup Wizard",
+      "kind": "real-alpha-recording",
+      "source_document": "docs/guides/video_guides/release_walkthroughs.md",
+      "webm": "docs/assets/screen_recordings/raw/webhdp_real_13_first_time_setup_wizard.webm",
+      "video": "docs/assets/screen_recordings/raw/webhdp_real_13_first_time_setup_wizard.mp4",
+      "subtitles": "docs/assets/screen_recordings/subtitles/webhdp_real_13_first_time_setup_wizard.en.vtt"
+    },
+    {
+      "id": "webhdp_real_14_main_upload_msf_preflight",
+      "title": "Main Upload And MSF Preflight Workflow",
+      "kind": "real-alpha-recording",
+      "source_document": "docs/guides/video_guides/release_walkthroughs.md",
+      "webm": "docs/assets/screen_recordings/raw/webhdp_real_14_main_upload_msf_preflight.webm",
+      "video": "docs/assets/screen_recordings/raw/webhdp_real_14_main_upload_msf_preflight.mp4",
+      "subtitles": "docs/assets/screen_recordings/subtitles/webhdp_real_14_main_upload_msf_preflight.en.vtt"
+    },
+    {
+      "id": "webhdp_real_15_pipeline_execution_results",
+      "title": "Pipeline Execution Results And Credential Gate",
+      "kind": "real-alpha-recording",
+      "source_document": "docs/guides/video_guides/release_walkthroughs.md",
+      "webm": "docs/assets/screen_recordings/raw/webhdp_real_15_pipeline_execution_results.webm",
+      "video": "docs/assets/screen_recordings/raw/webhdp_real_15_pipeline_execution_results.mp4",
+      "subtitles": "docs/assets/screen_recordings/subtitles/webhdp_real_15_pipeline_execution_results.en.vtt"
+    },
+    {
+      "id": "webhdp_real_16_records_provenance_hdpc_import_export",
+      "title": "Records, Provenance, And HDPC Import Export",
+      "kind": "real-alpha-recording",
+      "source_document": "docs/guides/video_guides/release_walkthroughs.md",
+      "webm": "docs/assets/screen_recordings/raw/webhdp_real_16_records_provenance_hdpc_import_export.webm",
+      "video": "docs/assets/screen_recordings/raw/webhdp_real_16_records_provenance_hdpc_import_export.mp4",
+      "subtitles": "docs/assets/screen_recordings/subtitles/webhdp_real_16_records_provenance_hdpc_import_export.en.vtt"
+    },
+    {
+      "id": "webhdp_real_17_zenodo_credentials_safe_configuration",
+      "title": "Zenodo Credentials Safe Configuration",
+      "kind": "real-alpha-recording",
+      "source_document": "docs/guides/video_guides/release_walkthroughs.md",
+      "webm": "docs/assets/screen_recordings/raw/webhdp_real_17_zenodo_credentials_safe_configuration.webm",
+      "video": "docs/assets/screen_recordings/raw/webhdp_real_17_zenodo_credentials_safe_configuration.mp4",
+      "subtitles": "docs/assets/screen_recordings/subtitles/webhdp_real_17_zenodo_credentials_safe_configuration.en.vtt"
+    },
+    {
+      "id": "webhdp_real_18_session_persisted_edm_validation_report",
+      "title": "Session-Persisted EDM Validation Report",
+      "kind": "real-alpha-recording",
+      "source_document": "docs/guides/video_guides/release_walkthroughs.md",
+      "webm": "docs/assets/screen_recordings/raw/webhdp_real_18_session_persisted_edm_validation_report.webm",
+      "video": "docs/assets/screen_recordings/raw/webhdp_real_18_session_persisted_edm_validation_report.mp4",
+      "subtitles": "docs/assets/screen_recordings/subtitles/webhdp_real_18_session_persisted_edm_validation_report.en.vtt"
+    },
+    {
+      "id": "webhdp_real_19_zenodo_account_retrieval_collection",
+      "title": "Zenodo Account Retrieval Collection",
+      "kind": "real-alpha-recording",
+      "source_document": "docs/guides/video_guides/release_walkthroughs.md",
+      "webm": "docs/assets/screen_recordings/raw/webhdp_real_19_zenodo_account_retrieval_collection.webm",
+      "video": "docs/assets/screen_recordings/raw/webhdp_real_19_zenodo_account_retrieval_collection.mp4",
+      "subtitles": "docs/assets/screen_recordings/subtitles/webhdp_real_19_zenodo_account_retrieval_collection.en.vtt"
+    },
+    {
+      "id": "webhdp_real_20_cloud_storage_mirror_download",
+      "title": "Cloud Storage Mirror Download",
+      "kind": "real-alpha-recording",
+      "source_document": "docs/guides/video_guides/release_walkthroughs.md",
+      "webm": "docs/assets/screen_recordings/raw/webhdp_real_20_cloud_storage_mirror_download.webm",
+      "video": "docs/assets/screen_recordings/raw/webhdp_real_20_cloud_storage_mirror_download.mp4",
+      "subtitles": "docs/assets/screen_recordings/subtitles/webhdp_real_20_cloud_storage_mirror_download.en.vtt"
+    },
+    {
+      "id": "webhdp_real_21_admin_observability_troubleshooting",
+      "title": "Admin Observability Troubleshooting",
+      "kind": "real-alpha-recording",
+      "source_document": "docs/guides/video_guides/release_walkthroughs.md",
+      "webm": "docs/assets/screen_recordings/raw/webhdp_real_21_admin_observability_troubleshooting.webm",
+      "video": "docs/assets/screen_recordings/raw/webhdp_real_21_admin_observability_troubleshooting.mp4",
+      "subtitles": "docs/assets/screen_recordings/subtitles/webhdp_real_21_admin_observability_troubleshooting.en.vtt"
+    }
+  ]
+}

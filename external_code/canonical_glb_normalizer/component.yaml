@@ -1,0 +1,76 @@
+metadata:
+  name: canonical_glb_normalizer
+  label: Canonical GLB Normalizer
+  description: Produces a publication derivative and normalization report without mutating the original asset.
+  tags: [3d, glb, normalization, derivative]
+  category: 3D Processing
+  version: "1.0.0"
+  status: alpha
+  component_schema: "0.1.0-alpha.1"
+
+distribution:
+  tier: external_installable
+  bundled_with_webhdp: false
+  installation_scope: [local_container]
+
+inputs:
+  - name: input_file
+    label: Input 3D Asset
+    type: file_path
+    required: true
+
+outputs:
+  - name: analysis_report
+    type: file_path
+  - name: canonical_asset
+    type: file_path
+
+execution:
+  profiles:
+    - id: local_docker
+      adapter: container_cli
+      runtime: docker
+      image: webhdp-canonical-glb-normalizer:local
+      entrypoint: [python, /app/component_runner.py, --component, canonical_glb_normalizer]
+      config:
+        webhdp_contract: true
+      resources:
+        gpu_count: 0
+        cpus: 1
+        memory_mb: 2048
+
+compatibility:
+  playground:
+    enabled: true
+
+install:
+  strategies:
+    - id: local_container
+      runtime: docker
+      profile: local_docker
+      image: webhdp-canonical-glb-normalizer:local
+  test:
+    files:
+      - name: sample.glb
+        content_base64: "Z2xURgIAAAAwAAAAHAAAAEpTT057ImFzc2V0Ijp7InZlcnNpb24iOiIyLjAifX0g"
+    inputs:
+      input_file: sample.glb
+    parameters: {}
+
+ui:
+  playground:
+    fields:
+      input_file:
+        widget: model_input
+        accept_extensions: [.glb, .gltf, .obj]
+    result:
+      artifact_views:
+        - id: normalization-report
+          label: Normalization Report
+          widget: file_download
+          extensions: [.json]
+        - id: canonical-asset
+          label: Canonical Asset
+          widget: file_download
+      show_result_json: true
+      show_logs: true

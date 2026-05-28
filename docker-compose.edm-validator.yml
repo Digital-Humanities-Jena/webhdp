@@ -1,0 +1,178 @@
+services:
+  backend:
+    environment:
+      - LOCAL_EDM_VALIDATOR_URL=http://local-edm-validator:8080
+      - ENABLE_LOCAL_EDM_VALIDATION=${ENABLE_LOCAL_EDM_VALIDATION:-true}
+      - LOCAL_EDM_VALIDATOR_REQUIRED=${LOCAL_EDM_VALIDATOR_REQUIRED:-true}
+      - LOCAL_EDM_VALIDATOR_CONTINUE_ON_ERROR=${LOCAL_EDM_VALIDATOR_CONTINUE_ON_ERROR:-true}
+    depends_on:
+      local-edm-validator:
+        condition: service_healthy
+
+  worker:
+    environment:
+      - LOCAL_EDM_VALIDATOR_URL=http://local-edm-validator:8080
+      - ENABLE_LOCAL_EDM_VALIDATION=${ENABLE_LOCAL_EDM_VALIDATION:-true}
+      - LOCAL_EDM_VALIDATOR_REQUIRED=${LOCAL_EDM_VALIDATOR_REQUIRED:-true}
+      - LOCAL_EDM_VALIDATOR_CONTINUE_ON_ERROR=${LOCAL_EDM_VALIDATOR_CONTINUE_ON_ERROR:-true}
+    depends_on:
+      local-edm-validator:
+        condition: service_healthy
+
+  local-edm-postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: metis-sandbox
+      POSTGRES_USER: local
+      POSTGRES_PASSWORD: local
+    ports:
+      - "127.0.0.1:${LOCAL_EDM_POSTGRES_PORT:-15432}:5432"
+    cpus: 0.35
+    mem_limit: 384m
+    mem_reservation: 128m
+    pids_limit: 256
+    networks:
+      hdp-network:
+        aliases:
+          - metis-sandbox-postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U local -d metis-sandbox"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  local-edm-mongo:
+    image: mongo:6.0.12
+    environment:
+      MONGO_INITDB_DATABASE: metis-sandbox
+      MONGO_INITDB_ROOT_USERNAME: local
+      MONGO_INITDB_ROOT_PASSWORD: local
+    ports:
+      - "127.0.0.1:${LOCAL_EDM_MONGO_PORT:-37017}:27017"
+    cpus: 0.50
+    mem_limit: 768m
+    mem_reservation: 256m
+    pids_limit: 384
+    networks:
+      hdp-network:
+        aliases:
+          - metis-sandbox-mongo
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  local-edm-solr:
+    build:
+      context: ${LOCAL_EDM_VALIDATOR_REPO:-./external_code/local-edm-validator}/metis-sandbox-rest/docker/solr
+      dockerfile: Dockerfile
+    ports:
+      - "127.0.0.1:${LOCAL_EDM_SOLR_PORT:-18983}:8983"
+      - "127.0.0.1:${LOCAL_EDM_SOLR_CLUSTER_PORT:-19983}:9983"
+    environment:
+      SOLR_HEAP: 512m
+    cpus: 0.70
+    mem_limit: 1024m
+    mem_reservation: 384m
+    pids_limit: 512
+    entrypoint:
+      - docker-entrypoint.sh
+      - solr
+      - start
+      - -c
+      - -f
+    networks:
+      hdp-network:
+        aliases:
+          - metis-sandbox-solr
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8983/solr/admin/collections?action=LIST | grep -q metis_sandbox_publish_local"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+
+  local-edm-minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: local
+      MINIO_ROOT_PASSWORD: localpassword
+    ports:
+      - "127.0.0.1:${LOCAL_EDM_MINIO_PORT:-19000}:9000"
+      - "127.0.0.1:${LOCAL_EDM_MINIO_CONSOLE_PORT:-19001}:9001"
+    cpus: 0.25
+    mem_limit: 256m
+    mem_reservation: 128m
+    pids_limit: 256
+    volumes:
+      - local_edm_minio_data:/data
+    networks:
+      hdp-network:
+        aliases:
+          - metis-sandbox-minio
+    healthcheck:
+      test: ["CMD-SHELL", "mc ready local"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  local-edm-minio-init:
+    image: minio/mc:latest
+    depends_on:
+      local-edm-minio:
+        condition: service_healthy
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        mc alias set local http://local-edm-minio:9000 local localpassword
+        mc mb --ignore-existing local/metis-sandbox-bucket
+    networks:
+      - hdp-network
+
+  local-edm-validator:
+    build:
+      context: ${LOCAL_EDM_VALIDATOR_REPO:-./external_code/local-edm-validator}
+      dockerfile: metis-sandbox-rest/Dockerfile.local
+      labels:
+        org.opencontainers.image.source: ${LOCAL_EDM_VALIDATOR_SOURCE_REPOSITORY:-https://github.com/Digital-Humanities-Jena/local-edm-validator.git}
+        org.opencontainers.image.revision: ${LOCAL_EDM_VALIDATOR_SOURCE_REF:-b1ba67802ae1581c88ba8ea0ae9740cf663a0176}
+    image: ${LOCAL_EDM_VALIDATOR_IMAGE:-local-edm-validator:webhdp-b1ba67802ae1}
+    ports:
+      - "127.0.0.1:${LOCAL_EDM_VALIDATOR_PORT:-18080}:8080"
+    cpus: 0.75
+    mem_limit: 1280m
+    mem_reservation: 512m
+    pids_limit: 512
+    environment:
+      SPRING_CONFIG_ADDITIONAL_LOCATION: file:/config/application.yml
+      JDK_JAVA_OPTIONS: -Xms500m -Xmx1g
+      INFO_APP_SOURCE_REPOSITORY: ${LOCAL_EDM_VALIDATOR_SOURCE_REPOSITORY:-https://github.com/Digital-Humanities-Jena/local-edm-validator.git}
+      INFO_APP_SOURCE_REF: ${LOCAL_EDM_VALIDATOR_SOURCE_REF:-b1ba67802ae1581c88ba8ea0ae9740cf663a0176}
+      INFO_APP_IMAGE_TAG: ${LOCAL_EDM_VALIDATOR_IMAGE:-local-edm-validator:webhdp-b1ba67802ae1}
+    labels:
+      org.opencontainers.image.source: ${LOCAL_EDM_VALIDATOR_SOURCE_REPOSITORY:-https://github.com/Digital-Humanities-Jena/local-edm-validator.git}
+      org.opencontainers.image.revision: ${LOCAL_EDM_VALIDATOR_SOURCE_REF:-b1ba67802ae1581c88ba8ea0ae9740cf663a0176}
+    volumes:
+      - ${LOCAL_EDM_VALIDATOR_REPO:-./external_code/local-edm-validator}/metis-sandbox-rest/docker/local/application.yml:/config/application.yml:ro
+    depends_on:
+      local-edm-postgres:
+        condition: service_healthy
+      local-edm-mongo:
+        condition: service_healthy
+      local-edm-solr:
+        condition: service_healthy
+      local-edm-minio-init:
+        condition: service_completed_successfully
+    networks:
+      - hdp-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/actuator/health | grep -q 'UP'"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+volumes:
+  local_edm_minio_data:

@@ -1,0 +1,16 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:05.000
+Open the first-run setup wizard on an uninitialized Docker clone.
+
+00:00:05.000 --> 00:00:12.000
+Start setup and review system checks plus detected deployment mode.
+
+00:00:12.000 --> 00:00:19.000
+Use the safe skip-rendering path because local rendering is unavailable in server mode.
+
+00:00:19.000 --> 00:00:28.000
+Create a dummy initial administrator with the password hidden.
+
+00:00:28.000 --> 00:00:36.000
+Finish setup and confirm the application redirects to login.

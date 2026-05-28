@@ -1,0 +1,93 @@
+metadata:
+  name: any_to_usdz
+  label: USDZ Converter
+  description: >
+    Convert supported 3D assets into USDZ format through the WebHDP converter service.
+    The Playground form is rendered from this manifest and re-used by the builtin handler.
+  tags:
+    - 3d
+    - usdz
+    - conversion
+    - blender
+  keywords:
+    - usdz conversion
+    - 3d model conversion
+    - blender
+  category: 3D Processing
+  version: "1.0.0"
+  status: alpha
+  component_schema: "0.1.0-alpha.1"
+
+sources:
+  git: "https://github.com/hdp-components/any_to_usdz"
+
+structure:
+  required_files:
+    - "converter_script.py"
+    - "server.py"
+    - "requirements.txt"
+
+inputs:
+  - name: input_file
+    label: Input 3D Model
+    description: >
+      Source model to convert into USDZ.
+    type: file_path
+    required: true
+
+outputs:
+  - name: output_path
+    label: Converted USDZ File
+    description: >
+      Generated USDZ output path for the converted model.
+    type: file_path
+    required: false
+
+parameter_groups:
+  - title: Conversion
+    description: Configure conversion behavior.
+    parameters:
+      - name: scale
+        label: Scale
+        description: Scale factor applied before export.
+        type: number
+        default: 1.0
+      - name: apply_modifiers
+        label: Apply Modifiers
+        description: Apply Blender mesh modifiers before exporting USDZ.
+        type: boolean
+        default: true
+
+ui:
+  playground:
+    fields:
+      input_file:
+        widget: model_input
+        accept_extensions:
+          - ".glb"
+          - ".gltf"
+          - ".obj"
+          - ".fbx"
+          - ".ply"
+          - ".stl"
+          - ".abc"
+          - ".dae"
+          - ".x3d"
+          - ".wrl"
+          - ".usd"
+          - ".usda"
+          - ".usdc"
+        help_text: Select a session-backed 3D file to convert.
+      scale:
+        widget: number_input
+      apply_modifiers:
+        widget: checkbox
+    result:
+      artifact_views:
+        - id: converted-models
+          label: Converted USDZ
+          widget: model_viewer
+          extensions:
+            - ".usdz"
+      show_result_json: true
+      show_logs: true

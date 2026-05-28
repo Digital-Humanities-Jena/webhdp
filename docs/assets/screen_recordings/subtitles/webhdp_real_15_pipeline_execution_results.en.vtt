@@ -1,0 +1,16 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:06.000
+Open the native Pipeline Constructor and switch on Diagnostics.
+
+00:00:06.000 --> 00:00:15.000
+Seed a real ZIP/MSF upload session and use one session-backed GLB as the pipeline input.
+
+00:00:15.000 --> 00:00:25.000
+Run the selected native pipeline from the constructor diagnostics panel.
+
+00:00:25.000 --> 00:00:42.000
+Review the persisted run summary, completed local processing steps, and generated artifacts.
+
+00:00:42.000 --> 00:00:58.000
+Confirm Zenodo publishing is stopped by a missing sandbox key without exposing credentials.

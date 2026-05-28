@@ -1,0 +1,16 @@
+Bootstrap: docker
+From: python:3.11-slim
+
+%files
+    validator.py /app/validator.py
+    requirements.txt /app/requirements.txt
+
+%post
+    python -m pip install --no-cache-dir -r /app/requirements.txt
+    chmod 755 /app/validator.py
+
+%environment
+    export PYTHONUNBUFFERED=1
+
+%runscript
+    exec python /app/validator.py "$@"

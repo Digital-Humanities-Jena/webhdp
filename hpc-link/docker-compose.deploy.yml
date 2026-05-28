@@ -1,0 +1,74 @@
+services:
+  vpn:
+    build:
+      context: ./vpn
+      dockerfile: Dockerfile
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      - VPN_SERVER=${VPN_SERVER:?set-your-vpn-server}
+      - VPN_USER=${VPN_USER:?set-your-vpn-username}
+      - VPN_PASSWORD_FILE=/run/secrets/vpn_password
+    volumes:
+      - ./secrets/vpn_password:/run/secrets/vpn_password:ro
+    ports:
+      - "127.0.0.1:${HPC_LINK_HTTP_PORT:-18000}:8000"
+    restart: unless-stopped
+    networks:
+      - hpc-link-net
+
+  app-core:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    network_mode: service:vpn
+    depends_on:
+      - vpn
+    volumes:
+      - ./secrets/ssh_key:/run/secrets/ssh_key:ro
+      - ./secrets/ssh_known_hosts:/run/secrets/ssh_known_hosts:ro
+      - ./data/auth:/data/auth
+    environment:
+      - ENVIRONMENT=${ENVIRONMENT:-production}
+      - HPC_HOST=${HPC_HOST:?set-your-hpc-login-host}
+      - HPC_USER=${HPC_USER:?set-your-hpc-username}
+      - SSH_KEY_PATH=/run/secrets/ssh_key
+      - SSH_KNOWN_HOSTS_PATH=/run/secrets/ssh_known_hosts
+      - API_KEY=${API_KEY:-}
+      - LEGACY_API_KEY_AUTH_ENABLED=${LEGACY_API_KEY_AUTH_ENABLED:-false}
+      - AUTH_DB_PATH=/data/auth/auth.db
+      - AUTH_TOKEN_SECRET=${AUTH_TOKEN_SECRET:?set-a-strong-random-secret}
+      - AUTH_TOKEN_TTL_MINUTES=${AUTH_TOKEN_TTL_MINUTES:-480}
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:?set-a-strong-admin-password}
+      - LOG_LEVEL=INFO
+      - MOCK_HPC=false
+      - HPC_DATA_ROOT=${HPC_DATA_ROOT:-/srv/hpc-link/data}
+      - HPC_APPS_ROOT=${HPC_APPS_ROOT:-/srv/hpc-link/apps}
+      - PI3_PYTHON=/srv/hpc-link/apps/pi3/venv/bin/python
+      - PI3_REPO_PATH=/srv/hpc-link/apps/pi3/runtime/Pi3
+      - PI3_DEFAULT_PARTITION=partition-a
+      - WEBHDP_COMPONENT_RUNTIME_ROOT=${WEBHDP_COMPONENT_RUNTIME_ROOT:-/srv/hpc-link/apps/webhdp/runtime}
+      - WEBHDP_COMPONENT_RUNNER=${WEBHDP_COMPONENT_RUNNER:-/srv/hpc-link/apps/webhdp/bin/webhdp_component_runner.py}
+      - WEBHDP_FAST_RENDERER_COMMAND=${WEBHDP_FAST_RENDERER_COMMAND:-WEBHDP_COMPONENT_RUNTIME_ROOT=/srv/hpc-link/apps/webhdp/runtime python3 /srv/hpc-link/apps/webhdp/bin/webhdp_component_runner.py}
+      - WEBHDP_ANY_TO_USDZ_COMMAND=${WEBHDP_ANY_TO_USDZ_COMMAND:-WEBHDP_COMPONENT_RUNTIME_ROOT=/srv/hpc-link/apps/webhdp/runtime python3 /srv/hpc-link/apps/webhdp/bin/webhdp_component_runner.py}
+      - WEBHDP_PREFLIGHT_COMMAND=${WEBHDP_PREFLIGHT_COMMAND:-WEBHDP_COMPONENT_RUNTIME_ROOT=/srv/hpc-link/apps/webhdp/runtime python3 /srv/hpc-link/apps/webhdp/bin/webhdp_component_runner.py --preflight}
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /home/appuser/.ssh:uid=1000,gid=1000,mode=700
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+networks:
+  hpc-link-net:
+    driver: bridge
+    enable_ipv6: true
+    ipam:
+      config:
+        - subnet: 172.27.0.0/16
+        - subnet: fd00:27::/64

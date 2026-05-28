@@ -1,0 +1,17 @@
+<svg width="960" height="520" viewBox="0 0 960 520" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="t d">
+<title id="t">WebHDP runtime data flow</title><desc id="d">Frontend, Flask API, database, tasks, validators, optional processors, Zenodo, and session HDPC storage.</desc>
+<defs><marker id="a" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0l8 4-8 4z" fill="#334155"/></marker><style>.b{fill:#fff;stroke:#334155;stroke-width:1.4}.api{fill:#e0f2fe}.st{fill:#ecfdf5}.q{fill:#fef9c3}.x{fill:#f8fafc}.l{stroke:#334155;stroke-width:1.4;fill:none;marker-end:url(#a)}text{font:13px system-ui,sans-serif;fill:#0f172a}.s{font-size:11px;fill:#475569}</style></defs>
+<rect width="960" height="520" fill="#fff"/>
+<rect class="b api" x="40" y="220" width="150" height="70" rx="6"/><text x="115" y="250" text-anchor="middle">Frontend UI</text><text class="s" x="115" y="270" text-anchor="middle">Vue browser app</text>
+<rect class="b api" x="260" y="220" width="160" height="70" rx="6"/><text x="340" y="250" text-anchor="middle">Flask Web API</text><text class="s" x="340" y="270" text-anchor="middle">routes + services</text>
+<rect class="b st" x="260" y="55" width="160" height="56" rx="6"/><text x="340" y="88" text-anchor="middle">App DB SQLite</text>
+<rect class="b st" x="500" y="72" width="190" height="70" rx="6"/><text x="595" y="100" text-anchor="middle">Native .hdpc +</text><text x="595" y="119" text-anchor="middle">Pipeline Services</text>
+<rect class="b q" x="500" y="220" width="150" height="70" rx="6"/><text x="575" y="250" text-anchor="middle">Redis / Celery</text><text class="s" x="575" y="270" text-anchor="middle">queue</text>
+<rect class="b q" x="720" y="220" width="150" height="70" rx="6"/><text x="795" y="250" text-anchor="middle">Async Tasks</text><text class="s" x="795" y="270" text-anchor="middle">workers</text>
+<rect class="b st" x="470" y="400" width="180" height="60" rx="6"/><text x="560" y="434" text-anchor="middle">Session .hdpc file</text>
+<rect class="b x" x="720" y="330" width="150" height="38" rx="5"/><text x="795" y="354" text-anchor="middle">Fast Renderer</text>
+<rect class="b x" x="720" y="378" width="150" height="38" rx="5"/><text x="795" y="402" text-anchor="middle">Any-to-USDZ</text>
+<rect class="b x" x="720" y="426" width="150" height="38" rx="5"/><text x="795" y="450" text-anchor="middle">Zenodo API</text>
+<rect class="b x" x="500" y="318" width="190" height="45" rx="5"/><text x="595" y="346" text-anchor="middle">Local EDM Validator</text>
+<path class="l" d="M190 255h60"/><path class="l" d="M420 255h70"/><path class="l" d="M650 255h60"/><path class="l" d="M340 220V120"/><path class="l" d="M420 230q80-90 80-120"/><path class="l" d="M795 220q-80-80-105-105"/><path class="l" d="M795 290v30"/><path class="l" d="M795 290v78"/><path class="l" d="M795 290v126"/><path class="l" d="M720 255q-160 20-160 135"/><path class="l" d="M340 290q60 110 120 130"/><path class="l" d="M595 142q-50 120-35 248"/><path class="l" d="M650 340h60"/>
+</svg>

@@ -1,0 +1,204 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://webhdp.example.org/schemas/webhdp_component_index_v1.schema.json",
+  "title": "WebHDP Component Index v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["schema", "components"],
+  "properties": {
+    "schema": {
+      "const": "webhdp.component-index.v1"
+    },
+    "generated_at": {
+      "type": "string"
+    },
+    "components": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["component_key", "version", "manifest"],
+        "properties": {
+          "component_key": {
+            "type": "string",
+            "minLength": 1
+          },
+          "version": {
+            "type": "string",
+            "minLength": 1
+          },
+          "label": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "trust_level": {
+            "enum": ["unknown", "experimental", "community-reviewed", "trusted"]
+          },
+          "manifest": {
+            "type": "object",
+            "required": ["url"],
+            "additionalProperties": true,
+            "properties": {
+              "url": {
+                "type": "string",
+                "minLength": 1
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-fA-F]{64}$"
+              }
+            }
+          },
+          "source": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "url": {
+                "type": "string"
+              },
+              "tag": {
+                "type": "string"
+              },
+              "commit": {
+                "type": "string"
+              }
+            }
+          },
+          "release": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "url": {
+                "type": "string",
+                "pattern": "^https://"
+              },
+              "tag": {
+                "type": "string"
+              },
+              "assets": {
+                "type": "array",
+                "items": {
+                  "oneOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^https://"
+                    },
+                    {
+                      "type": "object",
+                      "required": ["url"],
+                      "additionalProperties": true,
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "url": {
+                          "type": "string",
+                          "pattern": "^https://"
+                        },
+                        "media_type": {
+                          "type": "string"
+                        },
+                        "sha256": {
+                          "type": "string",
+                          "pattern": "^[0-9a-fA-F]{64}$"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "zenodo": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "doi": {
+                "type": "string"
+              },
+              "concept_doi": {
+                "type": "string"
+              },
+              "record_url": {
+                "type": "string",
+                "pattern": "^https://"
+              }
+            }
+          },
+          "compatibility": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "webhdp_min": {
+                "type": "string"
+              },
+              "webhdp_max": {
+                "type": "string"
+              }
+            }
+          },
+          "license": {},
+          "citation": {},
+          "artifacts": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "docker": {
+                "type": "object",
+                "additionalProperties": true,
+                "properties": {
+                  "image": {
+                    "type": "string"
+                  },
+                  "digest": {
+                    "type": "string"
+                  },
+                  "sbom_url": {
+                    "type": "string",
+                    "pattern": "^https://"
+                  },
+                  "provenance_url": {
+                    "type": "string",
+                    "pattern": "^https://"
+                  }
+                }
+              },
+              "sif": {
+                "type": "object",
+                "additionalProperties": true,
+                "properties": {
+                  "source": {
+                    "type": "string"
+                  },
+                  "sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-fA-F]{64}$"
+                  },
+                  "sbom_url": {
+                    "type": "string",
+                    "pattern": "^https://"
+                  },
+                  "provenance_url": {
+                    "type": "string",
+                    "pattern": "^https://"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

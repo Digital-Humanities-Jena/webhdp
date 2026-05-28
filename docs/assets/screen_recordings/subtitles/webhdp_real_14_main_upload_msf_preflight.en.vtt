@@ -1,0 +1,16 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:06.000
+Open the main upload workflow and choose the MSF-driven batch path.
+
+00:00:06.000 --> 00:00:14.000
+Select a synthetic model ZIP and a deliberately messy MSF fixture.
+
+00:00:14.000 --> 00:00:27.000
+Run ZIP/MSF validation and review the visible preflight repair summary.
+
+00:00:27.000 --> 00:00:40.000
+Confirm filename normalization, reference repair, duplicate-row merge, and matched model files.
+
+00:00:40.000 --> 00:00:55.000
+Create the batch session and continue into Guided MSF Analysis.

@@ -1,0 +1,49 @@
+metadata:
+  name: lod_generation
+  label: LOD Generation
+  description: Generates EDM, IIIF, and METS outputs using WebHDP services.
+  tags:
+    - lod
+    - edm
+    - iiif
+    - mets
+  keywords:
+    - edm
+    - iiif
+    - mets
+    - linked open data
+  category: Metadata Processing
+  version: "1.0.0"
+  status: alpha
+  component_schema: "0.1.0-alpha.1"
+
+inputs:
+  - name: draft
+    label: Draft Payload
+    description: Zenodo draft payload produced by an earlier step.
+    type: json
+    required: false
+
+outputs:
+  - name: edm
+    label: EDM XML
+    type: file_path
+  - name: iiif
+    label: IIIF Manifest
+    type: file_path
+  - name: mets
+    label: METS XML
+    type: file_path
+
+parameter_groups:
+  - title: Formats
+    parameters:
+      - name: generate_edm
+        type: boolean
+        default: true
+      - name: generate_iiif
+        type: boolean
+        default: true
+      - name: generate_mets
+        type: boolean
+        default: true

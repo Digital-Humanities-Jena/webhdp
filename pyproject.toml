@@ -1,0 +1,49 @@
+[project]
+name = "webhdp"
+version = "0.1.0a1"
+description = "WebHDP web application for preparing, validating, and publishing heritage-science datasets."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "EUPL-1.2"
+authors = [
+    { name = "Dominik Ukolov", email = "dominik.ukolov@uni-jena.de" },
+]
+dependencies = [
+    "bcrypt>=5.0.0",
+    "cryptography>=46.0.0",
+    "flask-cors>=6.0.2",
+    "flask-jwt-extended>=4.7.1",
+    "flask-mail>=0.10.0",
+    "flask-migrate>=4.1.0",
+    "flask-session>=0.8.0",
+    "flask-sqlalchemy>=3.1.1",
+    "gunicorn>=23.0.0",
+    "lxml>=6.0.2",
+    "openpyxl>=3.1.0",
+    "pandas>=2.0.0",
+    "pydantic[email]>=2.12.5",
+    "pyyaml>=6.0",
+    "python-dotenv>=1.2.1",
+    "redis>=5.0.0",
+    "requests>=2.32.5",
+    "werkzeug>=2.0.0",
+    "celery>=5.3.0",
+    "google-api-python-client>=2.100.0",
+    "google-auth>=2.23.0",
+    "google-auth-httplib2>=0.2.0",
+    "google-auth-oauthlib>=1.0.0",
+    "dropbox>=11.36.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/Digital-Humanities-Jena/webhdp"
+Repository = "https://github.com/Digital-Humanities-Jena/webhdp"
+Issues = "https://github.com/Digital-Humanities-Jena/webhdp/issues"
+Documentation = "https://github.com/Digital-Humanities-Jena/webhdp/tree/main/docs"
+Funding-3DBigDataSpace = "https://3dbigdataspace.eu/"
+Funding-INFINITY = "https://cordis.europa.eu/project/id/101233051"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.0",
+]

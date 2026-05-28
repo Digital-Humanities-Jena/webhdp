@@ -1,0 +1,532 @@
+{
+  "version": 1,
+  "description": "Curated synthetic WebHDP workflow fixtures for scanner, bundling, and golden workflow tests.",
+  "cases": [
+    {
+      "id": "root_stem_mixed",
+      "description": "Root mode stem bundling with one OBJ/MTL/image bundle, one FBX, and one real GLB.",
+      "path": "cases/root_stem_mixed",
+      "negative_case": false,
+      "scan_options": {
+        "extensions": [
+          ".obj",
+          ".mtl",
+          ".jpg",
+          ".fbx",
+          ".glb"
+        ],
+        "primarysourceext": ".obj",
+        "preferred_primary_files": [
+          "temple_column.obj",
+          "ceramic_bowl.fbx",
+          "bronze_helmet.glb"
+        ],
+        "bundling": {
+          "enabled": true,
+          "strategy": "stem_match"
+        },
+        "batchEntity": "root",
+        "obj_options": {
+          "add_mtl": true,
+          "add_textures": true,
+          "archive_subdirectories": false
+        }
+      },
+      "expected": {
+        "record_count": 3,
+        "primary_sources": [
+          "bronze_helmet.glb",
+          "ceramic_bowl.fbx",
+          "temple_column.obj"
+        ],
+        "bundle_members": {
+          "temple_column.obj": [
+            "temple_column.obj",
+            "temple_column.mtl",
+            "temple_column.jpg"
+          ],
+          "ceramic_bowl.fbx": [
+            "ceramic_bowl.fbx"
+          ],
+          "bronze_helmet.glb": [
+            "bronze_helmet.glb"
+          ]
+        },
+        "statuses": {
+          "temple_column.obj": "Valid",
+          "temple_column.mtl": "Valid",
+          "temple_column.jpg": "Valid",
+          "ceramic_bowl.fbx": "Valid",
+          "bronze_helmet.glb": "Valid"
+        }
+      }
+    },
+    {
+      "id": "root_pattern_locations",
+      "description": "Root mode regex pattern grouping into Athens and Rome bundles with texture scanning disabled.",
+      "path": "cases/root_pattern_locations",
+      "negative_case": false,
+      "scan_options": {
+        "extensions": [
+          ".obj",
+          ".mtl"
+        ],
+        "primarysourceext": ".obj",
+        "preferred_primary_files": [
+          "Athens_Temple_Section_A.obj",
+          "Rome_Forum_Column_01.obj"
+        ],
+        "bundling": {
+          "enabled": true,
+          "strategy": "pattern",
+          "pattern": "^([A-Za-z]+)_"
+        },
+        "batchEntity": "root",
+        "obj_options": {
+          "add_mtl": true,
+          "add_textures": false,
+          "archive_subdirectories": false
+        }
+      },
+      "expected": {
+        "record_count": 2,
+        "primary_sources": [
+          "Athens_Temple_Section_A.obj",
+          "Rome_Forum_Column_01.obj"
+        ],
+        "bundle_members": {
+          "Athens_Temple_Section_A.obj": [
+            "Athens_Temple_Section_A.obj",
+            "Athens_Temple_Section_B.obj",
+            "Athens_Temple_materials.mtl"
+          ],
+          "Rome_Forum_Column_01.obj": [
+            "Rome_Forum_Column_01.obj",
+            "Rome_Forum_Column_02.obj",
+            "Rome_Forum_materials.mtl"
+          ]
+        },
+        "statuses": {
+          "Athens_Temple_Section_B.obj": "MTL Missing",
+          "Rome_Forum_Column_02.obj": "MTL Missing"
+        }
+      }
+    },
+    {
+      "id": "root_prefix_suffix_literal",
+      "description": "Root mode literal prefix and suffix removal that matches current scanner behavior.",
+      "path": "cases/root_prefix_suffix_literal",
+      "negative_case": false,
+      "scan_options": {
+        "extensions": [
+          ".obj",
+          ".mtl"
+        ],
+        "primarysourceext": ".obj",
+        "bundling": {
+          "enabled": true,
+          "strategy": "prefix_suffix",
+          "prefix": "scan_",
+          "suffix": "_raw"
+        },
+        "batchEntity": "root",
+        "obj_options": {
+          "add_mtl": true,
+          "add_textures": false,
+          "archive_subdirectories": false
+        }
+      },
+      "expected": {
+        "record_count": 1,
+        "primary_sources": [
+          "scan_pottery_fragment_raw.obj"
+        ],
+        "bundle_members": {
+          "scan_pottery_fragment_raw.obj": [
+            "scan_pottery_fragment_raw.obj",
+            "pottery_fragment.mtl"
+          ]
+        },
+        "statuses": {}
+      }
+    },
+    {
+      "id": "core_identifier_via_pattern",
+      "description": "Core identifier behavior represented by regex pattern grouping for site IDs.",
+      "path": "cases/core_identifier_via_pattern",
+      "negative_case": false,
+      "scan_options": {
+        "extensions": [
+          ".obj",
+          ".mtl",
+          ".fbx"
+        ],
+        "primarysourceext": ".obj",
+        "preferred_primary_files": [
+          "site042_structure_detail.obj",
+          "site093_artifact_fragment.obj"
+        ],
+        "bundling": {
+          "enabled": true,
+          "strategy": "pattern",
+          "pattern": "(site\\d+)"
+        },
+        "batchEntity": "root",
+        "obj_options": {
+          "add_mtl": true,
+          "add_textures": false,
+          "archive_subdirectories": false
+        }
+      },
+      "expected": {
+        "record_count": 2,
+        "primary_sources": [
+          "site042_structure_detail.obj",
+          "site093_artifact_fragment.obj"
+        ],
+        "bundle_members": {
+          "site042_structure_detail.obj": [
+            "site042_structure_detail.obj",
+            "site042_structure_detail.mtl",
+            "site042_structure_main.fbx"
+          ],
+          "site093_artifact_fragment.obj": [
+            "site093_artifact_fragment.obj",
+            "site093_artifact_fragment.mtl",
+            "site093_artifact_complete.fbx"
+          ]
+        },
+        "statuses": {}
+      }
+    },
+    {
+      "id": "subdirectory_records",
+      "description": "Subdirectory mode where each immediate folder becomes one record.",
+      "path": "cases/subdirectory_records",
+      "negative_case": false,
+      "scan_options": {
+        "extensions": [
+          ".obj",
+          ".mtl",
+          ".fbx",
+          ".jpg",
+          ".png",
+          ".pdf"
+        ],
+        "primarysourceext": ".obj",
+        "preferred_primary_files": [
+          "site_overview.obj",
+          "artifact_scan.fbx",
+          "main_model.fbx"
+        ],
+        "bundling": {
+          "enabled": false
+        },
+        "batchEntity": "subdirectory",
+        "obj_options": {
+          "add_mtl": true,
+          "add_textures": true,
+          "archive_subdirectories": false
+        }
+      },
+      "expected": {
+        "record_count": 3,
+        "primary_sources": [
+          "artifact_scan.fbx",
+          "main_model.fbx",
+          "site_overview.obj"
+        ],
+        "bundle_members": {},
+        "statuses": {}
+      }
+    },
+    {
+      "id": "hybrid_root_and_subdirectories",
+      "description": "Hybrid mode with a root-level stem bundle and two subdirectory records.",
+      "path": "cases/hybrid_root_and_subdirectories",
+      "negative_case": false,
+      "scan_options": {
+        "extensions": [
+          ".obj",
+          ".mtl",
+          ".png",
+          ".jpg",
+          ".glb",
+          ".fbx",
+          ".txt"
+        ],
+        "primarysourceext": ".obj",
+        "preferred_primary_files": [
+          "standalone_artifact_001.obj",
+          "fragment_001.obj",
+          "vessel_fragments.fbx"
+        ],
+        "bundling": {
+          "enabled": true,
+          "strategy": "stem_match"
+        },
+        "batchEntity": "hybrid",
+        "obj_options": {
+          "add_mtl": true,
+          "add_textures": false,
+          "archive_subdirectories": false
+        }
+      },
+      "expected": {
+        "record_count": 3,
+        "primary_sources": [
+          "fragment_001.obj",
+          "standalone_artifact_001.obj",
+          "vessel_fragments.fbx"
+        ],
+        "bundle_members": {
+          "standalone_artifact_001.obj": [
+            "standalone_artifact_001.obj",
+            "standalone_artifact_001.mtl",
+            "standalone_artifact_001.png"
+          ],
+          "fragment_001.obj": [
+            "fragment_001.obj",
+            "site_overview.mtl",
+            "clay_texture.jpg",
+            "weathering_normal.jpg"
+          ]
+        },
+        "statuses": {}
+      }
+    },
+    {
+      "id": "dependency_obj_textures_archive",
+      "description": "OBJ dependency scanning with complete texture folder archived into one ZIP node.",
+      "path": "cases/dependency_obj_textures_archive",
+      "negative_case": false,
+      "scan_options": {
+        "extensions": [
+          ".obj",
+          ".mtl",
+          ".jpg",
+          ".png"
+        ],
+        "primarysourceext": ".obj",
+        "bundling": {
+          "enabled": true,
+          "strategy": "stem_match"
+        },
+        "batchEntity": "root",
+        "obj_options": {
+          "add_mtl": true,
+          "add_textures": true,
+          "archive_subdirectories": true
+        }
+      },
+      "expected": {
+        "record_count": 1,
+        "primary_sources": [
+          "test_model.obj"
+        ],
+        "bundle_members": {
+          "test_model.obj": [
+            "test_model.obj",
+            "test_model.mtl",
+            "test_model_textures.zip",
+            "synthetic_brick_base.jpg",
+            "synthetic_brick_roughness.jpg",
+            "synthetic_roof_base.jpg",
+            "synthetic_wood_base.jpg",
+            "synthetic_wood_roughness.jpg",
+            "synthetic_wood_normal.jpg",
+            "synthetic_door_base.jpg"
+          ]
+        },
+        "statuses": {
+          "test_model_textures.zip": "Valid"
+        }
+      }
+    },
+    {
+      "id": "dependency_gltf_external",
+      "description": "Tiny GLTF with external BIN and texture references.",
+      "path": "cases/dependency_gltf_external",
+      "negative_case": false,
+      "scan_options": {
+        "extensions": [
+          ".gltf",
+          ".bin"
+        ],
+        "primarysourceext": ".gltf",
+        "bundling": {
+          "enabled": true,
+          "strategy": "stem_match"
+        },
+        "batchEntity": "root",
+        "obj_options": {
+          "add_mtl": false,
+          "add_textures": true,
+          "archive_subdirectories": false
+        }
+      },
+      "expected": {
+        "record_count": 1,
+        "primary_sources": [
+          "ancient_sword.gltf"
+        ],
+        "bundle_members": {
+          "ancient_sword.gltf": [
+            "ancient_sword.gltf",
+            "ancient_sword.bin",
+            "blade_texture.jpeg"
+          ]
+        },
+        "statuses": {}
+      }
+    },
+    {
+      "id": "dependency_fbx_materials",
+      "description": "FBX dependency scanning through conventional Materials folder.",
+      "path": "cases/dependency_fbx_materials",
+      "negative_case": false,
+      "scan_options": {
+        "extensions": [
+          ".fbx",
+          ".jpg"
+        ],
+        "primarysourceext": ".fbx",
+        "bundling": {
+          "enabled": true,
+          "strategy": "stem_match"
+        },
+        "batchEntity": "root",
+        "obj_options": {
+          "add_mtl": false,
+          "add_textures": true,
+          "archive_subdirectories": false
+        }
+      },
+      "expected": {
+        "record_count": 1,
+        "primary_sources": [
+          "temple_reconstruction.fbx"
+        ],
+        "bundle_members": {
+          "temple_reconstruction.fbx": [
+            "temple_reconstruction.fbx",
+            "texture.jpg"
+          ]
+        },
+        "statuses": {}
+      }
+    },
+    {
+      "id": "negative_missing_obj_mtl",
+      "description": "Negative OBJ case where the referenced MTL file is absent.",
+      "path": "cases/negative_missing_obj_mtl",
+      "negative_case": true,
+      "scan_options": {
+        "extensions": [
+          ".obj"
+        ],
+        "primarysourceext": ".obj",
+        "bundling": {
+          "enabled": false
+        },
+        "batchEntity": "root",
+        "obj_options": {
+          "add_mtl": true,
+          "add_textures": true,
+          "archive_subdirectories": false
+        }
+      },
+      "expected": {
+        "record_count": 1,
+        "primary_sources": [
+          "orphan_model.obj"
+        ],
+        "bundle_members": {
+          "orphan_model.obj": [
+            "orphan_model.obj"
+          ]
+        },
+        "statuses": {
+          "orphan_model.obj": "MTL Missing"
+        }
+      }
+    },
+    {
+      "id": "negative_missing_mtl_texture",
+      "description": "Negative OBJ case where MTL exists but its referenced texture is absent.",
+      "path": "cases/negative_missing_mtl_texture",
+      "negative_case": true,
+      "scan_options": {
+        "extensions": [
+          ".obj",
+          ".mtl"
+        ],
+        "primarysourceext": ".obj",
+        "bundling": {
+          "enabled": true,
+          "strategy": "stem_match"
+        },
+        "batchEntity": "root",
+        "obj_options": {
+          "add_mtl": true,
+          "add_textures": true,
+          "archive_subdirectories": false
+        }
+      },
+      "expected": {
+        "record_count": 1,
+        "primary_sources": [
+          "artifact.obj"
+        ],
+        "bundle_members": {
+          "artifact.obj": [
+            "artifact.obj",
+            "artifact.mtl"
+          ]
+        },
+        "statuses": {
+          "artifact.mtl": "Textures Missing"
+        }
+      }
+    },
+    {
+      "id": "negative_regex_prefix_suffix_limitation",
+      "description": "Documents current limitation: prefix_suffix uses literal strings, not regex alternation.",
+      "path": "cases/negative_regex_prefix_suffix_limitation",
+      "negative_case": true,
+      "scan_options": {
+        "extensions": [
+          ".obj"
+        ],
+        "primarysourceext": ".obj",
+        "bundling": {
+          "enabled": true,
+          "strategy": "prefix_suffix",
+          "prefix": "v\\d+_",
+          "suffix": ""
+        },
+        "batchEntity": "root",
+        "obj_options": {
+          "add_mtl": true,
+          "add_textures": false,
+          "archive_subdirectories": false
+        }
+      },
+      "expected": {
+        "record_count": 3,
+        "primary_sources": [
+          "v1_pottery_fragment.obj",
+          "v2_pottery_fragment.obj",
+          "v3_pottery_fragment.obj"
+        ],
+        "bundle_members": {},
+        "statuses": {}
+      }
+    }
+  ],
+  "msf": {
+    "csv": "msf/workflow_minimal.csv",
+    "xlsx": "msf/workflow_minimal.xlsx",
+    "description": "Fresh metadata fixtures referencing only curated workflow filenames."
+  }
+}

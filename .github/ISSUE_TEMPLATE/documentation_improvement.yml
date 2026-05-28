@@ -1,0 +1,34 @@
+name: Documentation improvement
+description: Improve onboarding, user, operator, API, or architecture documentation.
+title: "[Docs]: "
+labels: ["documentation", "triage"]
+body:
+  - type: textarea
+    id: page
+    attributes:
+      label: Page or topic
+      description: Which document, section, or missing topic should change?
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is unclear or missing?
+    validations:
+      required: true
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested improvement
+      description: Include commands, links, or wording if you already have a proposal.
+  - type: dropdown
+    id: audience
+    attributes:
+      label: Audience
+      options:
+        - New developer
+        - API integrator
+        - Operator/admin
+        - End user
+        - Scientific/public audience
+        - Maintainer

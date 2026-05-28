@@ -1,0 +1,16 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:05.000
+Open the HDP Component Playground in a local Docker WebHDP instance.
+
+00:00:05.000 --> 00:00:10.000
+Filter the manifest-backed components and open Input File Classification.
+
+00:00:10.000 --> 00:00:16.000
+Select a seeded test session and a session-relative GLB fixture.
+
+00:00:16.000 --> 00:00:21.000
+Run the component through the Playground form without exposing credentials.
+
+00:00:21.000 --> 00:00:27.000
+Review the completed run and classification JSON to confirm the component test passed.

@@ -1,0 +1,76 @@
+#!/bin/bash
+#SBATCH --job-name={{ config.job_name|shell_quote }}
+#SBATCH --partition={{ config.partition|shell_quote }}
+#SBATCH --time={{ config.time_limit|shell_quote }}
+#SBATCH --nodes={{ config.nodes }}
+#SBATCH --ntasks-per-node={{ config.tasks_per_node }}
+#SBATCH --cpus-per-task={{ config.cpus_per_task }}
+#SBATCH --mem={{ config.memory|shell_quote }}
+#SBATCH --output={{ config.output_path|shell_quote }}
+#SBATCH --error={{ config.error_path|shell_quote }}
+
+{% if config.gpu_type and config.gpu_count > 0 %}
+#SBATCH --gres=gpu:{{ config.gpu_type|shell_quote }}:{{ config.gpu_count }}
+{% elif config.gpu_count > 0 %}
+#SBATCH --gres=gpu:{{ config.gpu_count }}
+{% endif %}
+
+# Request pseudo-terminal for interactive output buffering if needed (optional)
+# #SBATCH --open-mode=append
+
+echo "Starting job ${SLURM_JOB_ID} on $(hostname) at $(date)"
+
+{% if config.working_dir %}
+cd {{ config.working_dir|shell_quote }}
+echo "Changed directory to $(pwd)"
+{% endif %}
+
+# --- Environment Setup ---
+{% for module in config.modules %}
+module load {{ module|shell_quote }}
+{% endfor %}
+
+{% for key, value in config.environment_vars.items() %}
+export {{ key }}={{ value|shell_quote }}
+{% endfor %}
+
+{# --- UV Integration --- #}
+{% if config.use_uv %}
+echo "Initializing UV environment..."
+# Ensure uv is in path or load module if configured
+# module load uv  <-- Uncomment if your HPC requires module load for uv
+
+if [ ! -d ".venv" ]; then
+    echo "Creating virtual environment..."
+    uv venv
+fi
+
+echo "Activating virtual environment..."
+source .venv/bin/activate
+
+{% if config.uv_install %}
+echo "Syncing dependencies..."
+uv sync
+{% endif %}
+{% endif %}
+
+# --- Job Execution ---
+echo "Executing commands..."
+echo "----------------------------------------------------------------"
+
+{% for command in config.commands %}
+{{ command }}
+{% endfor %}
+
+echo "----------------------------------------------------------------"
+echo "Job finished at $(date)"
+
+{% if config.webhook_url %}
+# --- Webhook Notification ---
+echo "Sending webhook notification..."
+# Capture exit code of the last command (which was the job execution loop or final command)
+EXIT_CODE=$?
+curl -X POST -H "Content-Type: application/json" \
+     -d "{\"job_id\": \"$SLURM_JOB_ID\", \"status\": \"COMPLETED\", \"exit_code\": \"$EXIT_CODE\"}" \
+     "{{ config.webhook_url }}" || echo "Webhook failed"
+{% endif %}

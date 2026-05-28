@@ -1,0 +1,78 @@
+{
+  "$schema": "https://raw.githubusercontent.com/devcontainers/spec/main/schemas/devContainer.schema.json",
+  "name": "WebHDP Developer",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": "."
+  },
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "22"
+    },
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {}
+  },
+  "remoteUser": "vscode",
+  "workspaceFolder": "/workspaces/webhdp_clean",
+  "containerEnv": {
+    "FLASK_ENV": "development",
+    "WEBHDP_INLINE_TASKS": "true",
+    "PIP_DISABLE_PIP_VERSION_CHECK": "1",
+    "UV_PROJECT_ENVIRONMENT": "/home/vscode/.venv/webhdp"
+  },
+  "forwardPorts": [
+    5000,
+    5173,
+    8080,
+    6379,
+    18080
+  ],
+  "mounts": [
+    "source=webhdp-frontend-node-modules,target=/workspaces/webhdp_clean/frontend/node_modules,type=volume"
+  ],
+  "portsAttributes": {
+    "5000": {
+      "label": "Flask API"
+    },
+    "5173": {
+      "label": "Vite frontend"
+    },
+    "8080": {
+      "label": "Docker frontend"
+    },
+    "6379": {
+      "label": "Redis"
+    },
+    "18080": {
+      "label": "Local EDM validator"
+    }
+  },
+  "postCreateCommand": "mkdir -p /home/vscode/.venv && sudo chown -R vscode:vscode /workspaces/webhdp_clean/frontend/node_modules /home/vscode/.venv && make setup && make docs-check && make api-contract-check",
+  "postStartCommand": "make golden-workflow",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "Vue.volar",
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "redhat.vscode-yaml",
+        "tamasfe.even-better-toml",
+        "ms-azuretools.vscode-docker"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/home/vscode/.venv/webhdp/bin/python",
+        "python.testing.pytestEnabled": true,
+        "python.testing.pytestArgs": [
+          "tests"
+        ],
+        "editor.formatOnSave": false,
+        "files.exclude": {
+          "**/__pycache__": true,
+          "**/.pytest_cache": true,
+          "**/node_modules": true
+        }
+      }
+    }
+  }
+}

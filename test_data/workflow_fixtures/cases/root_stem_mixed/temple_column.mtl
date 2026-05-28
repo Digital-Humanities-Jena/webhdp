@@ -1,0 +1,4 @@
+# Minimal WebHDP fixture MTL
+newmtl fixture_material
+Kd 0.7 0.7 0.7
+map_Kd temple_column.jpg

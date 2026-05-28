@@ -1,0 +1,134 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    image: webhdp-backend:${WEBHDP_IMAGE_TAG:-plesk}
+    command: >
+      gunicorn --bind 0.0.0.0:5000
+      --workers ${GUNICORN_WORKERS:-2}
+      --timeout 1200
+      --access-logfile -
+      --error-logfile -
+      app:app
+    cpus: 0.75
+    mem_limit: 768m
+    mem_reservation: 384m
+    pids_limit: 512
+    deploy:
+      resources:
+        limits:
+          cpus: '0.75'
+          memory: 768M
+          pids: 512
+        reservations:
+          memory: 384M
+    networks:
+      - hdp-network
+      - hpc-link-net
+    volumes:
+      - ${WEBHDP_INSTANCE_PATH:-./instance}:/app/instance
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: webhdp-frontend:${WEBHDP_IMAGE_TAG:-plesk}
+    cpus: 0.25
+    mem_limit: 160m
+    mem_reservation: 64m
+    pids_limit: 256
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 160M
+          pids: 256
+        reservations:
+          memory: 64M
+
+  redis:
+    ports: !reset []
+    cpus: 0.25
+    mem_limit: 256m
+    mem_reservation: 64m
+    pids_limit: 128
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+          pids: 128
+        reservations:
+          memory: 64M
+
+  worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    image: webhdp-backend:${WEBHDP_IMAGE_TAG:-plesk}
+    command: >
+      celery -A celery_app.celery worker
+      --loglevel=info
+      --concurrency=${CELERY_WORKER_CONCURRENCY:-1}
+      --time-limit=${CELERY_TASK_TIME_LIMIT:-3600}
+      --soft-time-limit=${CELERY_TASK_SOFT_TIME_LIMIT:-3300}
+    cpus: 0.75
+    mem_limit: 768m
+    mem_reservation: 384m
+    pids_limit: 512
+    deploy:
+      resources:
+        limits:
+          cpus: '0.75'
+          memory: 768M
+          pids: 512
+        reservations:
+          memory: 384M
+    networks:
+      - hdp-network
+      - hpc-link-net
+    volumes:
+      - ${WEBHDP_INSTANCE_PATH:-./instance}:/app/instance
+
+  fast-renderer:
+    build:
+      context: ./external_code/fast_renderer
+      dockerfile: Dockerfile
+    image: webhdp-fast-renderer:${WEBHDP_IMAGE_TAG:-plesk}
+    cpus: 1.0
+    mem_limit: 3500m
+    mem_reservation: 1024m
+    pids_limit: 768
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 3500M
+          pids: 768
+        reservations:
+          memory: 1024M
+
+  any-to-usdz:
+    build:
+      context: ./external_code/any_to_usdz
+      dockerfile: Dockerfile
+    image: webhdp-any-to-usdz:${WEBHDP_IMAGE_TAG:-plesk}
+    platform: ${ANY_TO_USDZ_PLATFORM:-linux/amd64}
+    cpus: 1.0
+    mem_limit: 2500m
+    mem_reservation: 768m
+    pids_limit: 768
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2500M
+          pids: 768
+        reservations:
+          memory: 768M
+
+networks:
+  hpc-link-net:
+    external: true
+    name: hpc-link_hpc-link-net

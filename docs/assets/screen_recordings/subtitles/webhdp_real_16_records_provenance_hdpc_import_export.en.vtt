@@ -1,0 +1,16 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:06.000
+Seed a real ZIP/MSF upload session and open its Session Records view.
+
+00:00:06.000 --> 00:00:17.000
+Review source item counts, mapped metadata, provenance overview, and .hdpc export controls.
+
+00:00:17.000 --> 00:00:29.000
+Open one record detail and inspect files, source hierarchy, health, and Zenodo status.
+
+00:00:29.000 --> 00:00:41.000
+Open the session provenance report and review mapped fields, file types, and snapshots.
+
+00:00:41.000 --> 00:00:55.000
+Download the raw .hdpc file, import it, and verify the imported session in the explorer.

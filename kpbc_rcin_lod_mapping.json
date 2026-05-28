@@ -1,0 +1,32 @@
+{
+  "edm": {
+    "3d_model": {
+      "dc:title": { "source": "msf", "field": "title" },
+      "dc:description": { "source": "msf", "field": "description" },
+      "dc:creator": { "source": "msf", "field": "creator" },
+      "dc:identifier": { "source": "msf", "field": "identifier" },
+      "dcterms:created": { "source": "msf", "field": "date" },
+      "edm:type": { "source": "static", "value": "3D" },
+      "edm:intendedUsage": { "source": "static", "value": "Research" },
+      "schema:digitalSourceType": { "source": "static", "value": "digitisation" },
+      "lod:thumbnailMode": { "source": "static", "value": "all" }
+    }
+  },
+  "iiif": {
+    "3d_model": {
+      "label": { "source": "msf", "field": "title" },
+      "summary": { "source": "msf", "field": "description" },
+      "iiif:modelLabel": { "source": "msf", "field": "title" },
+      "iiif:heading": { "source": "static", "value": "0" }
+    }
+  },
+  "mets": {
+    "3d_model": {
+      "dc:title": { "source": "msf", "field": "title" },
+      "dc:description": { "source": "msf", "field": "description" },
+      "dc:creator": { "source": "msf", "field": "creator" },
+      "dc:identifier": { "source": "msf", "field": "identifier" },
+      "dcterms:created": { "source": "msf", "field": "date" }
+    }
+  }
+}

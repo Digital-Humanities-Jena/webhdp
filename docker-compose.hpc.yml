@@ -1,0 +1,36 @@
+services:
+  # Optimized overrides for Linux HPC Environments
+
+  fast-renderer:
+    deploy:
+      resources:
+        limits:
+          cpus: '32.0' # Assume a standard compute node capacity
+          memory: 64G
+        reservations:
+          memory: 16G
+    environment:
+      - OMP_NUM_THREADS=32
+      # HPC often uses Singularity or Shifter, but if Docker is available:
+      - NVIDIA_VISIBLE_DEVICES=all # Enable GPU if available on the node
+
+  any-to-usdz:
+    deploy:
+      resources:
+        limits:
+          cpus: '32.0'
+          memory: 32G
+
+  backend:
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 8G
+
+  worker:
+    deploy:
+      resources:
+        limits:
+          cpus: '8.0' # Workers need more power for coordination
+          memory: 16G

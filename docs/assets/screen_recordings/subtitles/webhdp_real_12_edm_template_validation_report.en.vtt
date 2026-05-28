@@ -1,0 +1,16 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:05.000
+Open EDM Templates in the local Docker WebHDP instance.
+
+00:00:05.000 --> 00:00:10.000
+Open the Standard EDM Template editor.
+
+00:00:10.000 --> 00:00:18.000
+Run template validation, which renders sample EDM XML first.
+
+00:00:18.000 --> 00:00:27.000
+Review the validation report and Local EDM Validator steps.
+
+00:00:27.000 --> 00:00:34.000
+Confirm Basic, XSD, Schematron, Business, and Remote checks are visible.

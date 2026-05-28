@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns:xlink="http://www.w3.org/1999/xlink"
+           targetNamespace="http://www.w3.org/1999/xlink"
+           elementFormDefault="qualified"
+           attributeFormDefault="qualified">
+  <xs:attribute name="type" type="xs:string"/>
+  <xs:attribute name="href" type="xs:anyURI"/>
+  <xs:attribute name="role" type="xs:anyURI"/>
+  <xs:attribute name="arcrole" type="xs:anyURI"/>
+  <xs:attribute name="title" type="xs:string"/>
+  <xs:attribute name="show" type="xs:string"/>
+  <xs:attribute name="actuate" type="xs:string"/>
+  <xs:attribute name="label" type="xs:string"/>
+  <xs:attribute name="from" type="xs:string"/>
+  <xs:attribute name="to" type="xs:string"/>
+
+  <xs:attributeGroup name="simpleLink">
+    <xs:attribute ref="xlink:type" fixed="simple"/>
+    <xs:attribute ref="xlink:href"/>
+    <xs:attribute ref="xlink:role"/>
+    <xs:attribute ref="xlink:arcrole"/>
+    <xs:attribute ref="xlink:title"/>
+    <xs:attribute ref="xlink:show"/>
+    <xs:attribute ref="xlink:actuate"/>
+  </xs:attributeGroup>
+
+  <xs:attributeGroup name="extendedLink">
+    <xs:attribute ref="xlink:type" fixed="extended"/>
+    <xs:attribute ref="xlink:role"/>
+    <xs:attribute ref="xlink:title"/>
+  </xs:attributeGroup>
+
+  <xs:attributeGroup name="locatorLink">
+    <xs:attribute ref="xlink:type" fixed="locator"/>
+    <xs:attribute ref="xlink:href" use="required"/>
+    <xs:attribute ref="xlink:role"/>
+    <xs:attribute ref="xlink:title"/>
+    <xs:attribute ref="xlink:label"/>
+  </xs:attributeGroup>
+
+  <xs:attributeGroup name="arcLink">
+    <xs:attribute ref="xlink:type" fixed="arc"/>
+    <xs:attribute ref="xlink:arcrole"/>
+    <xs:attribute ref="xlink:title"/>
+    <xs:attribute ref="xlink:show"/>
+    <xs:attribute ref="xlink:actuate"/>
+    <xs:attribute ref="xlink:from"/>
+    <xs:attribute ref="xlink:to"/>
+  </xs:attributeGroup>
+
+  <xs:attributeGroup name="resourceLink">
+    <xs:attribute ref="xlink:type" fixed="resource"/>
+    <xs:attribute ref="xlink:role"/>
+    <xs:attribute ref="xlink:title"/>
+    <xs:attribute ref="xlink:label"/>
+  </xs:attributeGroup>
+
+  <xs:attributeGroup name="titleLink">
+    <xs:attribute ref="xlink:type" fixed="title"/>
+    <xs:attribute ref="xlink:lang"/>
+  </xs:attributeGroup>
+
+  <xs:attributeGroup name="emptyLink">
+    <xs:attribute ref="xlink:type" fixed="none"/>
+  </xs:attributeGroup>
+
+  <xs:attribute name="lang" type="xs:language"/>
+</xs:schema>

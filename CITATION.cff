@@ -1,0 +1,24 @@
+cff-version: 1.2.0
+message: "If you use WebHDP, please cite this software using the metadata from this file."
+title: "WebHDP"
+version: "0.1.0-alpha.1"
+date-released: "2026-05-28"
+license: "EUPL-1.2"
+repository-code: "https://github.com/Digital-Humanities-Jena/webhdp"
+url: "https://github.com/Digital-Humanities-Jena/webhdp"
+authors:
+  - family-names: "Ukolov"
+    given-names: "Dominik"
+    email: "dominik.ukolov@uni-jena.de"
+    orcid: "https://orcid.org/0000-0002-7904-3892"
+    affiliation: "Professorship for Digital Humanities (Image/Object), Friedrich Schiller University Jena; Research Group DIGITAL ORGANOLOGY, Leipzig University"
+abstract: "WebHDP is a web application for preparing, validating, and publishing heritage-science datasets with support for 3D content, EDM, IIIF, METS, Zenodo workflows, and provenance-oriented local project state. It was developed as part of 3DBigDataSpace, funded by the European Union under Grant Agreement No. 101173385, and will continue to be developed as part of INFINITY, funded by the European Commission under Grant Agreement No. 101233051."
+keywords:
+  - cultural heritage
+  - 3D data
+  - EDM
+  - IIIF
+  - METS
+  - Zenodo
+  - 3DBigDataSpace
+  - INFINITY

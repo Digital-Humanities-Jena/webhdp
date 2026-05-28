@@ -1,0 +1,37 @@
+# Synthetic WebHDP workflow fixture material library.
+# The image files are generated 1x1 fixtures with no real-world source content.
+
+newmtl synthetic_brick
+Ka 1.000000 1.000000 1.000000
+Kd 0.650000 0.230000 0.180000
+Ks 0.200000 0.200000 0.200000
+d 1.000000
+illum 2
+map_Kd textures/synthetic_brick_base.jpg
+map_Ns textures/synthetic_brick_roughness.jpg
+
+newmtl synthetic_roof
+Ka 1.000000 1.000000 1.000000
+Kd 0.500000 0.120000 0.080000
+Ks 0.200000 0.200000 0.200000
+d 1.000000
+illum 2
+map_Kd textures/synthetic_roof_base.jpg
+
+newmtl synthetic_wood
+Ka 1.000000 1.000000 1.000000
+Kd 0.450000 0.300000 0.180000
+Ks 0.200000 0.200000 0.200000
+d 1.000000
+illum 2
+map_Kd textures/synthetic_wood_base.jpg
+map_Ns textures/synthetic_wood_roughness.jpg
+map_Bump -bm 1.000000 textures/synthetic_wood_normal.jpg
+
+newmtl synthetic_door
+Ka 1.000000 1.000000 1.000000
+Kd 0.170000 0.100000 0.060000
+Ks 0.200000 0.200000 0.200000
+d 1.000000
+illum 2
+map_Kd textures/synthetic_door_base.jpg

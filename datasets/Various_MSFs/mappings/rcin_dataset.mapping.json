@@ -1,0 +1,383 @@
+{
+  "zenodo": {
+    "3d": {
+      "zenodo:title": {
+        "source": "msf",
+        "field": "title",
+        "value": ""
+      },
+      "zenodo:description": {
+        "source": "msf",
+        "field": "description",
+        "value": ""
+      },
+      "zenodo:upload_type": {
+        "source": "options",
+        "field": "",
+        "value": "dataset"
+      },
+      "zenodo:publication_date": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "zenodo:creators": {
+        "source": "msf",
+        "field": "creator",
+        "value": ""
+      },
+      "zenodo:access_right": {
+        "source": "options",
+        "field": "",
+        "value": "open"
+      },
+      "zenodo:license": {
+        "source": "static",
+        "field": "",
+        "value": "cc-by-4.0"
+      },
+      "zenodo:communities": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "zenodo:keywords": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "zenodo:notes": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "zenodo:version": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "zenodo:language": {
+        "source": "static",
+        "field": "",
+        "value": "pol"
+      }
+    }
+  },
+  "edm": {
+    "3d": {
+      "dc:title": {
+        "source": "msf",
+        "field": "title",
+        "value": ""
+      },
+      "dc:description": {
+        "source": "msf",
+        "field": "description",
+        "value": ""
+      },
+      "dc:creator": {
+        "source": "msf",
+        "field": "creator",
+        "value": ""
+      },
+      "dc:identifier": {
+        "source": "msf",
+        "field": "identifier",
+        "value": ""
+      },
+      "dcterms:created": {
+        "source": "msf",
+        "field": "date",
+        "value": ""
+      },
+      "edm:type": {
+        "source": "static",
+        "field": "",
+        "value": "3D"
+      },
+      "edm:country": {
+        "source": "options",
+        "field": "",
+        "value": "Poland"
+      },
+      "edm:language": {
+        "source": "options",
+        "field": "",
+        "value": "Polish"
+      },
+      "dcterms:medium": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "schema:digitalSourceType": {
+        "source": "static",
+        "field": "",
+        "value": "Reality captured"
+      },
+      "edm:intendedUsage": {
+        "source": "static",
+        "field": "",
+        "value": "Research"
+      },
+      "dcterms:extent": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "edm:vertexCount": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "edm:polygonCount": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "lod:thumbnailMode": {
+        "source": "options",
+        "field": "",
+        "value": "auto"
+      },
+      "lod:thumbnailPattern": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "lod:thumbnailFiles": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      }
+    }
+  },
+  "iiif": {
+    "3d": {
+      "label": {
+        "source": "msf",
+        "field": "title",
+        "value": ""
+      },
+      "summary": {
+        "source": "msf",
+        "field": "description",
+        "value": ""
+      },
+      "iiif:manifestId": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "iiif:sceneId": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "iiif:sceneLabel": {
+        "source": "static",
+        "field": "",
+        "value": "Default Scene"
+      },
+      "iiif:annotationPageId": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "iiif:annotationId": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "iiif:modelId": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "iiif:modelFormat": {
+        "source": "options",
+        "field": "",
+        "value": "model/gltf-binary"
+      },
+      "iiif:modelLabel": {
+        "source": "msf",
+        "field": "title",
+        "value": ""
+      },
+      "iiif:translateX": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "iiif:translateY": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "iiif:translateZ": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "iiif:rotateX": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "iiif:rotateY": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "iiif:rotateZ": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "iiif:scaleX": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "iiif:scaleY": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "iiif:scaleZ": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "iiif:pointX": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "iiif:pointY": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "iiif:pointZ": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "lod:thumbnailMode": {
+        "source": "options",
+        "field": "",
+        "value": "auto"
+      },
+      "lod:thumbnailPattern": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "lod:thumbnailFiles": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "rights": {
+        "source": "zenodo",
+        "field": "metadata.license",
+        "value": ""
+      },
+      "provider": {
+        "source": "static",
+        "field": "",
+        "value": "RCIN / IAE PAN"
+      }
+    }
+  },
+  "mets": {
+    "3d": {
+      "dc:title": {
+        "source": "msf",
+        "field": "title",
+        "value": ""
+      },
+      "dc:description": {
+        "source": "msf",
+        "field": "description",
+        "value": ""
+      },
+      "dc:creator": {
+        "source": "msf",
+        "field": "creator",
+        "value": ""
+      },
+      "dc:identifier": {
+        "source": "msf",
+        "field": "identifier",
+        "value": ""
+      },
+      "dcterms:created": {
+        "source": "msf",
+        "field": "date",
+        "value": ""
+      },
+      "edm:type": {
+        "source": "static",
+        "field": "",
+        "value": "3D"
+      },
+      "edm:country": {
+        "source": "options",
+        "field": "",
+        "value": "Poland"
+      },
+      "edm:language": {
+        "source": "options",
+        "field": "",
+        "value": "Polish"
+      },
+      "dcterms:medium": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "schema:digitalSourceType": {
+        "source": "static",
+        "field": "",
+        "value": "Reality captured"
+      },
+      "edm:intendedUsage": {
+        "source": "static",
+        "field": "",
+        "value": "Research"
+      },
+      "dcterms:extent": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "edm:vertexCount": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "edm:polygonCount": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "lod:thumbnailMode": {
+        "source": "options",
+        "field": "",
+        "value": "auto"
+      },
+      "lod:thumbnailPattern": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "lod:thumbnailFiles": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      }
+    }
+  }
+}

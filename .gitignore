@@ -1,0 +1,227 @@
+# =======================================
+# Alpha & Application Specific
+# =======================================
+.docker-nocreds
+.tmp_sing_test
+.pytest_cache
+artifacts/
+backups/
+outputs/
+reports/
+infinity_use_cases/
+external_code/local-edm-validator/
+hpc-link/Legacy/
+hdp-shared/*
+!hdp-shared/.gitkeep
+local_input/*
+!local_input/.gitkeep
+local_output/*
+!local_output/.gitkeep
+logs/*
+!logs/.gitkeep
+test_models_extracted/
+test_models/
+test_sessions/
+test_scripts/
+unsorted_test_files/
+instance/*
+!instance/.gitkeep
+*.db
+*.sqlite
+*.sqlite3
+*.db-*
+*.db-journal
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.7z
+*.glb
+*.obj
+*.fbx
+*.xlsx
+*.pdf
+*.mp4
+*.mov
+
+# Curated embedded documentation walkthrough videos.
+!docs/assets/
+!docs/assets/screen_recordings/
+!docs/assets/screen_recordings/raw/
+!docs/assets/screen_recordings/raw/*.mp4
+
+# Small fixtures required by setup/admin render and converter smoke tests.
+!test_model.glb
+!test_image.jpg
+!MSF.xlsx
+
+# Curated workflow fixtures are intentionally tracked, including selected
+# model binaries covered by test_data/workflow_fixtures/manifest.json.
+!test_data/
+!test_data/workflow_fixtures/
+!test_data/workflow_fixtures/**
+test_data/**/*.zip
+
+# Generated verification outputs
+community_batch_approval_report.md
+change_community_timing.md
+lessons_learnt_server_deployment.md
+required_hpc_tests_before_release.md
+scantheworld_final.csv
+docs/reports/
+docs/agents/
+docs/strategies/*scantheworld*
+
+# External standards/reference prose is linked from docs/standards_links.md
+# instead of vendored into the public alpha repository.
+docs/edm/
+docs/iiif/
+docs/hdp-server/
+docs/evaluations/
+docs/zenodo_api.md
+
+scripts/hpc_singularity/remote/*scantheworld*
+scripts/hpc_singularity/remote/recover_scantheworld_chunk.py
+scripts/execute_zenodo_community_append_from_csv.py
+scripts/launch_zenodo_historical_backfill.py
+scripts/monitor_zenodo_historical_backfill.py
+scripts/prepare_subset_msf.py
+*_report_*.md
+validation_output.txt
+validation_result.json
+generated_edm_record.xml
+*_iiifmanifest_new.json
+timings.json
+submission_*_processing_result.json
+*_dataset_superseded_drafts.csv
+*_dataset_superseded_drafts.json
+/hunt_dataset.csv
+/hunt_dataset.json
+/turin_dataset.csv
+/turin_dataset.json
+
+gdrive-token.json
+client_secret.json
+hdp-3drepo-credentials.txt
+credentials/*.json
+!credentials/.gitkeep
+
+server_app/_version.py
+
+databases/component_registry.db
+databases/pipeline_system.db
+
+*.ztp
+*.hdpc
+
+pipeline_components/*
+!pipeline_components/.gitkeep
+prompts/
+3DModels/
+
+build_macOS.sh
+codebase.sh
+
+HDPBackend.spec
+
+codebase/
+
+**/available_components.json
+**/component_versions.json
+**/zenodo_components.json
+
+pipeline_components_copy
+
+notes/*
+
+codebase.py
+codebase.txt
+codebase_complete.txt
+codeout.txt
+
+# =======================================
+# Environment Specific
+# =======================================
+*.env
+**/.env
+
+**/env/
+**/.venv/
+**/venv/
+
+!example.env
+!.env.example
+!frontend/.env.development
+!frontend/.env.production
+
+# =======================================
+# macOS Specific
+# =======================================
+._*
+__MACOSX
+.DS_Store
+.AppleDouble
+.LSOverride
+
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+
+# =======================================
+# Development & Dependency Artifacts
+# =======================================
+.vscode
+jsconfig.json
+
+node_modules/
+jspm_packages/
+
+packaged_python_backend/
+
+*.pyc
+*.pyo
+*.pyd
+
+__pycache__/
+.pytest_cache/
+
+build/
+dist/
+*.egg-info/
+*.egg
+.mypy_cache/
+.ruff_cache/
+
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+playwright-report/
+test-results/
+
+.idea/           # JetBrains IDEs (PyCharm, WebStorm, etc.)
+.vscode/         # Visual Studio Code
+*.sublime-project
+*.sublime-workspace
+.project         # Eclipse
+.classpath       # Eclipse
+.settings/       # Eclipse
+*.swp            # Vim swap file
+
+*.pid
+*.seed
+*.pid.lock
+
+.coverage
+coverage.xml
+htmlcov/
+.tox/

@@ -1,0 +1,13 @@
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+asyncssh>=2.14.0
+pydantic-settings>=2.1.0
+structlog>=24.1.0
+websockets>=12.0
+jinja2>=3.1.0
+slowapi>=0.1.9
+httpx>=0.25.0
+prometheus-client>=0.19.0
+asgi-correlation-id>=4.3.0
+python-multipart>=0.0.9 # For file uploads tests
+requests>=2.32.0 # For live-service smoke tests

@@ -1,0 +1,37 @@
+metadata:
+  name: zenodo_draft
+  label: Zenodo Draft Creation
+  description: Creates Zenodo draft records through WebHDP project services.
+  tags:
+    - zenodo
+    - draft
+    - pipeline
+  keywords:
+    - zenodo draft
+    - deposition
+  category: Pipeline Publishing
+  version: "1.0.0"
+  status: alpha
+  component_schema: "0.1.0-alpha.1"
+
+inputs:
+  - name: record_id
+    label: Record ID
+    type: integer
+    required: false
+
+outputs:
+  - name: draft
+    label: Draft Payload
+    type: json
+    required: false
+
+parameter_groups: []
+
+ui:
+  constructor:
+    outputs:
+      draft:
+        selector_examples:
+          - "$.zenodo_response.id"
+          - "$.success"

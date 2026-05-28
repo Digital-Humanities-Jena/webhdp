@@ -1,0 +1,8 @@
+# Synthetic WebHDP OBJ fixture
+# Geometry is intentionally minimal; scanner tests exercise dependency structure.
+o synthetic_triangle
+v 0.0 0.0 0.0
+v 1.0 0.0 0.0
+v 0.0 1.0 0.0
+usemtl synthetic_surface
+f 1 2 3

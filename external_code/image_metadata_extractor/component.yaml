@@ -1,0 +1,97 @@
+metadata:
+  name: image_metadata_extractor
+  label: Image Metadata Extractor
+  description: Extracts stable file and image facts from PNG, JPEG, GIF, and WebP inputs for component testing.
+  tags:
+    - image
+    - metadata
+    - qa
+    - testing
+  keywords:
+    - image metadata
+    - file facts
+    - image dimensions
+  category: Image QA
+  version: "1.0.0"
+  status: alpha
+  component_schema: "0.1.0-alpha.1"
+
+structure:
+  required_files:
+    - "extractor.py"
+    - "requirements.txt"
+
+inputs:
+  - name: input_file
+    label: Input Image
+    description: Image file to inspect.
+    type: file_path
+    required: true
+
+outputs:
+  - name: metadata_report
+    label: Metadata Report
+    description: JSON report containing file facts, detected format, dimensions, and optional hash.
+    type: file_path
+    default: "./output/image_metadata.json"
+    required: false
+
+parameter_groups:
+  - title: Extraction
+    description: Configure metadata extraction.
+    parameters:
+      - name: include_hash
+        label: Include SHA-256
+        description: Compute a SHA-256 checksum for the input file.
+        type: boolean
+        default: true
+      - name: probe_bytes
+        label: Probe Bytes
+        description: Number of leading bytes to inspect for image headers.
+        type: integer
+        default: 65536
+
+execution:
+  profiles:
+    - id: local_default
+      adapter: local_cli
+      entrypoint:
+        - python
+        - extractor.py
+      working_directory: "."
+      output_collection:
+        - name: metadata_report
+          path: output/image_metadata.json
+          artifact_kind: file
+          metadata:
+            content_type: application/json
+
+compatibility:
+  playground:
+    enabled: true
+
+ui:
+  playground:
+    fields:
+      input_file:
+        widget: image_input
+        accept_extensions:
+          - ".png"
+          - ".jpg"
+          - ".jpeg"
+          - ".gif"
+          - ".webp"
+        help_text: Select a staged image file.
+      include_hash:
+        widget: checkbox
+      probe_bytes:
+        widget: number_input
+    result:
+      artifact_views:
+        - id: metadata-json
+          label: Metadata JSON
+          widget: file_download
+          extensions:
+            - ".json"
+      show_result_json: true
+      show_logs: true

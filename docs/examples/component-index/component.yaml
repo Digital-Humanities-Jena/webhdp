@@ -1,0 +1,25 @@
+metadata:
+  name: example_remote_validator
+  label: Example Remote Validator
+  version: "1.0.0"
+  description: Example manifest used by the unpublished WebHDP component index fixture.
+  category: 3D QA
+inputs:
+  - name: input_file
+    type: file_path
+    required: true
+outputs:
+  - name: report
+    type: file_path
+execution:
+  profiles:
+    - id: local_docker
+      adapter: container_cli
+      runtime: docker
+      image: ghcr.io/webhdp/example-remote-validator:1.0.0
+      entrypoint:
+        - python
+        - /app/component.py
+compatibility:
+  playground:
+    enabled: true

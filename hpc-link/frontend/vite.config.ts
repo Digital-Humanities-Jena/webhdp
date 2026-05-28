@@ -1,0 +1,24 @@
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+import tailwindcss from '@tailwindcss/vite'
+
+// https://vite.dev/config/
+export default defineConfig({
+  plugins: [react(), tailwindcss()],
+  build: {
+    chunkSizeWarningLimit: 800,
+  },
+  server: {
+    proxy: {
+      '/api': {
+        target: process.env.VITE_API_TARGET || 'http://localhost:8000',
+        changeOrigin: true,
+        ws: true,
+      },
+      '/ws': {
+        target: process.env.VITE_API_TARGET?.replace('http', 'ws') || 'ws://localhost:8000',
+        ws: true,
+      },
+    },
+  },
+})

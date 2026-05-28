@@ -1,0 +1,59 @@
+{
+  "schema": "webhdp.component-index.v1",
+  "generated_at": "2026-05-27T00:00:00Z",
+  "components": [
+    {
+      "component_key": "example_remote_validator",
+      "version": "1.0.0",
+      "label": "Example Remote Validator",
+      "description": "Example unpublished index entry for local WebHDP development and documentation.",
+      "category": "3D QA",
+      "tags": ["example", "validation"],
+      "trust_level": "experimental",
+      "manifest": {
+        "url": "./component.yaml",
+        "sha256": "d0f4e10e15077732020860cee0123e3f8c02b80b717517fa2c5ddca6a1b98c63"
+      },
+      "source": {
+        "url": "https://codeberg.org/webhdp/example-remote-validator",
+        "tag": "v1.0.0",
+        "commit": "0000000000000000000000000000000000000000"
+      },
+      "release": {
+        "url": "https://codeberg.org/webhdp/example-remote-validator/releases/tag/v1.0.0",
+        "tag": "v1.0.0",
+        "assets": [
+          {
+            "name": "example-remote-validator.sif",
+            "url": "https://example.org/webhdp/components/example-remote-validator-1.0.0.sif",
+            "media_type": "application/vnd.sylabs.sif",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ]
+      },
+      "zenodo": {
+        "doi": "10.5281/zenodo.0000000",
+        "concept_doi": "10.5281/zenodo.000000",
+        "record_url": "https://zenodo.org/records/0000000"
+      },
+      "compatibility": {
+        "webhdp_min": "0.1.0",
+        "webhdp_max": "1.0.0"
+      },
+      "license": "MIT",
+      "citation": "Example Remote Validator contributors (2026).",
+      "artifacts": {
+        "docker": {
+          "image": "ghcr.io/webhdp/example-remote-validator@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "sbom_url": "https://example.org/webhdp/components/example-remote-validator-sbom.json",
+          "provenance_url": "https://example.org/webhdp/components/example-remote-validator.intoto.jsonl"
+        },
+        "sif": {
+          "source": "https://example.org/webhdp/components/example-remote-validator-1.0.0.sif",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,84 @@
+metadata:
+  name: model_repair_component
+  label: Model Repair Component
+  description: Reports potential repair operations and optionally emits a repaired derivative, never mutating the original asset.
+  tags: [3d, repair, derivative, qa]
+  category: 3D Processing
+  version: "1.0.0"
+  status: alpha
+  component_schema: "0.1.0-alpha.1"
+
+distribution:
+  tier: external_installable
+  bundled_with_webhdp: false
+  installation_scope: [local_container]
+
+inputs:
+  - name: input_file
+    label: Input 3D Asset
+    type: file_path
+    required: true
+
+outputs:
+  - name: analysis_report
+    type: file_path
+  - name: repaired_asset
+    type: file_path
+
+parameter_groups:
+  - title: Repair Policy
+    parameters:
+      - name: apply_repair
+        label: Emit Repaired Derivative
+        type: boolean
+        default: false
+
+execution:
+  profiles:
+    - id: local_docker
+      adapter: container_cli
+      runtime: docker
+      image: webhdp-model-repair-component:local
+      entrypoint: [python, /app/component_runner.py, --component, model_repair_component]
+      config:
+        webhdp_contract: true
+      resources:
+        gpu_count: 0
+        cpus: 1
+        memory_mb: 2048
+
+compatibility:
+  playground:
+    enabled: true
+
+install:
+  strategies:
+    - id: local_container
+      runtime: docker
+      profile: local_docker
+      image: webhdp-model-repair-component:local
+  test:
+    files:
+      - name: sample.glb
+        content_base64: "Z2xURgIAAAAwAAAAHAAAAEpTT057ImFzc2V0Ijp7InZlcnNpb24iOiIyLjAifX0g"
+    inputs:
+      input_file: sample.glb
+    parameters:
+      apply_repair: false
+
+ui:
+  playground:
+    fields:
+      input_file:
+        widget: model_input
+        accept_extensions: [.glb, .gltf, .obj, .ply]
+      apply_repair:
+        widget: checkbox
+    result:
+      artifact_views:
+        - id: repair-report
+          label: Repair Report
+          widget: file_download
+          extensions: [.json]
+      show_result_json: true
+      show_logs: true

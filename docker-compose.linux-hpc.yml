@@ -1,0 +1,46 @@
+services:
+  # Limitless overrides for high-end Linux HPC nodes
+  # This configuration removes memory and CPU limits to allow the application
+  # to consume all available hardware resources.
+
+  fast-renderer:
+    deploy:
+      resources:
+        limits:
+          # Limits are intentionally omitted to allow unconstrained usage
+          cpus: null
+          memory: null
+        reservations:
+          # High reservations to ensure priority
+          memory: 4G
+    environment:
+      - OMP_NUM_THREADS=64
+      - NVIDIA_VISIBLE_DEVICES=all
+
+  any-to-usdz:
+    deploy:
+      resources:
+        limits:
+          cpus: null
+          memory: null
+        reservations:
+          memory: 2G
+
+  backend:
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+    environment:
+      - STORAGE_MODE=local_storage
+
+  worker:
+    deploy:
+      resources:
+        limits:
+          cpus: null
+          memory: null
+        reservations:
+          memory: 4G
+    environment:
+      - STORAGE_MODE=local_storage

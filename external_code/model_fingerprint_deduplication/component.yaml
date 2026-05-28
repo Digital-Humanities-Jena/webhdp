@@ -1,0 +1,71 @@
+metadata:
+  name: model_fingerprint_deduplication
+  label: 3D Fingerprint / Deduplication Component
+  description: Computes durable file and geometry signatures for cross-session duplicate and versioning workflows.
+  tags: [3d, fingerprint, deduplication, versioning]
+  category: 3D Analysis
+  version: "1.0.0"
+  status: alpha
+  component_schema: "0.1.0-alpha.1"
+
+distribution:
+  tier: external_installable
+  bundled_with_webhdp: false
+  installation_scope: [local_container]
+
+inputs:
+  - name: input_file
+    label: Input 3D Asset
+    type: file_path
+    required: true
+
+outputs:
+  - name: analysis_report
+    type: file_path
+
+execution:
+  profiles:
+    - id: local_docker
+      adapter: container_cli
+      runtime: docker
+      image: webhdp-model-fingerprint-deduplication:local
+      entrypoint: [python, /app/component_runner.py, --component, model_fingerprint_deduplication]
+      config:
+        webhdp_contract: true
+      resources:
+        gpu_count: 0
+        cpus: 1
+        memory_mb: 1024
+
+compatibility:
+  playground:
+    enabled: true
+
+install:
+  strategies:
+    - id: local_container
+      runtime: docker
+      profile: local_docker
+      image: webhdp-model-fingerprint-deduplication:local
+  test:
+    files:
+      - name: sample.glb
+        content_base64: "Z2xURgIAAAAwAAAAHAAAAEpTT057ImFzc2V0Ijp7InZlcnNpb24iOiIyLjAifX0g"
+    inputs:
+      input_file: sample.glb
+    parameters: {}
+
+ui:
+  playground:
+    fields:
+      input_file:
+        widget: model_input
+        accept_extensions: [.glb, .gltf, .obj, .ply, .las, .laz, .e57]
+    result:
+      artifact_views:
+        - id: fingerprint-report
+          label: Fingerprint Report
+          widget: file_download
+          extensions: [.json]
+      show_result_json: true
+      show_logs: true

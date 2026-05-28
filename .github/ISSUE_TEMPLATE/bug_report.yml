@@ -1,0 +1,67 @@
+name: Bug report
+description: Report a reproducible WebHDP defect.
+title: "[Bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve WebHDP. Please avoid sharing credentials, tokens, private paths, or unpublished record data.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What went wrong?
+      placeholder: Upload scan fails when...
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Include the smallest reliable sequence.
+      placeholder: |
+        1. Go to ...
+        2. Upload ...
+        3. Click ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Backend/API
+        - Frontend/UI
+        - Upload/workflow
+        - Zenodo/publishing
+        - EDM/IIIF/METS
+        - Docker/deployment
+        - HPC Link
+        - Documentation
+        - Unknown
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Browser, OS, Docker/local, branch, version, and relevant feature flags.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Remove secrets and private data before pasting.
+      render: shell

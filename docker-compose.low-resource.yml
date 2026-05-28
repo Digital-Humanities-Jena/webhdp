@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  # Disable Renderer Service
+  fast-renderer:
+    profiles: ["disabled"]
+
+  # Disable USDZ Converter Service
+  any-to-usdz:
+    profiles: ["disabled"]
+
+  # Update Backend with flags
+  backend:
+    environment:
+      - ENABLE_RENDERER=false
+      - ENABLE_USDZ_CONVERSION=false
+
+  # Update Worker with flags
+  worker:
+    environment:
+      - ENABLE_RENDERER=false
+      - ENABLE_USDZ_CONVERSION=false

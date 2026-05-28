@@ -1,0 +1,347 @@
+metadata:
+  name: fast_renderer
+  label: Fast 3D Model Renderer
+  description: >
+    An optimized, high-throughput rendering processor for 3D models using Blender.
+    Supports batch processing, parallel execution, and HPC environments.
+  tags:
+    - 3d
+    - renderer
+    - blender
+    - batch
+    - gltf
+    - obj
+    - cycles
+    - eevee
+  keywords:
+    - 3d rendering
+    - blender
+    - cycles
+    - eevee
+    - batch processing
+    - parallel computing
+    - hpc
+  category: 3D Processing
+  version: "0.1.0"
+  status: alpha
+  created: "2025-11-16"
+  updated: "2025-11-16"
+  authors:
+    - name: "Ukolov, Dominik"
+      affiliation: "Professorship for Digital Humanities (Image/Object), Friedrich Schiller University Jena"
+      orcid: "0000-0002-7904-3892"
+  contact:
+    email: "webhdp@3drepo.eu"
+  license:
+    type: GPLv3
+    url: "https://www.gnu.org/licenses/gpl-3.0.html.en"
+  component_schema: "0.1.0-alpha.1"
+
+sources:
+  record: ""
+  doi: ""
+  concept_doi: ""
+  changelog: ""
+  git: "https://github.com/hdp-components/fast_renderer"
+
+structure:
+  required_files:
+    - "main.py"
+    - "processor.py"
+    - "requirements.txt"
+  additional_files:
+    - "README.md"
+  directories:
+    - "output"
+    - "input"
+
+inputs:
+  - name: input_files
+    label: Input Files
+    description: >
+      Explicit list of 3D model files to render. Preferred for pipeline constructor mappings
+      and chained execution from earlier steps.
+    type: file_list
+    required: false
+    mutex_with: ["input-dir"]
+  - name: input-dir
+    label: Input Directory
+    description: >
+      Directory containing 3D models to render. The component will scan
+      this directory recursively for supported file formats.
+    type: dir_path
+    default: "./input"
+    required: false
+    mutex_with: ["input_files"]
+
+outputs:
+  - name: output-dir
+    label: Output Directory
+    description: >
+      Directory where the rendered images will be saved. The component will
+      replicate the input directory's structure.
+    type: dir_path
+    default: "./output"
+    required: true
+
+parameter_groups:
+  - title: Render Quality
+    description: Configure render presets and manual quality overrides.
+    parameters:
+      - name: preset
+        label: Quality Preset
+        type: string_dropdown
+        default: "medium"
+        options: ["draft", "medium", "high", "ultra"]
+        description: >
+          Render quality preset (draft: 256px, 8 samples; medium: 512px, 32 samples;
+          high: 1024px, 128 samples; ultra: 2048px, 256 samples).
+      - name: resolution
+        label: Resolution (Override)
+        type: integer
+        default: ""
+        description: >
+          Manual override for image resolution (e.g., 1024).
+          Overrides the selected preset.
+      - name: samples
+        label: Samples (Override)
+        type: integer
+        default: ""
+        description: >
+          Manual override for render samples. Overrides the selected preset.
+      - name: camera-dist
+        label: Camera Distance (Override)
+        type: number
+        default: ""
+        description: >
+          Manual override for camera distance (float value).
+          Overrides the selected preset.
+
+  - title: Render Configuration
+    description: Control the render engine, file formats, and output settings.
+    parameters:
+      - name: engine
+        label: Render Engine
+        type: string_dropdown
+        default: "CYCLES"
+        options:
+          - "CYCLES"
+          - "BLENDER_EEVEE"
+          - "BLENDER_WORKBENCH"
+        description: Blender rendering engine to use.
+      - name: formats
+        label: File Formats
+        type: array[string]
+        default: [".obj", ".glb", ".gltf", ".usdz", ".ply", ".fbx", ".dae", ".stl", ".usd", ".usda", ".usdc", ".abc"]
+        description: List of file formats to scan for.
+      - name: transparent-background
+        label: Transparent Background
+        type: boolean
+        default: true
+        description: Render images with a transparent PNG background.
+
+  - title: Camera and Lighting
+    description: Configure camera angles and scene lighting.
+    parameters:
+      - name: angles
+        label: Custom Angles
+        type: array[number]
+        default: [0, 72, 144, 216, 288]
+        description: >
+          List of specific camera rotation angles (e.g., [0, 45, 90]).
+        mutex_with: ["angle-iteration"]
+      - name: angle-iteration
+        label: Angle Iterations
+        type: integer
+        default: ""
+        description: >
+          Number of evenly spaced angles (e.g., 12 for every 30 degrees).
+        mutex_with: ["angles"]
+      - name: light-energy
+        label: Light Energy
+        type: number
+        default: 4.0
+        description: Intensity of the light source (float value).
+      - name: light-angle
+        label: Light Angle
+        type: number
+        default: 45.0
+        description: Directional light angle in degrees (float value).
+
+  - title: Processing and Performance
+    description: Configure batching, timeouts, and parallel execution.
+    parameters:
+      - name: batch-size
+        label: Batch Size
+        type: integer
+        default: 50
+        description: Number of models to process in a single Blender instance.
+      - name: timeout-multiplier
+        label: Timeout Multiplier
+        type: number
+        default: 1.0
+        description: >
+          Timeout scaling factor (float). Increase (e.g., 2.0) for slower
+          systems or very complex models.
+      - name: parallel-mode
+        label: Parallel Mode
+        type: boolean
+        default: false
+        description: >
+          Enable parallel rendering across multiple GPUs on a single node.
+      - name: hpc-mode
+        label: HPC Mode
+        type: boolean
+        default: false
+        description: >
+          Enable HPC optimizations, including GPU binding and distributed chunking
+          (implies parallel mode).
+      - name: chunk-index
+        label: HPC Chunk Index
+        type: integer
+        default: ""
+        description: >
+          Job array index for distributed HPC execution (used with --hpc-mode).
+      - name: total-chunks
+        label: HPC Total Chunks
+        type: integer
+        default: ""
+        description: >
+          Total number of job array chunks (used with --hpc-mode).
+
+  - title: Validation and Debugging
+    description: Options for texture checking, dry runs, and logging.
+    parameters:
+      - name: check-textures
+        label: Check Textures
+        type: boolean
+        default: false
+        description: >
+          Verify the presence of associated texture files (e.g., model.png for model.obj).
+      - name: skip-missing-textures
+        label: Skip Missing Textures
+        type: boolean
+        default: false
+        description: >
+          If texture checking is enabled, skip warnings and render models
+          even if textures are missing.
+      - name: dry-run
+        label: Dry Run
+        type: boolean
+        default: false
+        description: Validate configuration and scan for models without starting Blender.
+      - name: verbose
+        label: Verbose Logging
+        type: boolean
+        default: false
+        description: Enable detailed debug logging output to the console.
+      - name: no-ansi
+        label: Disable ANSI Colors
+        type: boolean
+        default: false
+        description: Disable ANSI color formatting in console output (for CI/CD).
+
+ui:
+  playground:
+    fields:
+      input_files:
+        widget: file_list_picker
+        path_source: files
+        preview_kind: model
+        help_text: Select one or more session-backed model files when this renderer is fed by pipeline mappings.
+      input-dir:
+        widget: directory_picker
+        path_source: directories
+        help_text: Select a session directory that contains the source models to scan.
+      preset:
+        widget: select
+      formats:
+        widget: array_editor
+        rows: 6
+        help_text: One extension per line. These extensions are used to scan the selected directory.
+      transparent-background:
+        widget: checkbox
+      angles:
+        widget: array_editor
+        rows: 5
+        preview_kind: model
+        help_text: One angle per line. This field is mutually exclusive with Angle Iterations.
+      angle-iteration:
+        widget: number_input
+      light-energy:
+        widget: number_input
+      light-angle:
+        widget: number_input
+      batch-size:
+        widget: number_input
+      timeout-multiplier:
+        widget: number_input
+      chunk-index:
+        widget: number_input
+        visible_if:
+          field: hpc-mode
+          truthy: true
+      total-chunks:
+        widget: number_input
+        visible_if:
+          field: hpc-mode
+          truthy: true
+      skip-missing-textures:
+        widget: checkbox
+        visible_if:
+          field: check-textures
+          truthy: true
+    result:
+      artifact_views:
+        - id: rendered-images
+          label: Rendered Images
+          widget: image_gallery
+          extensions:
+            - ".png"
+            - ".jpg"
+            - ".jpeg"
+            - ".webp"
+      show_result_json: true
+      show_logs: true
+
+requirements:
+  python_environment:
+    python_version: ">=3.8"
+    packages: []
+
+  system_dependencies:
+    - name: "blender"
+      version: ">=3.0"
+      required: true
+      description: "Blender 3D creation suite is required for all rendering operations."
+      type: "package"
+      install:
+        methods:
+          - type: "apt"
+            command: "sudo apt-get update && sudo apt-get install -y blender"
+            platforms: ["ubuntu", "debian"]
+          - type: "yum"
+            command: "sudo yum install -y blender"
+            platforms: ["centos", "rhel", "fedora"]
+          - type: "brew"
+            command: "brew install blender"
+            platforms: ["macos"]
+          - type: "choco"
+            command: "choco install blender"
+            platforms: ["windows"]
+          - type: "manual"
+            url: "https://www.blender.org/download/"
+            platforms: ["linux"]
+      verify:
+        command: "blender --version"
+        expected_pattern: "Blender [3-4]"
+
+  system_requirements:
+    min_memory_mb: 2048
+    recommended_memory_mb: 8192
+    min_disk_space_mb: 1024
+    gpu_memory_mb: 4096
+
+execution:
+  idempotent: true
+  timeout: 7200

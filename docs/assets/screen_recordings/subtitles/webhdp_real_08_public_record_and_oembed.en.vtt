@@ -1,0 +1,13 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:05.000
+Open a public WebHDP page for a published Zenodo 3D record.
+
+00:00:05.000 --> 00:00:10.000
+Inspect metadata, file count, DOI, and preview controls.
+
+00:00:10.000 --> 00:00:15.000
+Open the iframe-safe embed page for the same record.
+
+00:00:15.000 --> 00:00:22.000
+Verify the oEmbed endpoint returns a rich JSON iframe response.

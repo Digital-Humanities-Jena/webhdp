@@ -1,0 +1,694 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://webhdp.example.org/schemas/webhdp_component_manifest_v0_1_0_alpha_1.schema.json",
+  "title": "WebHDP HDP Component Manifest",
+  "description": "Schema companion for WebHDP component.yaml manifests using component_schema 0.1.0-alpha.1.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["metadata", "execution"],
+  "properties": {
+    "metadata": {
+      "$ref": "#/$defs/metadata"
+    },
+    "sources": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "distribution": {
+      "$ref": "#/$defs/distribution"
+    },
+    "structure": {
+      "$ref": "#/$defs/structure"
+    },
+    "inputs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/field"
+      },
+      "default": []
+    },
+    "outputs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/field"
+      },
+      "default": []
+    },
+    "parameter_groups": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/parameter_group"
+      },
+      "default": []
+    },
+    "execution": {
+      "$ref": "#/$defs/execution"
+    },
+    "compatibility": {
+      "$ref": "#/$defs/compatibility"
+    },
+    "install": {
+      "$ref": "#/$defs/install"
+    },
+    "hpc": {
+      "$ref": "#/$defs/hpc"
+    },
+    "ui": {
+      "$ref": "#/$defs/ui"
+    }
+  },
+  "$defs": {
+    "metadata": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_]*$"
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "label": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "keywords": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "category": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "component_schema": {
+          "type": "string"
+        },
+        "maintainer": {
+          "type": "string"
+        },
+        "license": {},
+        "citation": {}
+      }
+    },
+    "distribution": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "tier": {
+          "type": "string"
+        },
+        "bundled_with_webhdp": {
+          "type": "boolean"
+        },
+        "installation_scope": {
+          "type": "array",
+          "items": {
+            "enum": ["local_container", "hpc_sif"]
+          }
+        }
+      }
+    },
+    "structure": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "required_files": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "field": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "enum": [
+            "file_path",
+            "dir_path",
+            "file_list",
+            "boolean",
+            "integer",
+            "number",
+            "string_dropdown",
+            "string",
+            "text",
+            "json",
+            "array[string]",
+            "array[number]",
+            "array[integer]",
+            "file",
+            "directory",
+            "dropdown"
+          ],
+          "default": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean",
+          "default": false
+        },
+        "default": {},
+        "options": {
+          "type": "array",
+          "default": []
+        },
+        "mutex_with": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        }
+      }
+    },
+    "parameter_group": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "title": {
+          "type": "string",
+          "default": "Parameters"
+        },
+        "description": {
+          "type": "string"
+        },
+        "parameters": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/field"
+          },
+          "default": []
+        }
+      }
+    },
+    "execution": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["profiles"],
+      "properties": {
+        "profiles": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/execution_profile"
+          }
+        }
+      }
+    },
+    "execution_profile": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["id", "adapter"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "adapter": {
+          "enum": ["legacy_hdp_python", "local_cli", "container_cli", "builtin_webhdp", "hpc_link"]
+        },
+        "entrypoint": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "default": []
+        },
+        "working_directory": {
+          "type": "string",
+          "default": "."
+        },
+        "runtime": {
+          "type": "string"
+        },
+        "image": {
+          "type": "string"
+        },
+        "handler": {
+          "type": "string"
+        },
+        "input_bindings": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          },
+          "default": []
+        },
+        "output_collection": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          },
+          "default": []
+        },
+        "environment": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {}
+        },
+        "resources": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "gpu_count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "cpus": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "memory_mb": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "default": {}
+        },
+        "config": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "adapter": {
+                "const": "container_cli"
+              }
+            },
+            "required": ["adapter"]
+          },
+          "then": {
+            "required": ["runtime", "image", "entrypoint"]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "adapter": {
+                "enum": ["builtin_webhdp", "hpc_link"]
+              }
+            },
+            "required": ["adapter"]
+          },
+          "then": {
+            "required": ["handler"]
+          }
+        }
+      ]
+    },
+    "compatibility": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "playground": {
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "object",
+              "additionalProperties": true,
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "install": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "strategies": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/install_strategy"
+          }
+        },
+        "test": {
+          "$ref": "#/$defs/smoke_test"
+        }
+      }
+    },
+    "install_strategy": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["id"],
+      "properties": {
+        "id": {
+          "enum": ["local_container", "hpc_sif"]
+        },
+        "runtime": {
+          "type": "string"
+        },
+        "profile": {
+          "type": "string"
+        },
+        "image": {
+          "type": "string"
+        }
+      }
+    },
+    "hpc": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "install": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "runtime": {
+              "const": "singularity"
+            },
+            "sif_required": {
+              "type": "boolean"
+            }
+          }
+        },
+        "test": {
+          "$ref": "#/$defs/smoke_test"
+        }
+      }
+    },
+    "smoke_test": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/smoke_test_file"
+          },
+          "default": []
+        },
+        "inputs": {
+          "type": "object",
+          "additionalProperties": true,
+          "default": {}
+        },
+        "parameters": {
+          "type": "object",
+          "additionalProperties": true,
+          "default": {}
+        },
+        "timeout_seconds": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      }
+    },
+    "smoke_test_file": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "not": {
+            "pattern": "[/\\\\]"
+          }
+        },
+        "content": {
+          "type": "string"
+        },
+        "content_base64": {
+          "type": "string",
+          "contentEncoding": "base64"
+        }
+      },
+      "oneOf": [
+        {
+          "required": ["content"]
+        },
+        {
+          "required": ["content_base64"]
+        }
+      ]
+    },
+    "ui": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "playground": {
+          "$ref": "#/$defs/playground_ui"
+        },
+        "constructor": {
+          "$ref": "#/$defs/constructor_ui"
+        }
+      }
+    },
+    "playground_ui": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "fields": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/playground_field_ui"
+          }
+        },
+        "result": {
+          "$ref": "#/$defs/playground_result_ui"
+        }
+      }
+    },
+    "playground_field_ui": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "widget": {
+          "enum": [
+            "text_input",
+            "textarea",
+            "number_input",
+            "checkbox",
+            "select",
+            "json_editor",
+            "file_picker",
+            "directory_picker",
+            "file_list_picker",
+            "array_editor",
+            "image_input",
+            "model_input"
+          ]
+        },
+        "placeholder": {
+          "type": "string"
+        },
+        "help_text": {
+          "type": "string"
+        },
+        "rows": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "path_source": {
+          "type": "string"
+        },
+        "preview_kind": {
+          "type": "string"
+        },
+        "accept_extensions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "accept_mime_types": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "mutex_with": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "visible_if": {
+          "$ref": "#/$defs/visible_if"
+        }
+      }
+    },
+    "visible_if": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["field"],
+      "properties": {
+        "field": {
+          "type": "string"
+        },
+        "equals": {},
+        "not_equals": {},
+        "truthy": {},
+        "in": {
+          "type": "array"
+        }
+      },
+      "anyOf": [
+        {
+          "required": ["equals"]
+        },
+        {
+          "required": ["not_equals"]
+        },
+        {
+          "required": ["truthy"]
+        },
+        {
+          "required": ["in"]
+        }
+      ]
+    },
+    "playground_result_ui": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "artifact_views": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/artifact_view"
+          }
+        },
+        "show_result_json": {
+          "type": "boolean"
+        },
+        "show_logs": {
+          "type": "boolean"
+        }
+      }
+    },
+    "artifact_view": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "widget": {
+          "enum": ["image_gallery", "model_viewer", "file_download"]
+        },
+        "extensions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "constructor_ui": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "outputs": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/constructor_output_ui"
+          }
+        }
+      }
+    },
+    "constructor_output_ui": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "trigger_fields": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/constructor_trigger_field"
+          }
+        },
+        "selector_examples": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "constructor_trigger_field": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^\\$\\."
+        },
+        "json_path": {
+          "type": "string",
+          "pattern": "^\\$\\."
+        },
+        "label": {
+          "type": "string"
+        },
+        "value_type": {
+          "type": "string"
+        },
+        "operators": {
+          "type": "array",
+          "items": {
+            "enum": ["eq", "neq", "in", "not_in", "gte", "lte", "between", "exists", "truthy"]
+          }
+        },
+        "options": {
+          "type": "array"
+        }
+      },
+      "oneOf": [
+        {
+          "required": ["path"]
+        },
+        {
+          "required": ["json_path"]
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,103 @@
+services:
+  # FastAPI Application Core
+  app-core:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./secrets/ssh_key:/run/secrets/ssh_key:ro
+      - ./secrets/ssh_known_hosts/known_hosts:/run/secrets/ssh_known_hosts:ro
+      - ./data/auth:/data/auth
+      - ./app:/app/app:ro  # Dev: mount app code for hot reload
+      - ./tests:/app/tests:ro # Dev: mount tests
+    environment:
+      - HPC_HOST=hpc-login.example.edu
+      - HPC_USER=webhdp-user
+      - SSH_KEY_PATH=/run/secrets/ssh_key
+      - SSH_KNOWN_HOSTS_PATH=/run/secrets/ssh_known_hosts
+      - API_KEY=${API_KEY:-dev-only-local-api-key}
+      - LEGACY_API_KEY_AUTH_ENABLED=${LEGACY_API_KEY_AUTH_ENABLED:-false}
+      - AUTH_DB_PATH=/data/auth/auth.db
+      - AUTH_TOKEN_SECRET=${AUTH_TOKEN_SECRET:-dev-only-local-auth-token-secret}
+      - AUTH_TOKEN_TTL_MINUTES=${AUTH_TOKEN_TTL_MINUTES:-480}
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-dev-only-local-admin-password}
+      - LOG_LEVEL=INFO
+      - MOCK_HPC=false
+      - PI3_PYTHON=/srv/hpc-link/apps/pi3/venv/bin/python
+      - PI3_REPO_PATH=/srv/hpc-link/apps/pi3/runtime/Pi3
+      - PI3_DEFAULT_PARTITION=partition-a
+      - MARKER_BINARY=/srv/hpc-link/apps/marker/venv/bin/marker_single
+      - MARKER_DEFAULT_PARTITION=partition-a
+      - MARKER_TORCH_DEVICE=auto
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /home/appuser/.ssh:uid=1000,gid=1000,mode=700
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  # Frontend (Vite)
+  app-frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules # Prevent overwriting node_modules
+    environment:
+      - VITE_API_TARGET=http://app-core:8000
+    depends_on:
+      - app-core
+    restart: unless-stopped
+
+  # Separate demo application container that consumes HPC-Link API
+  hpc-linktest:
+    build:
+      context: ./hpc-linktest
+      dockerfile: Dockerfile
+    ports:
+      - "5180:8080"
+    environment:
+      - HPC_LINK_BASE_URL=http://app-core:8000
+    depends_on:
+      - app-core
+    restart: unless-stopped
+
+  # Separate demo application container for Pi3 image-to-3D workflows
+  hpc-pi3:
+    build:
+      context: ./hpc-pi3
+      dockerfile: Dockerfile
+    ports:
+      - "5181:8080"
+    environment:
+      - HPC_LINK_BASE_URL=http://app-core:8000
+    depends_on:
+      - app-core
+    restart: unless-stopped
+
+  # Separate demo application container for Marker document conversion workflows
+  hpc-marker:
+    build:
+      context: ./hpc-marker
+      dockerfile: Dockerfile
+    ports:
+      - "5182:8080"
+    environment:
+      - HPC_LINK_BASE_URL=http://app-core:8000
+    depends_on:
+      - app-core
+    restart: unless-stopped
+
+# Networks
+# networks:
+#   hpc-link-net:
+#     driver: bridge
+#     driver_opts:
+#       com.docker.network.driver.mtu: 1000

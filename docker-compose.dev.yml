@@ -1,0 +1,54 @@
+services:
+  # Optimized overrides for MacBook M1 / Local Dev
+
+  fast-renderer:
+    deploy:
+      resources:
+        limits:
+          cpus: '6.0'  # Unlock most cores for rendering
+          memory: 4G   # Increase memory limit
+        reservations:
+          memory: 1G
+    environment:
+      # Disable software rendering enforcement to try and use native GL/Metal if possible (though experimental in Docker)
+      # But definitely remove the forcing of llvmpipe if the base image allows something better.
+      # Actually, on Linux/Docker ARM64, we often still rely on software rendering (llvmpipe),
+      # but it's FAST native software rendering (NEON optimized) vs Emulated x86 software rendering.
+      # We keep standard envs but just unlocking CPU is the big win.
+      - OMP_NUM_THREADS=6
+    build:
+      context: ./external_code/fast_renderer
+      dockerfile: Dockerfile
+      # Detect host architecture automatically
+
+  any-to-usdz:
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 4G
+    build:
+      context: ./external_code/any_to_usdz
+      dockerfile: Dockerfile
+
+  backend:
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1G
+    environment:
+      - FLASK_ENV=development
+      - FLASK_DEBUG=1
+    volumes:
+      # Mount source for hot reloading
+      - .:/app
+
+  worker:
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1G
+    volumes:
+      - .:/app

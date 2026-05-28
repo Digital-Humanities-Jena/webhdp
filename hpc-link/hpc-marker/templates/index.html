@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>HPC-Marker</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="page">
+      <header class="hero">
+        <h1>HPC-Marker</h1>
+        <p>
+          Separate containerized Marker app for document conversion through HPC-Link.
+          Allocate a Marker session, upload a document, convert it, and download artifacts.
+        </p>
+        <p class="meta">HPC-Link target: <code>{{ hpc_link_base_url }}</code></p>
+      </header>
+
+      <section class="card auth-card">
+        <h2>Authentication</h2>
+        <div class="field">
+          <label for="access-token">Bearer token</label>
+          <input id="access-token" type="password" autocomplete="off" placeholder="eyJhbGciOi..." />
+        </div>
+        <div class="actions">
+          <button id="save-token-btn" class="secondary">Save Token</button>
+          <button id="clear-token-btn" class="secondary">Clear Token</button>
+        </div>
+        <div id="auth-status" class="auth-status"></div>
+      </section>
+
+      <section class="grid">
+        <article class="card">
+          <h2>Session</h2>
+          <div class="row">
+            <div class="field">
+              <label for="partition">Partition</label>
+              <input id="partition" value="partition-a" />
+            </div>
+            <div class="field">
+              <label for="gpu-count">GPU count</label>
+              <input id="gpu-count" type="number" min="1" max="4" value="1" />
+            </div>
+          </div>
+          <div class="row">
+            <div class="field">
+              <label for="duration">Duration (min)</label>
+              <input id="duration" type="number" min="5" max="240" value="30" />
+            </div>
+            <div class="field">
+              <label for="torch-device">Torch device</label>
+              <select id="torch-device">
+                <option value="auto" selected>auto</option>
+                <option value="cuda">cuda</option>
+                <option value="cpu">cpu</option>
+                <option value="mps">mps</option>
+              </select>
+            </div>
+          </div>
+          <div class="actions">
+            <button id="allocate-btn">Allocate</button>
+            <button id="release-btn" class="secondary" disabled>Release</button>
+          </div>
+          <div class="status">
+            <div><strong>Session:</strong> <span id="session-id">-</span></div>
+            <div><strong>Job:</strong> <span id="job-id">-</span></div>
+            <div><strong>Scheduler:</strong> <span id="scheduler-state">idle</span></div>
+            <div><strong>Remaining:</strong> <span id="remaining">-</span></div>
+          </div>
+        </article>
+
+        <article class="card">
+          <h2>Conversion</h2>
+          <div class="field">
+            <label for="document-file">Source document</label>
+            <input id="document-file" type="file" />
+          </div>
+          <div class="actions">
+            <button id="upload-btn" class="secondary" disabled>Upload</button>
+          </div>
+
+          <div class="row">
+            <div class="field">
+              <label for="input-filename">Input filename</label>
+              <input id="input-filename" placeholder="sample.pdf" />
+            </div>
+            <div class="field">
+              <label for="output-format">Output format</label>
+              <select id="output-format">
+                <option value="markdown" selected>markdown</option>
+                <option value="json">json</option>
+                <option value="html">html</option>
+                <option value="chunks">chunks</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="row">
+            <div class="field">
+              <label for="page-range">Page range (optional)</label>
+              <input id="page-range" placeholder="0,5-10" />
+            </div>
+            <div class="field checkbox-group">
+              <label><input id="force-ocr" type="checkbox" /> force_ocr</label>
+              <label><input id="use-llm" type="checkbox" /> use_llm</label>
+            </div>
+          </div>
+
+          <div class="actions">
+            <button id="convert-btn" disabled>Convert</button>
+            <button id="refresh-artifacts-btn" class="secondary" disabled>Refresh Artifacts</button>
+          </div>
+
+          <h3>Artifacts</h3>
+          <div id="artifact-list" class="list-box">No artifacts yet.</div>
+        </article>
+      </section>
+
+      <section class="card log-card">
+        <div class="log-header">
+          <h2>Logs</h2>
+          <button id="clear-log" class="secondary">Clear</button>
+        </div>
+        <div id="log-window" class="log-window"></div>
+
+        <div class="log-header runtime-header">
+          <h2>HPC Runtime Log Stream (SLURM/Marker)</h2>
+          <button id="clear-runtime-log" class="secondary">Clear</button>
+        </div>
+        <div id="runtime-log-window" class="runtime-log-window"></div>
+      </section>
+    </main>
+
+    <script src="/static/app.js" defer></script>
+  </body>
+</html>

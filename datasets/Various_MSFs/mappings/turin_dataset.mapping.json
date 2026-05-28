@@ -1,0 +1,403 @@
+{
+  "zenodo": {
+    "3d": {
+      "zenodo:title": {
+        "source": "msf",
+        "field": "Title",
+        "value": ""
+      },
+      "zenodo:description": {
+        "source": "msf",
+        "field": "Description",
+        "value": ""
+      },
+      "zenodo:upload_type": {
+        "source": "options",
+        "field": "",
+        "value": "dataset"
+      },
+      "zenodo:publication_date": {
+        "source": "msf",
+        "field": "dcterms:created",
+        "value": ""
+      },
+      "zenodo:creators": {
+        "source": "msf",
+        "field": "Creator",
+        "value": ""
+      },
+      "zenodo:access_right": {
+        "source": "options",
+        "field": "",
+        "value": "open"
+      },
+      "zenodo:license": {
+        "source": "static",
+        "field": "",
+        "value": "cc-by-4.0"
+      },
+      "zenodo:communities": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "zenodo:keywords": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "zenodo:notes": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "zenodo:version": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "zenodo:language": {
+        "source": "static",
+        "field": "",
+        "value": "ita"
+      }
+    }
+  },
+  "edm": {
+    "3d": {
+      "dc:title": {
+        "source": "msf",
+        "field": "Title",
+        "value": ""
+      },
+      "dc:description": {
+        "source": "msf",
+        "field": "Description",
+        "value": ""
+      },
+      "dc:creator": {
+        "source": "msf",
+        "field": "Creator",
+        "value": ""
+      },
+      "dc:identifier": {
+        "source": "msf",
+        "field": "Identifier",
+        "value": ""
+      },
+      "dcterms:created": {
+        "source": "msf",
+        "field": "dcterms:created",
+        "value": ""
+      },
+      "dc:type": {
+        "source": "msf",
+        "field": "dc:type",
+        "value": ""
+      },
+      "edm:type": {
+        "source": "static",
+        "field": "",
+        "value": "3D"
+      },
+      "edm:country": {
+        "source": "options",
+        "field": "",
+        "value": "Italy"
+      },
+      "edm:language": {
+        "source": "options",
+        "field": "",
+        "value": "mul"
+      },
+      "dcterms:medium": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "dcterms:temporal": {
+        "source": "msf",
+        "field": "dcterms:temporal",
+        "value": ""
+      },
+      "schema:digitalSourceType": {
+        "source": "msf",
+        "field": "schema:digitalSourceType",
+        "value": ""
+      },
+      "edm:intendedUsage": {
+        "source": "msf",
+        "field": "edm:intendedUsage",
+        "value": ""
+      },
+      "dcterms:extent": {
+        "source": "msf",
+        "field": "dcterms:extent (MB)",
+        "value": ""
+      },
+      "edm:vertexCount": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "edm:polygonCount": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "lod:thumbnailMode": {
+        "source": "options",
+        "field": "",
+        "value": "auto"
+      },
+      "lod:thumbnailPattern": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "lod:thumbnailFiles": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      }
+    }
+  },
+  "iiif": {
+    "3d": {
+      "label": {
+        "source": "msf",
+        "field": "Title",
+        "value": ""
+      },
+      "summary": {
+        "source": "msf",
+        "field": "Description",
+        "value": ""
+      },
+      "iiif:manifestId": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "iiif:sceneId": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "iiif:sceneLabel": {
+        "source": "static",
+        "field": "",
+        "value": "Default Scene"
+      },
+      "iiif:annotationPageId": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "iiif:annotationId": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "iiif:modelId": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "iiif:modelFormat": {
+        "source": "options",
+        "field": "",
+        "value": "model/gltf-binary"
+      },
+      "iiif:modelLabel": {
+        "source": "msf",
+        "field": "Title",
+        "value": ""
+      },
+      "iiif:translateX": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "iiif:translateY": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "iiif:translateZ": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "iiif:rotateX": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "iiif:rotateY": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "iiif:rotateZ": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "iiif:scaleX": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "iiif:scaleY": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "iiif:scaleZ": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "iiif:pointX": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "iiif:pointY": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "iiif:pointZ": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "lod:thumbnailMode": {
+        "source": "options",
+        "field": "",
+        "value": "auto"
+      },
+      "lod:thumbnailPattern": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "lod:thumbnailFiles": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "rights": {
+        "source": "zenodo",
+        "field": "metadata.license",
+        "value": ""
+      },
+      "provider": {
+        "source": "static",
+        "field": "",
+        "value": "Politecnico di Torino"
+      }
+    }
+  },
+  "mets": {
+    "3d": {
+      "dc:title": {
+        "source": "msf",
+        "field": "Title",
+        "value": ""
+      },
+      "dc:description": {
+        "source": "msf",
+        "field": "Description",
+        "value": ""
+      },
+      "dc:creator": {
+        "source": "msf",
+        "field": "Creator",
+        "value": ""
+      },
+      "dc:identifier": {
+        "source": "msf",
+        "field": "Identifier",
+        "value": ""
+      },
+      "dcterms:created": {
+        "source": "msf",
+        "field": "dcterms:created",
+        "value": ""
+      },
+      "dc:type": {
+        "source": "msf",
+        "field": "dc:type",
+        "value": ""
+      },
+      "edm:type": {
+        "source": "static",
+        "field": "",
+        "value": "3D"
+      },
+      "edm:country": {
+        "source": "options",
+        "field": "",
+        "value": "Italy"
+      },
+      "edm:language": {
+        "source": "options",
+        "field": "",
+        "value": "mul"
+      },
+      "dcterms:medium": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "dcterms:temporal": {
+        "source": "msf",
+        "field": "dcterms:temporal",
+        "value": ""
+      },
+      "schema:digitalSourceType": {
+        "source": "msf",
+        "field": "schema:digitalSourceType",
+        "value": ""
+      },
+      "edm:intendedUsage": {
+        "source": "msf",
+        "field": "edm:intendedUsage",
+        "value": ""
+      },
+      "dcterms:extent": {
+        "source": "msf",
+        "field": "dcterms:extent (MB)",
+        "value": ""
+      },
+      "edm:vertexCount": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "edm:polygonCount": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "lod:thumbnailMode": {
+        "source": "options",
+        "field": "",
+        "value": "auto"
+      },
+      "lod:thumbnailPattern": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      },
+      "lod:thumbnailFiles": {
+        "source": "skip",
+        "field": "",
+        "value": ""
+      }
+    }
+  }
+}

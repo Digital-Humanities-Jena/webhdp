@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">WebHDP app icon</title>
+  <desc id="desc">A 3D cube, upload arrow, and processing ring for WebHDP.</desc>
+  <rect width="512" height="512" rx="96" fill="#f8fafc"/>
+  <circle cx="256" cy="256" r="218" fill="#e0f2fe"/>
+  <path d="M256 42 A214 214 0 0 0 42 256" fill="none" stroke="#64748b" stroke-width="20" stroke-linecap="round" stroke-dasharray="40 20"/>
+  <path d="M470 256 A214 214 0 0 0 256 42" fill="none" stroke="#1e3a8a" stroke-width="20" stroke-linecap="round"/>
+  <path d="M256 140 L380 200 L380 340 L256 400 L132 340 L132 200 Z" fill="none" stroke="#1e3a8a" stroke-width="16" stroke-linejoin="round"/>
+  <path d="M132 200 L256 260 L380 200" fill="none" stroke="#1e3a8a" stroke-width="16" stroke-linejoin="round"/>
+  <path d="M256 260 L256 400" fill="none" stroke="#1e3a8a" stroke-width="16" stroke-linejoin="round"/>
+  <path d="M256 320 L256 100" stroke="#334155" stroke-width="24" stroke-linecap="round"/>
+  <path d="M196 160 L256 100 L316 160" fill="none" stroke="#334155" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

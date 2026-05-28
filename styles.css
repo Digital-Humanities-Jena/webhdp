@@ -1,0 +1,307 @@
+/* styles.css */
+/* This file contains all the styling for index.html */
+
+:root {
+    --color-bg: #f8f9fa;
+    --color-text: #212529;
+    --color-primary: #007bff;
+    --color-white: #ffffff;
+    --color-border: #dee2e6;
+    --color-error: #dc3545;
+    --color-success: #28a745;
+    --shadow-sm: 0 1px 3px rgba(0,0,0,0.05);
+    --shadow-md: 0 4px 10px rgba(0,0,0,0.05);
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    margin: 0;
+    padding: 0;
+    background-color: var(--color-bg);
+    color: var(--color-text);
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+}
+
+header {
+    background-color: var(--color-white);
+    border-bottom: 1px solid var(--color-border);
+    padding: 1rem 2rem;
+    font-size: 1.25rem;
+    font-weight: 600;
+    box-shadow: var(--shadow-sm);
+    z-index: 10;
+}
+
+main {
+    flex-grow: 1;
+    padding: 2rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center; /* Center the content */
+}
+
+.content-wrapper {
+    width: 100%;
+    max-width: 1000px; /* Set a max width for large screens */
+}
+
+/* Action bar for buttons */
+.action-bar {
+    background-color: var(--color-white);
+    padding: 1.5rem 2rem;
+    border-radius: 0.5rem;
+    box-shadow: var(--shadow-md);
+}
+
+.action-bar h2 {
+    font-weight: 500;
+    margin-top: 0;
+    margin-bottom: 1rem;
+}
+
+.button-container {
+    display: flex;
+    justify-content: flex-start;
+}
+
+button {
+    background-color: var(--color-primary);
+    color: var(--color-white);
+    border: none;
+    padding: 0.75rem 1.5rem;
+    font-size: 1rem;
+    font-weight: 600;
+    border-radius: 0.25rem;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+    margin-right: 1rem; /* Use right margin for spacing */
+}
+
+button:hover {
+    background-color: #0056b3;
+}
+
+button:disabled {
+    background-color: #c0c0c0;
+    cursor: not-allowed;
+}
+
+.btn-secondary {
+    background-color: #6c757d;
+}
+
+.btn-secondary:hover {
+    background-color: #5a6268;
+}
+
+/* Results container styles */
+.results-container {
+    margin-top: 2rem;
+}
+
+.file-list-header {
+    display: none; /* Hidden by default */
+    padding-bottom: 1rem;
+    border-bottom: 2px solid var(--color-border);
+}
+
+#file-list-container {
+    min-height: 300px;
+    overflow-y: auto;
+    background-color: var(--color-white);
+    border: 1px solid var(--color-border);
+    border-radius: 0.25rem;
+    box-shadow: var(--shadow-md);
+}
+
+/* Placeholder for empty file list */
+#file-list-placeholder {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    min-height: 300px;
+    padding: 2rem;
+    color: #6c757d;
+}
+
+#file-list-placeholder svg {
+    width: 50px;
+    height: 50px;
+    margin-bottom: 1rem;
+    opacity: 0.5;
+}
+
+/* File row styles */
+.file-row {
+    display: flex;
+    align-items: center;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--color-border);
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+}
+
+.file-row:hover {
+    background-color: var(--color-bg);
+}
+
+.file-row:last-child {
+    border-bottom: none;
+}
+
+.file-row-icon {
+    margin-right: 0.75rem;
+}
+
+.file-row-name {
+    font-weight: 500;
+    flex-grow: 1;
+}
+
+.file-row-status {
+    padding: 0.25rem 0.5rem;
+    border-radius: 0.25rem;
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.status-Valid { background-color: #eaf7f0; color: #2d6a4f; }
+.status-Problems { background-color: #fceceb; color: var(--color-error); }
+.status-Missing { background-color: #fffbe6; color: #8a6d0a; }
+
+/* Modal styles */
+.modal-backdrop {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background-color: rgba(0, 0, 0, 0.5);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.modal-content {
+    background-color: var(--color-white);
+    padding: 2rem;
+    border-radius: 0.5rem;
+    min-width: 400px;
+    max-width: 600px;
+    box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+}
+
+#progress-modal .modal-content {
+    text-align: center;
+}
+
+#modal-message {
+    font-size: 1.1rem;
+    font-weight: 500;
+    margin-top: 0;
+    margin-bottom: 0.5rem;
+}
+
+#modal-sub-message {
+    font-size: 0.9rem;
+    color: #6c757d;
+    margin-bottom: 1.5rem;
+}
+
+.spinner {
+    border: 4px solid #f3f3f3;
+    border-top: 4px solid var(--color-primary);
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    animation: spin 1s linear infinite;
+    margin: 0 auto 1.5rem auto;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.modal-icon-error { color: var(--color-error); font-size: 3rem; margin-bottom: 1rem; }
+.modal-icon-success { color: var(--color-success); font-size: 3rem; margin-bottom: 1rem; }
+
+/* Path Modal Specifics */
+#path-modal-title {
+    font-size: 1.25rem;
+    font-weight: 500;
+    margin-top: 0;
+    margin-bottom: 1.5rem;
+}
+
+#path-modal-desc {
+    font-size: 0.9rem;
+    color: #6c757d;
+    margin-top: -1rem;
+    margin-bottom: 1rem;
+    text-align: left;
+}
+
+#path-modal-input {
+    width: 100%;
+    padding: 0.75rem;
+    font-size: 1rem;
+    border: 1px solid var(--color-border);
+    border-radius: 0.25rem;
+    box-sizing: border-box;
+    margin-bottom: 1.5rem;
+}
+
+#path-modal-buttons {
+    display: flex;
+    justify-content: flex-end;
+}
+
+/* Validation Modal Specifics */
+#validation-modal-title {
+    font-size: 1.25rem;
+    font-weight: 500;
+    margin-top: 0;
+    margin-bottom: 0.5rem;
+    word-break: break-all;
+}
+
+#validation-modal-status-badge {
+    display: inline-block;
+    padding: 0.35rem 0.75rem;
+    border-radius: 0.25rem;
+    font-size: 1rem;
+    font-weight: 600;
+    margin-bottom: 1.5rem;
+}
+
+#validation-modal-children {
+    text-align: left;
+    padding-left: 0;
+    list-style: none;
+    background-color: var(--color-bg);
+    border: 1px solid var(--color-border);
+    border-radius: 0.25rem;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+#validation-modal-children li {
+    padding: 0.5rem 1rem;
+    border-bottom: 1px solid var(--color-border);
+}
+
+#validation-modal-children li:last-child {
+    border-bottom: none;
+}
+
+#validation-modal-children-title {
+    text-align: left;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+}

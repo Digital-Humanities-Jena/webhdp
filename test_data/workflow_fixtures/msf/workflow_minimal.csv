@@ -1,0 +1,11 @@
+Identifier,Filename,Title,Description,Creator,Creator Affiliation,dcterms:created,Related to,dc:type,dcterms:extent (MB),Reference System,Units
+1,temple_column.obj,Fixture Temple Column,Root stem OBJ bundle fixture.,WebHDP Fixtures,WebHDP Test Lab,2026-01-01,not applicable,virtual models,1,not applicable,meters
+2,ceramic_bowl.fbx,Fixture Ceramic Bowl,Root stem FBX fixture.,WebHDP Fixtures,WebHDP Test Lab,2026-01-01,not applicable,virtual models,1,not applicable,meters
+3,bronze_helmet.glb,Fixture Bronze Helmet,Root stem GLB fixture.,WebHDP Fixtures,WebHDP Test Lab,2026-01-01,not applicable,virtual models,4,not applicable,meters
+4,site042_structure_detail.obj,Fixture Site 042 Detail,Core identifier OBJ fixture.,WebHDP Fixtures,WebHDP Test Lab,2026-01-01,Identifier 5,virtual models,1,not applicable,meters
+5,site042_structure_main.fbx,Fixture Site 042 Main,Core identifier FBX fixture.,WebHDP Fixtures,WebHDP Test Lab,2026-01-01,Identifier 4,virtual models,1,not applicable,meters
+6,site093_artifact_complete.glb,Fixture Site 093 Complete,Core identifier GLB fixture.,WebHDP Fixtures,WebHDP Test Lab,2026-01-01,Identifier 7,virtual models,4,not applicable,meters
+7,site093_artifact_fragment.obj,Fixture Site 093 Fragment,Core identifier OBJ fixture.,WebHDP Fixtures,WebHDP Test Lab,2026-01-01,Identifier 6,virtual models,1,not applicable,meters
+8,test_model.obj,Fixture Archived OBJ,OBJ texture archive fixture.,WebHDP Fixtures,WebHDP Test Lab,2026-01-01,not applicable,virtual models,1,not applicable,meters
+9,ancient_sword.gltf,Fixture Ancient Sword,GLTF external dependency fixture.,WebHDP Fixtures,WebHDP Test Lab,2026-01-01,not applicable,virtual models,1,not applicable,meters
+10,temple_reconstruction.fbx,Fixture Temple Reconstruction,FBX material folder fixture.,WebHDP Fixtures,WebHDP Test Lab,2026-01-01,not applicable,virtual models,1,not applicable,meters
