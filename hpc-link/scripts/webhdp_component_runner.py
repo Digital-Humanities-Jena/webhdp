@@ -17,6 +17,7 @@ import shutil
 import subprocess
 import sys
 import time
+import tempfile
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -123,9 +124,10 @@ def _component_output_dir(component_key: str, request: dict[str, Any]) -> Path:
     ).resolve()
     step_id = str(request.get("step_id") or component_key).strip() or component_key
     safe_step = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in step_id)
-    target = remote_output_dir / safe_step
-    target.mkdir(parents=True, exist_ok=True)
-    return target
+    remote_output_dir.mkdir(parents=True, exist_ok=True)
+    # Record-scoped derivatives often share a basename. Keep every invocation's
+    # remote artifacts stable, including retries and earlier download references.
+    return Path(tempfile.mkdtemp(prefix=f"{safe_step}-", dir=remote_output_dir))
 
 
 def _find_by_name(root: Path, name: str) -> Path | None:
@@ -185,7 +187,7 @@ def _collect_render_inputs(request: dict[str, Any], remote_input_dir: Path) -> t
     for item in _listify(inputs.get("input_files") or inputs.get("input-files")):
         if str(item or "").strip():
             original_values.append(str(item).strip())
-    for record in batch_records:
+    for record in ([] if original_values else batch_records):
         if isinstance(record, dict) and str(record.get("file_path") or "").strip():
             value = str(record["file_path"]).strip()
             if value not in original_values:
@@ -289,6 +291,10 @@ def _render_component(request: dict[str, Any]) -> dict[str, Any]:
         artifacts.extend(result_payload["artifacts"])
 
     success = bool(record_results) and all(item.get("success") for item in record_results.values())
+    if request.get("scope") == "record" and len(record_results) == 1:
+        return {**next(iter(record_results.values())),
+                "logs": {"stdout": "\n".join(render_result.get("logs", [])), "stderr": ""},
+                "command": ["hpc_link", "fast_renderer"]}
     return {
         "success": success,
         "status": "completed" if success else "failed",
@@ -459,12 +465,39 @@ def _generic_singularity_component(component_key: str, request: dict[str, Any]) 
         raise RuntimeError("Singularity/Apptainer executable not found")
 
     session_root = request_path.parent
+    # Translate exact staged paths instead of guessing by basename.
+    staged_paths = {}
+    for staged in request.get("staged_files") or []:
+        if not isinstance(staged, dict) or not staged.get("local_path"):
+            continue
+        remote = Path(str(staged.get("remote_path") or "")).resolve()
+        if not remote.is_relative_to(remote_input_dir):
+            raise ValueError("Staged input escapes the input directory")
+        staged_paths[str(staged["local_path"])] = str(Path('/inputs') / remote.relative_to(remote_input_dir))
+
+    def container_inputs(value):
+        if isinstance(value, dict):
+            return {key: container_inputs(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [container_inputs(item) for item in value]
+        return staged_paths.get(value, value) if isinstance(value, str) else value
+
+    container_request_path = request_path.with_name(request_path.stem + '.container.json')
+    container_request_path.write_text(json.dumps({**request, 'inputs': container_inputs(request.get('inputs') or {})}))
+    # A retry must not consume a stale response after a process crash.
+    response_path.unlink(missing_ok=True)
     binds = [
         f"{session_root}:{session_root}",
         f"{remote_input_dir}:/inputs",
         f"{remote_output_dir}:/outputs",
     ]
+    # Singularity's private /tmp can be a small tmpfs. Mesh intermediates need
+    # node-local disk space, isolated per invocation and cleaned after execution.
+    scratch = tempfile.mkdtemp(prefix="webhdp-component-", dir="/tmp")
+    binds.append(f"{scratch}:/tmp")
     cmd = [singularity, "exec", "--cleanenv", "--containall", "--no-home", "--pwd", "/outputs"]
+    if int((profile.get('resources') or {}).get('gpu_count') or 0) > 0:
+        cmd.append('--nv')
     for bind in binds:
         cmd.extend(["--bind", bind])
     cmd.append(image)
@@ -472,12 +505,12 @@ def _generic_singularity_component(component_key: str, request: dict[str, Any]) 
     env = os.environ.copy()
     env.update(
         {
-            "SINGULARITYENV_WEBHDP_COMPONENT_REQUEST": str(request_path),
+            "SINGULARITYENV_WEBHDP_COMPONENT_REQUEST": str(container_request_path),
             "SINGULARITYENV_WEBHDP_COMPONENT_RESPONSE": str(response_path),
             "SINGULARITYENV_WEBHDP_INPUT_DIR": "/inputs",
             "SINGULARITYENV_WEBHDP_OUTPUT_DIR": "/outputs",
             "SINGULARITYENV_WEBHDP_COMPONENT_KEY": component_key,
-            "APPTAINERENV_WEBHDP_COMPONENT_REQUEST": str(request_path),
+            "APPTAINERENV_WEBHDP_COMPONENT_REQUEST": str(container_request_path),
             "APPTAINERENV_WEBHDP_COMPONENT_RESPONSE": str(response_path),
             "APPTAINERENV_WEBHDP_INPUT_DIR": "/inputs",
             "APPTAINERENV_WEBHDP_OUTPUT_DIR": "/outputs",
@@ -485,14 +518,17 @@ def _generic_singularity_component(component_key: str, request: dict[str, Any]) 
         }
     )
     started = time.time()
-    proc = subprocess.run(
-        cmd,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=int(request.get("timeout_seconds") or 7200),
-        env=env,
-    )
+    try:
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=int(request.get("timeout_seconds") or 7200),
+            env=env,
+        )
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
     parsed = None
     if response_path.exists() and response_path.stat().st_size > 0:
         try:
@@ -505,7 +541,8 @@ def _generic_singularity_component(component_key: str, request: dict[str, Any]) 
             parsed = json.loads(proc.stdout.strip())
         except json.JSONDecodeError:
             parsed = None
-    result = parsed if isinstance(parsed, dict) else {}
+    result = parsed if isinstance(parsed, dict) and isinstance(parsed.get('success'), bool) else {
+        'success': False, 'status': 'failed', 'error': 'Component did not return a valid completion response.'}
     result = _rewrite_container_paths(result, remote_input_dir=remote_input_dir, remote_output_dir=remote_output_dir)
     result.setdefault("success", proc.returncode == 0)
     result.setdefault("status", "completed" if result.get("success") else "failed")

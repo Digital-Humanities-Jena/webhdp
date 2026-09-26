@@ -271,6 +271,9 @@
                   <div class="text-right text-xs text-slate-500">
                     <p>{{ recordFileStatusLabel(file.upload_status || file.status || 'pending') }}</p>
                     <p v-if="file.pipeline_source || file.step_source">{{ file.pipeline_source || 'unknown' }} / {{ file.step_source || 'unknown' }}</p>
+                    <button v-if="file.absolute_path && ['mesh_optimizer', 'fast_renderer'].includes(file.pipeline_source)"
+                      type="button" :disabled="!!downloadingFile" class="mt-2 text-indigo-700 underline disabled:opacity-50"
+                      @click="downloadGeneratedFile(file)">{{ downloadingFile === file.absolute_path ? 'Downloading…' : 'Download file' }}</button>
                   </div>
                 </div>
               </li>
@@ -401,6 +404,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import api from '@/services/api'
 import submissionService from '@/services/submission.service.js'
+import pipelineService from '@/services/pipeline.service.js'
 import LoadingSpinner from '@/components/ui/LoadingSpinner.vue'
 import Alert from '@/components/ui/Alert.vue'
 import { useToast } from '@/composables/useToast'
@@ -418,6 +422,24 @@ const previewLoaded = ref(false)
 const lodReport = ref(null)
 const lodError = ref('')
 const lodBusy = ref(false)
+const downloadingFile = ref('')
+async function downloadGeneratedFile(file) {
+  if (downloadingFile.value) return
+  downloadingFile.value = file.absolute_path
+  try {
+    const blob = await pipelineService.getPlaygroundSessionFile(Number(route.params.sessionId), file.absolute_path)
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = file.filename
+    link.click()
+    URL.revokeObjectURL(url)
+  } catch {
+    toast.error('The generated file could not be downloaded. Refresh this record and try again.')
+  } finally {
+    downloadingFile.value = ''
+  }
+}
 async function loadLod(retry = false, refreshDetail = true) {
   if (lodBusy.value) return
   const url = `/sessions/${Number(route.params.sessionId)}/records/${Number(route.params.recordId)}/lod`

@@ -768,9 +768,17 @@ class HpcAllocationService:
     def execute_component(self, allocation: HpcAllocation, request_payload: Dict[str, Any]) -> Dict[str, Any]:
         if not allocation.remote_session_id:
             raise ValidationError("Allocation has no remote HPC-Link session")
+        # HPC-Link resolves executable settings from its installed registry.
+        # Send identity and the expected digest, never a client-supplied command.
+        profile = request_payload.get("profile") or {}
+        payload = {
+            **request_payload,
+            "component_version": request_payload.get("component_version") or profile.get("version"),
+            "profile": {key: profile[key] for key in ("version", "sif_sha256") if profile.get(key)},
+        }
         return self.client().post(
             f"/api/apps/webhdp/sessions/{allocation.remote_session_id}/components/run",
-            request_payload,
+            payload,
             timeout=float(request_payload.get("timeout_seconds") or 7200),
         )
 

@@ -643,7 +643,8 @@ class HpcComponentInstallerService:
                 response = current_app.hpc_allocation_service.client().post(
                     "/api/apps/webhdp/components/validate-install",
                     hpc_payload,
-                    timeout=30,
+                    # Large GPU images must finish their remote checksum check.
+                    timeout=930,
                 )
                 hpc_checks = response if isinstance(response, dict) else {"checked": True, "raw": response}
             except Exception as exc:

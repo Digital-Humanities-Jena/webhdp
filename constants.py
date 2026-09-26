@@ -553,6 +553,28 @@ THREE_D_POINT_CLOUD_READINESS_PIPELINE_DEFINITION = {
     ],
 }
 
+MESH_OPTIMIZATION_PIPELINE_ID = "mesh_optimization"
+MESH_OPTIMIZATION_PIPELINE_DEFINITION = {
+    "identifier": MESH_OPTIMIZATION_PIPELINE_ID,
+    "name": "Mesh Optimization & Preview",
+    "description": "Optimize static GLB models on an HPC GPU, then create previews of the optimized results. Originals are preserved. No Zenodo upload is performed.",
+    "status": "active", "modality": "3D Model", "processingMode": "root", "version": "1.0.0",
+    "tags": ["3d", "hpc", "optimization", "preview"],
+    "steps": [
+        {"id": "mesh_optimizer", "component_ref": "mesh_optimizer", "name": "Optimize model",
+         "description": "Create a textured GLB derivative while keeping the original upload.",
+         "execution_profile_ref": "hpc_singularity", "scope": "record", "enabled": True,
+         "input_bindings": [{"kind": "input", "target": "input_file", "type": "pipeline_source_file"}],
+         "parameters": {"quality": "MEDIUM", "texture_resolution": 1024}},
+        {"id": "fast_renderer", "component_ref": "fast_renderer", "name": "Preview optimized model",
+         "description": "Render the optimized GLB using the active HPC allocation.",
+         "execution_profile_ref": "builtin_default", "scope": "record", "enabled": True,
+         "input_bindings": [{"kind": "input", "target": "input_files", "type": "artifact_file",
+                             "source_step": "mesh_optimizer", "source_output": "optimized_model"}],
+         "parameters": {"preset": "medium", "angle-iteration": 5}},
+    ],
+}
+
 OPTIONAL_3D_PIPELINE_DEFINITIONS = {
     THREE_D_PREPUBLICATION_ANALYSIS_PIPELINE_ID: THREE_D_PREPUBLICATION_ANALYSIS_PIPELINE_DEFINITION,
     THREE_D_PUBLICATION_DERIVATIVES_PIPELINE_ID: THREE_D_PUBLICATION_DERIVATIVES_PIPELINE_DEFINITION,

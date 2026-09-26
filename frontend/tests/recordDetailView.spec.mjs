@@ -14,6 +14,7 @@ const mocked = vi.hoisted(() => ({
     getSessionRecordDetail: vi.fn(),
     createSessionRecordVersion: vi.fn(),
   },
+  pipelineService: { getPlaygroundSessionFile: vi.fn() },
   toast: {
     success: vi.fn(),
     error: vi.fn(),
@@ -31,6 +32,7 @@ vi.mock('vue-router', async () => {
 vi.mock('@/services/submission.service.js', () => ({
   default: mocked.submissionService,
 }))
+vi.mock('@/services/pipeline.service.js', () => ({ default: mocked.pipelineService }))
 
 vi.mock('@/composables/useToast', () => ({
   useToast: () => mocked.toast,
@@ -49,6 +51,23 @@ describe('RecordDetailView', () => {
     global.URL.createObjectURL = vi.fn(() => 'blob:record-detail')
     global.URL.revokeObjectURL = vi.fn()
     global.confirm = vi.fn(() => true)
+  })
+
+  it('downloads generated models through the authenticated session endpoint and reports failures', async () => {
+    mocked.submissionService.getSessionRecordDetail.mockResolvedValue({ data: { record: {
+      local_record_id: 9, files: [{ file_id: 1, filename: 'model_optimized.glb', absolute_path: '/session/outputs/model_optimized.glb', pipeline_source: 'mesh_optimizer' }],
+    } } })
+    mocked.pipelineService.getPlaygroundSessionFile.mockRejectedValue(new Error('Missing file'))
+    const wrapper = mount(RecordDetailView, { global: { stubs: { RouterLink: RouterLinkStub, PlaygroundModelViewer: true } } })
+    await flushPromises()
+    const button = wrapper.findAll('button').find(item => item.text() === 'Download file')
+    expect(button).toBeTruthy()
+    await button.trigger('click')
+    await flushPromises()
+    expect(mocked.pipelineService.getPlaygroundSessionFile).toHaveBeenCalledWith(42, '/session/outputs/model_optimized.glb')
+    expect(mocked.toast.error).toHaveBeenCalledWith(expect.stringContaining('could not be downloaded'))
+    expect(button.attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
   })
 
   it('renders record detail and creates a new version draft', async () => {

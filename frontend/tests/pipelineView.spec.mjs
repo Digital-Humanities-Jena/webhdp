@@ -176,4 +176,15 @@ describe('PipelineView', () => {
     expect(mocked.router.push).toHaveBeenCalledWith('/workflow/submit')
   })
 
+  it('blocks unsupported files before starting an optimization workflow', async () => {
+    mocked.workflowStore.sessionId = 42
+    mocked.workflowStore.selectedFiles = [{ filename: 'model.obj' }]
+    mocked.pipelineService.listPipelines.mockResolvedValue({ data: { pipelines: [{ identifier: 'mesh_optimization', name: 'Mesh Optimization & Preview' }] } })
+    const wrapper = mount(PipelineView, { global: { stubs: { StepIndicator: true, LoadingSpinner: true } } })
+    await flushPromises()
+    expect(wrapper.get('[data-testid="pipeline-continue"]').element.disabled).toBe(true)
+    expect(wrapper.get('[role="alert"]').text()).toContain('requires static GLB files')
+    expect(mocked.router.push).not.toHaveBeenCalled()
+  })
+
 })

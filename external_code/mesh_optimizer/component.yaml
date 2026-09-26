@@ -1,0 +1,71 @@
+metadata:
+  name: mesh_optimizer
+  label: Mesh Optimizer
+  description: Optimize static GLB models on an HPC GPU, preserving originals and producing a textured GLB derivative.
+  tags: [3d, optimization, hpc, glb]
+  category: 3D Processing
+  version: "1.0.0"
+  status: alpha
+  component_schema: "0.1.0-alpha.1"
+sources:
+  git: https://github.com/3DOM-FBK/mesh-optimizer
+distribution:
+  tier: external_installable
+  bundled_with_webhdp: false
+  installation_scope: [hpc_sif]
+inputs:
+  - name: input_file
+    label: Static GLB model
+    description: Self-contained GLB with embedded textures. Animations and skins are not supported.
+    type: file_path
+    required: true
+outputs:
+  - {name: optimized_model, label: Optimized GLB, type: file_path}
+  - {name: optimization_report, label: Optimization report, type: file_path}
+parameter_groups:
+  - title: Optimization
+    parameters:
+      - name: quality
+        label: Geometry detail
+        type: string_dropdown
+        default: MEDIUM
+        options: [LOW, MEDIUM, HIGH]
+        description: Targets 25,000, 100,000 or 200,000 faces per material group, subject to the geometric error limit.
+      - name: texture_resolution
+        label: Texture resolution
+        type: integer
+        default: 1024
+        options: [256, 512, 1024, 2048, 4096]
+        description: Maximum texture size per baked map.
+execution:
+  timeout: 7200
+  profiles:
+    - id: hpc_singularity
+      adapter: hpc_link
+      handler: generic_singularity_component
+      runtime: singularity
+      image: ""
+      entrypoint: [python3, /opt/webhdp/mesh_optimizer/runner.py]
+      resources: {gpu_count: 1, cpus: 8, memory_mb: 32768}
+compatibility:
+  playground: {enabled: true}
+install:
+  strategies:
+    - {id: hpc_sif, runtime: singularity, profile: hpc_singularity}
+hpc:
+  install: {runtime: singularity, sif_required: true}
+ui:
+  playground:
+    fields:
+      input_file:
+        widget: model_input
+        accept_extensions: [.glb]
+        help_text: Select a static GLB. The source remains unchanged; optimization creates a separate file.
+      quality: {widget: select}
+      texture_resolution: {widget: select}
+    result:
+      artifact_views:
+        - {id: optimized-model, label: Optimized model, widget: file_download, extensions: [.glb]}
+        - {id: report, label: Optimization report, widget: file_download, extensions: [.json]}
+      show_result_json: false
+      show_logs: true

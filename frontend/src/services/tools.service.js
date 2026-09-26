@@ -22,7 +22,7 @@ const toolsService = {
   },
 
   async validateHdpComponentInstall(payload) {
-    return api.post('/tools/hdp-components/validate', payload)
+    return api.post('/tools/hdp-components/validate', payload, { timeout: 960000 })
   },
 
   async listHdpComponentCatalog(params = {}) {

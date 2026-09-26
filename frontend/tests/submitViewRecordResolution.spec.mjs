@@ -145,7 +145,7 @@ describe('SubmitView record-resolution plan', () => {
         pipeline: {
           config: {
             name: 'Render',
-            steps: [],
+            steps: [{ id: 'zenodo_draft', component_ref: 'zenodo_draft', name: 'Create draft', enabled: true }],
           },
         },
       },
@@ -444,4 +444,23 @@ describe('SubmitView record-resolution plan', () => {
     expect(mocked.pipelineService.getPipelineRun).toHaveBeenCalledTimes(2)
   })
 
+})
+
+describe('processing-only pipeline summary', () => {
+  it('hides the Zenodo destination when no Zenodo steps are enabled', async () => {
+    mocked.workflowStore.sessionId = 42
+    mocked.workflowStore.selectedPipeline = { identifier: 'mesh_optimization', name: 'Mesh Optimization & Preview' }
+    mocked.pipelineService.listPipelines.mockResolvedValue({ data: { pipelines: [mocked.workflowStore.selectedPipeline] } })
+    mocked.pipelineService.getPipeline.mockResolvedValue({ data: { pipeline: { config: {
+      name: 'Mesh Optimization & Preview', steps: [
+        { id: 'mesh_optimizer', component_ref: 'mesh_optimizer', name: 'Optimize model', enabled: true, execution_profile_ref: 'hpc_singularity' },
+        { id: 'fast_renderer', name: 'Preview optimized model', enabled: true },
+      ],
+    } } } })
+    const wrapper = mount(SubmitView, { global: { stubs: { StepIndicator: true, LoadingSpinner: true } } })
+    await flushPromises()
+    expect(wrapper.findAll('input[name="zenodo-environment"]')).toHaveLength(0)
+    expect(wrapper.text()).toContain('Generated files will be saved with your session')
+    wrapper.unmount()
+  })
 })

@@ -533,6 +533,26 @@ class NativePipelineSystemTestCase(unittest.TestCase):
             self.native_service.ensure_seeded()
             self.assertEqual(PipelineVersion.query.count(), version_count)
 
+    def test_failed_optimizer_does_not_render_original_as_fallback(self):
+        import yaml
+        from constants import MESH_OPTIMIZATION_PIPELINE_DEFINITION
+        with self.app.app_context():
+            session_dir, source_file, session_row = self._prepare_generic_pipeline_session("optimizer_failure")
+            manifest = yaml.safe_load((Path(__file__).resolve().parents[1] / "external_code/mesh_optimizer/component.yaml").read_text())
+            manifest["execution"]["profiles"][0]["sif_sha256"] = "a" * 64
+            self.native_service.import_component_from_manifest(manifest)
+            self.native_service.create_pipeline_version_from_config("mesh_optimization", MESH_OPTIMIZATION_PIPELINE_DEFINITION, activate=True)
+            self.app.hpc_allocation_service = MagicMock()
+            adapter = MagicMock()
+            adapter.execute.return_value = {"success": False, "status": "failed", "error": "Baking failed", "outputs": {}}
+            self.native_service._adapter_registry["hpc_link"] = adapter
+            context = self._build_generic_execution_context(session_dir, source_file, session_row, MESH_OPTIMIZATION_PIPELINE_DEFINITION["steps"])
+            result = self.native_service.execute_registered_submission("mesh_optimization", context)
+            self.assertFalse(result["success"])
+            self.assertEqual(adapter.execute.call_count, 1)
+            self.assertEqual([row.status for row in StepRun.query.order_by(StepRun.id)], ["failed", "failed"])
+            self.assertIn("did not produce", result["details"][0]["step_results"]["fast_renderer"]["error"])
+
     def test_publication_retry_does_not_reactivate_an_older_version(self):
         from uuid import uuid4
         from services.registry_lock import OperationConflict

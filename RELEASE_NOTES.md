@@ -2,6 +2,7 @@
 
 ## 0.1.0-alpha.2 - 2026-09-26
 
+- The installable Mesh Optimizer component adds an HPC **Mesh Optimization & Preview** workflow for static GLB models. It preserves originals, saves optimized derivatives and reports, and renders the derivatives with Fast Renderer. GPU containers use isolated disk scratch space; missing UVs and multi-material inputs are handled before baking.
 - Password login is the default. Each user can enable email two-factor authentication after confirming an enrollment code, or disable it with their current password.
 - Core pipelines generate CIDOC-CRM RDF/XML and equivalent JSON-LD alongside EDM, IIIF, and METS/MODS. Exports describe the digital dataset without inventing physical-object history.
 - Nested MSF-listed models remain separate records, including models that share a buffer. Dependency paths survive HPC staging, and source bundles preserve directory layouts and repeated texture filenames when downloaded from Zenodo.

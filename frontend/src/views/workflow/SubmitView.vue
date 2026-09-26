@@ -3,7 +3,7 @@
     <div class="max-w-4xl mx-auto px-4">
       <div class="mb-8">
         <h1 class="text-3xl font-bold text-gray-900">Submit for Processing</h1>
-        <p class="mt-2 text-gray-600">Review your files, processing tasks and Zenodo destination.</p>
+        <p class="mt-2 text-gray-600">{{ usesZenodo ? 'Review your files, processing tasks and Zenodo destination.' : 'Review your files and processing tasks. Generated files will be saved with your session.' }}</p>
       </div>
 
       <StepIndicator :batch-mode="workflowStore.isBatchMode" :current-step="7" />
@@ -139,7 +139,7 @@
                 </dl>
               </div>
 
-              <fieldset class="p-4 bg-blue-50 rounded-lg border border-blue-200" :disabled="isBatchExecutionEnvironmentLocked || submitting">
+              <fieldset v-if="usesZenodo" class="p-4 bg-blue-50 rounded-lg border border-blue-200" :disabled="isBatchExecutionEnvironmentLocked || submitting">
                 <legend class="px-1 text-sm font-semibold text-gray-900">Zenodo destination</legend>
                 <div class="grid gap-3 sm:grid-cols-2">
                   <label class="flex cursor-pointer items-start gap-2 rounded-md border border-blue-200 bg-white p-3 text-sm">
@@ -356,7 +356,7 @@
           <p class="text-gray-600 mb-8">
             {{ hasAnyWarnings
               ? 'Pipeline finished, but one or more processing steps reported warnings or incomplete output.'
-              : `Processing finished. Review the generated files and Zenodo record status ${effectiveExecutionEnvironmentIsSandbox ? '(Sandbox)' : ''}.` }}
+              : usesZenodo ? `Processing finished. Review the generated files and Zenodo record status ${effectiveExecutionEnvironmentIsSandbox ? '(Sandbox)' : ''}.` : 'Processing finished. Open a record in Session Records to download its optimized model, report and previews.' }}
           </p>
 
           <div v-if="hasConverterWarnings" class="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6 text-left">
@@ -444,7 +444,7 @@
 
               <li class="flex items-center text-green-700">
                 <svg class="h-4 w-4 mr-2" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" /></svg>
-                Files uploaded successfully
+                {{ usesZenodo ? 'Files uploaded successfully' : 'Generated files saved with this session' }}
               </li>
 
               <li :class="['flex items-center', usdzSummaryClass]">
@@ -650,6 +650,9 @@ const activeSteps = computed(() => {
   return pipelineConfig.value.steps.filter(s => s.enabled)
 })
 
+const usesZenodo = computed(() => activeSteps.value.some(step =>
+  ['zenodo_draft', 'zenodo_upload'].includes(step.component_ref || step.id)))
+
 const isRendererDisabled = computed(() => {
   const step = pipelineConfig.value?.steps?.find(s => s.id === 'fast_renderer')
   // Consider it disabled if explicitly disabled OR if the step is missing entirely (for safe fallback)
@@ -668,6 +671,10 @@ const hpcComponentKeys = computed(() => {
   const keys = []
   if (!isRendererDisabled.value) keys.push('fast_renderer')
   if (!isUsdzDisabled.value) keys.push('any_to_usdz')
+  for (const step of activeSteps.value) {
+    const key = step.component_ref || step.id
+    if ((step.execution_profile_ref === 'hpc_singularity' || key === 'mesh_optimizer') && !keys.includes(key)) keys.push(key)
+  }
   return keys
 })
 
@@ -687,6 +694,7 @@ const STAGE_LABELS = {
   loading_project: 'Loading project',
   registering_records: 'Registering records',
   processing_record: 'Processing record',
+  processing_component: 'Processing component',
   rendering_assets: 'Rendering assets',
   converting_to_usdz: 'Converting to USDZ',
   usdz_conversion_failed: 'USDZ conversion failed',
@@ -881,7 +889,7 @@ const stopProgressPolling = () => {
 }
 
 const updateCurrentStepFromProgress = (progress) => {
-  const stepId = STAGE_TO_STEP_ID[progress?.current_stage]
+  const stepId = progress?.step_id || STAGE_TO_STEP_ID[progress?.current_stage]
   if (!stepId) return
   const index = activeSteps.value.findIndex(step => step.id === stepId)
   if (index >= 0) {

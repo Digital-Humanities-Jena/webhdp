@@ -3,7 +3,7 @@
     <div class="max-w-4xl mx-auto px-4">
       <div class="mb-8">
         <h1 class="text-3xl font-bold text-gray-900">Select Pipeline</h1>
-        <p class="mt-2 text-gray-600">Choose whether to render previews or prepare metadata only.</p>
+        <p class="mt-2 text-gray-600">Choose how to process your selected files. Each pipeline lists its outputs and requirements.</p>
       </div>
 
       <StepIndicator :batch-mode="workflowStore.isBatchMode" :current-step="6" />
@@ -69,6 +69,7 @@
           </fieldset>
 
           <p v-if="saveError" role="alert" class="mt-4 text-sm text-red-700">{{ saveError }}</p>
+          <p v-if="inputCompatibilityError" role="alert" class="mt-4 text-sm text-amber-800">{{ inputCompatibilityError }}</p>
           <div class="mt-8 flex flex-col-reverse gap-3 sm:flex-row sm:justify-between">
             <button
               @click="handleBack"
@@ -79,7 +80,7 @@
             </button>
             <button
               @click="handleSubmit"
-              :disabled="!selectedPipeline || submitting"
+              :disabled="!selectedPipeline || submitting || Boolean(inputCompatibilityError)"
               data-testid="pipeline-continue"
               class="px-8 py-2 bg-indigo-600 text-white rounded-md font-medium hover:bg-indigo-700 disabled:opacity-50 transition-colors shadow-sm"
             >
@@ -93,7 +94,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useWorkflowStore } from '@/stores/workflow'
 import { useToast } from '@/composables/useToast'
@@ -114,6 +115,14 @@ const availablePipelines = ref([])
 const loadingPipelines = ref(true)
 const pipelineError = ref('')
 const saveError = ref('')
+const inputCompatibilityError = computed(() => {
+  if (selectedPipeline.value !== 'mesh_optimization') return ''
+  const unsupported = workflowStore.selectedFiles.some(file => {
+    const name = file.filename || file.name || file.relative_path || file.absolute_path || ''
+    return name && !name.toLowerCase().endsWith('.glb')
+  })
+  return unsupported ? 'Mesh Optimization & Preview requires static GLB files with embedded textures. Go back to choose GLB files, or select a different pipeline.' : ''
+})
 
 const loadPipelines = async () => {
   loadingPipelines.value = true
@@ -174,7 +183,7 @@ const handleBack = () => {
 }
 
 const handleSubmit = async () => {
-  if (!selectedPipeline.value || submitting.value) return
+  if (!selectedPipeline.value || submitting.value || inputCompatibilityError.value) return
   saveError.value = ''
 
   submitting.value = true

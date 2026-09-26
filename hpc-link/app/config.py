@@ -3,7 +3,7 @@ from functools import lru_cache
 import json
 from typing import Annotated
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode
 
 
@@ -53,6 +53,8 @@ class Settings(BaseSettings):
     marker_cuda_module: str | None = None
     marker_torch_device: str = "auto"
     webhdp_default_partition: str = "partition-a"
+    webhdp_cpus_per_task: int = Field(default=8, ge=1, le=256)
+    webhdp_memory_mb: int = Field(default=32768, ge=1024)
     webhdp_cuda_module: str | None = None
     webhdp_component_runtime_root: str = "/srv/hpc-link/apps/webhdp/runtime"
     webhdp_component_runner: str = "/srv/hpc-link/apps/webhdp/bin/webhdp_component_runner.py"

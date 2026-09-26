@@ -26,6 +26,8 @@ from constants import (
     LEGACY_PIPELINE_ALIASES,
     METADATA_ONLY_PIPELINE_DEFINITION,
     METADATA_ONLY_PIPELINE_ID,
+    MESH_OPTIMIZATION_PIPELINE_ID,
+    MESH_OPTIMIZATION_PIPELINE_DEFINITION,
     OPTIONAL_3D_PIPELINE_DEFINITIONS,
     PIPELINE_DEFINITION,
     PREDEFINED_PIPELINE_ID,
@@ -525,7 +527,7 @@ class NativePipelineSystemService:
         if status:
             query = query.filter_by(status=status)
         if os.environ.get("WEBHDP_CORE_ONLY", "false").lower() == "true":
-            query = query.filter(PipelineDefinition.identifier.in_(["render", METADATA_ONLY_PIPELINE_ID]))
+            query = query.filter(PipelineDefinition.identifier.in_(["render", METADATA_ONLY_PIPELINE_ID, MESH_OPTIMIZATION_PIPELINE_ID]))
         definitions = query.order_by(PipelineDefinition.identifier.asc()).all()
         return [self._serialize_pipeline_summary(definition) for definition in definitions]
 
@@ -533,7 +535,7 @@ class NativePipelineSystemService:
         self.ensure_seeded()
         requested_identifier = str(identifier or "").strip()
         canonical_identifier = self.resolve_pipeline_identifier(requested_identifier)
-        if os.environ.get("WEBHDP_CORE_ONLY", "false").lower() == "true" and canonical_identifier not in {"render", METADATA_ONLY_PIPELINE_ID}:
+        if os.environ.get("WEBHDP_CORE_ONLY", "false").lower() == "true" and canonical_identifier not in {"render", METADATA_ONLY_PIPELINE_ID, MESH_OPTIMIZATION_PIPELINE_ID}:
             raise ValidationError("This optional pipeline is disabled in the core workflow profile")
         definition = PipelineDefinition.query.filter_by(identifier=canonical_identifier, is_active=True).first()
         if definition is None:
@@ -1272,7 +1274,9 @@ class NativePipelineSystemService:
                 activate=True,
                 mirror_legacy_config=False,
             )
-        for identifier, definition in OPTIONAL_3D_PIPELINE_DEFINITIONS.items():
+        installable_pipelines = {**OPTIONAL_3D_PIPELINE_DEFINITIONS,
+                                MESH_OPTIMIZATION_PIPELINE_ID: MESH_OPTIMIZATION_PIPELINE_DEFINITION}
+        for identifier, definition in installable_pipelines.items():
             try:
                 effective_config = self._load_effective_seed_config(identifier, definition)
                 validation = self.validate_pipeline_config(effective_config)
@@ -3416,6 +3420,12 @@ class NativePipelineSystemService:
                     if trigger_resolution["action"] != "run":
                         self._mark_step_skipped(step, record_context, matched_rule_id=trigger_resolution.get("matched_rule_id"))
                         continue
+                    legacy._emit_progress(progress_callback, {
+                        "current_stage": "processing_component", "step_id": step["id"],
+                        "status_message": f"{step.get('name') or step['id']}: {record_context['filename']}",
+                        "current_file_name": record_context["filename"],
+                        "current_index": record_context["index"], "total_files": total_records,
+                    })
                     self._execute_record_step(
                         step,
                         version_row,
@@ -3837,6 +3847,16 @@ class NativePipelineSystemService:
 
         resolved_inputs, resolved_parameters = self._resolve_step_bindings(step, record_context, execution_context)
         manifest = _json_loads(component_version.manifest_json, {})
+        missing_artifact_inputs = [binding["target"] for binding in step.get("input_bindings", [])
+                                   if binding.get("type", "").startswith("artifact_")
+                                   and not self._has_meaningful_bound_value(resolved_inputs.get(binding["target"]))]
+        if missing_artifact_inputs:
+            message = f"{step.get('name') or step['id']} cannot run because an earlier step did not produce: {', '.join(missing_artifact_inputs)}."
+            result = {"success": False, "status": "failed", "error": message, "outputs": {}}
+            self._finish_step_run(step_run, result, message, None)
+            record_context["record_status"]["step_results"][step["id"]] = result
+            record_context["record_status"].setdefault("error", message)
+            return
         resolved_inputs = self._apply_default_input_bindings(
             manifest.get("inputs") or [],
             resolved_inputs,
@@ -3885,6 +3905,13 @@ class NativePipelineSystemService:
                 component_key,
                 result,
             )
+            if result.get("success") and component_key in {"mesh_optimizer", "fast_renderer"}:
+                self._register_record_files(execution_context, record_context["record_id"],
+                                            materialized_paths, component_key, component_key)
+                record_context["generated_files"].extend(
+                    path for path in materialized_paths if path not in record_context["generated_files"])
+                if component_key == "fast_renderer":
+                    record_context["record_status"]["render"] = _deepcopy(result.get("render_status") or result)
             if component_key == "any_to_usdz":
                 record_context["record_status"]["usdz"] = _deepcopy(result)
                 duration = result.get("duration")

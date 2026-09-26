@@ -6,6 +6,22 @@ from services.hpc_allocation_service import HpcAllocationService, mask_secret
 from exceptions import ValidationError
 
 
+def test_component_execution_sends_pinned_identity_without_executable_settings(monkeypatch):
+    from unittest.mock import Mock
+    service = HpcAllocationService()
+    client = Mock()
+    monkeypatch.setattr(service, 'client', lambda: client)
+    profile = {'version': '1.0.0', 'sif_sha256': 'a' * 64, 'image': '/work/component.sif',
+               'entrypoint': ['python3', 'runner.py'], 'environment': {'SETTING': 'value'}}
+    request = {'component_key': 'mesh_optimizer', 'profile': profile, 'inputs': {'input_file': 'model.glb'}}
+    service.execute_component(HpcAllocation(remote_session_id='allocation-1'), request)
+    sent = client.post.call_args.args[1]
+    assert sent['profile'] == {'version': '1.0.0', 'sif_sha256': 'a' * 64}
+    assert sent['component_version'] == '1.0.0'
+    assert sent['inputs'] == request['inputs']
+    assert request['profile'] is profile and 'entrypoint' in profile
+
+
 def test_hpc_link_permission_requires_verified_capability_for_users():
     service = HpcAllocationService()
     user = User(email="user@example.com", role=UserRole.USER, is_verified=True)

@@ -47,3 +47,7 @@ Root fixtures and `test_data/workflow_fixtures/` media-like files are synthetic 
 ## Documentation Media
 
 `docs/assets/screen_recordings/` contains curated WebHDP walkthrough recordings referenced by the in-app documentation. `scripts/check_release_assets.py` enforces the alpha allow-list, file-size limit, and reference consistency. If a maintainer cannot confirm provenance for a recording, move it out of the source repository and publish it as an external release asset instead.
+
+## Mesh Optimizer
+
+The optional HPC component integrates [3DOM-FBK/mesh-optimizer](https://github.com/3DOM-FBK/mesh-optimizer), pinned at revision `a1e76f43b9257be5288ad18c52b640c6a3f4829a`, whose repository carries the GNU GPL version 3. See `external_code/mesh_optimizer/UPSTREAM_LICENSE`. Its external runtime includes Blender and other upstream dependencies under their respective licenses; the runtime image is installed separately and is not bundled in WebHDP.

@@ -1813,6 +1813,8 @@ while true; do sleep 120; done
         return f"""#!/bin/bash
 #SBATCH --job-name=hpc-link-webhdp-{session.session_id[:8]}
 #SBATCH --partition={session.partition}
+#SBATCH --cpus-per-task={self._settings.webhdp_cpus_per_task}
+#SBATCH --mem={self._settings.webhdp_memory_mb}M
 {gres_line.rstrip()}
 #SBATCH --time={session.time_limit}
 #SBATCH --output={session.remote_session_dir}/slurm-%j.out
@@ -2319,7 +2321,7 @@ while true; do sleep 120; done
                     f"stat -c%s {shlex.quote(remote_path)} && "
                     f"sha256sum {shlex.quote(remote_path)} | awk '{{print $1}}'"
                 ),
-                timeout=120,
+                timeout=900,
             )
             lines = stdout.strip().splitlines()
             actual_sha256 = lines[-1].strip().lower() if exit_code == 0 and lines else ""
@@ -2424,7 +2426,7 @@ while true; do sleep 120; done
         # Always fingerprint installed artifacts, including sources without a supplied checksum.
         stdout, stderr, exit_code = await ssh_manager.run_command(
             f"sha256sum {shlex.quote(sif_path)} | awk '{{print $1}}'",
-            timeout=300,
+            timeout=900,
         )
         installed_sif_sha256 = stdout.strip().splitlines()[-1].strip().lower() if exit_code == 0 and stdout.strip() else ""
         logs["sif_checksum"] = {

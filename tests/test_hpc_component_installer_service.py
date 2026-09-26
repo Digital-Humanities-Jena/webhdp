@@ -187,6 +187,7 @@ def test_validate_accepts_hpc_link_singularity_profile(flask_app):
     assert result["component_key"] == "example_validator"
     assert result["profile"]["handler"] == "generic_singularity_component"
     assert result["checks"]["hpc_link"]["success"] is True
+    assert flask_app.fake_hpc_client.posts[-1][2] > 900
 
 
 def test_validate_rejects_missing_sif_source(flask_app):
