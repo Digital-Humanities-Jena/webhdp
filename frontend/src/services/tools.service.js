@@ -26,11 +26,11 @@ const toolsService = {
   },
 
   async listHdpComponentCatalog(params = {}) {
-    return api.get('/tools/hdp-components/catalog', { params })
+    return api.get('/tools/hdp-components/catalog', { params, timeout: 30000 })
   },
 
   async getHdpComponentCatalogDiagnostics() {
-    return api.get('/tools/hdp-components/catalog/diagnostics')
+    return api.get('/tools/hdp-components/catalog/diagnostics', { timeout: 15000, suppressGlobalError: true })
   },
 
   async installHdpComponent(payload) {
@@ -42,7 +42,7 @@ const toolsService = {
   },
 
   async getHdpComponentInstallation(installationId) {
-    return api.get(`/tools/hdp-components/installations/${encodeURIComponent(installationId)}`)
+    return api.get(`/tools/hdp-components/installations/${encodeURIComponent(installationId)}`, { timeout: 15000, suppressGlobalError: true })
   },
 
   async testHdpComponentInstallation(installationId, payload = {}) {

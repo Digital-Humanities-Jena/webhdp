@@ -24,6 +24,7 @@
       <div v-if="validationResult?.errors?.length" class="mt-4 space-y-2">
         <div v-for="message in validationResult.errors" :key="message" class="rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
           {{ message }}
+          <button type="button" class="ml-2 font-medium underline" @click="$emit('focus-diagnostic', message)">Open affected step</button>
         </div>
       </div>
       <div v-if="validationResult?.warnings?.length" class="mt-4 space-y-2">
@@ -40,8 +41,15 @@
       </p>
       <div class="mt-4 space-y-3">
         <div>
-          <label class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Session ID</label>
-          <input aria-label="Preflight session ID" v-model.trim="preflightSessionIdModel" type="text" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" data-testid="preflight-session-id" />
+          <label for="constructor-session" class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Uploaded session</label>
+          <select id="constructor-session" aria-label="Preflight session ID" v-model="preflightSessionIdModel" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" data-testid="preflight-session-id">
+            <option value="">Choose a session</option>
+            <option v-if="preflightSessionId && !sessions.some(session => String(session.id) === String(preflightSessionId))" :value="preflightSessionId">Session {{ preflightSessionId }}</option>
+            <option v-for="session in sessions" :key="session.id" :value="String(session.id)">{{ session.name || session.title || `Session ${session.id}` }}{{ session.file_count != null ? ` · ${session.file_count} files` : '' }}{{ session.created_at ? ` · ${new Date(session.created_at).toLocaleDateString()}` : '' }}</option>
+          </select>
+          <p v-if="loadingSessions" class="mt-2 text-xs text-slate-500">Loading sessions…</p>
+          <p v-if="sessionsError" role="alert" class="mt-2 text-sm text-rose-700">{{ sessionsError }}</p>
+          <button type="button" class="mt-2 text-xs text-indigo-700 underline" :disabled="loadingSessions" @click="$emit('retry-sessions')">Refresh sessions</button>
         </div>
         <div v-if="preflightSessionId" class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
           <div class="flex flex-wrap items-center justify-between gap-4">
@@ -64,17 +72,6 @@
             </div>
           </div>
         </div>
-        <div>
-          <label class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Local File Paths</label>
-          <textarea
-            aria-label="Preflight file paths"
-            v-model="preflightFilePathsTextModel"
-            rows="8"
-            class="w-full rounded-2xl border border-slate-300 px-3 py-2 font-mono text-xs"
-            placeholder="/abs/path/model.glb&#10;/abs/path/pointcloud.ply"
-            data-testid="preflight-local-file-paths"
-          />
-        </div>
         <SessionPathPicker
           v-if="constructorSessionFiles.length > 0"
           title="Session Files"
@@ -91,6 +88,18 @@
           @toggle="togglePreflightFilePath"
           @bulk-action="handleBulkAction"
         />
+        <details class="rounded-xl border border-slate-200 p-3">
+          <summary class="cursor-pointer text-sm font-medium text-slate-600">Advanced: enter file paths</summary>
+          <label class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Local File Paths</label>
+          <textarea
+            aria-label="Preflight file paths"
+            v-model="preflightFilePathsTextModel"
+            rows="8"
+            class="w-full rounded-2xl border border-slate-300 px-3 py-2 font-mono text-xs"
+            placeholder="/abs/path/model.glb&#10;/abs/path/pointcloud.ply"
+            data-testid="preflight-local-file-paths"
+          />
+        </details>
       </div>
 
       <button type="button" class="mt-4 w-full rounded-xl border border-indigo-300 px-4 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-50 disabled:opacity-50" :disabled="!preflightSessionId || !selectedPreflightPaths.length" @click="$emit('run-preflight')">Check selected files</button>
@@ -142,8 +151,15 @@
     <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
       <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-700">Execution</h2>
       <p class="mt-2 text-sm text-slate-500">
-        Run the selected pipeline against the same session files used for preflight and inspect the persisted run output.
+        Run the saved version on the checked files. Progress is saved on the server; you can leave this page and reconnect.
       </p>
+      <div v-if="runId" class="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm" role="status">
+        <div class="font-semibold">{{ pipelineExecutionRun?.status || 'Confirming submission' }} · {{ Math.floor(runElapsed / 60) }}m {{ runElapsed % 60 }}s</div>
+        <a :href="`/tools/pipeline-constructor?run=${encodeURIComponent(runId)}`" class="mt-1 block break-all text-xs text-indigo-700 underline">Open saved run {{ runId }}</a>
+        <ProgressBar v-if="executingPipeline" class="mt-3" :percentage="runPercentage" :label="pipelineExecutionRun?.result?.progress?.status_message || pipelineExecutionRun?.result?.progress?.message || 'Waiting for processing updates…'" />
+        <button type="button" class="mt-2 text-indigo-700 underline" @click="$emit('reconnect-run')">Refresh run status</button>
+        <button v-if="canRetryRequest && pipelineExecutionError && !pipelineExecutionRun" type="button" class="mt-2 ml-3 text-indigo-700 underline" @click="$emit('retry-run-request')">Retry same request</button>
+      </div>
       <button
         type="button"
         class="mt-4 w-full rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-indigo-700 disabled:opacity-50"
@@ -206,10 +222,17 @@
 
 <script setup>
 import { computed } from 'vue'
+import ProgressBar from '@/components/ui/ProgressBar.vue'
 import SessionPathPicker from '@/components/ui/SessionPathPicker.vue'
 import LoadingSpinner from '@/components/ui/LoadingSpinner.vue'
 
 const props = defineProps({
+  sessions: { type: Array, default: () => [] },
+  sessionsError: { type: String, default: '' },
+  loadingSessions: { type: Boolean, default: false },
+  canRetryRequest: { type: Boolean, default: false },
+  runId: { type: String, default: '' },
+  runElapsed: { type: Number, default: 0 },
   executionBlockedReason: { type: String, default: '' },
   validationResult: {
     type: Object,
@@ -258,12 +281,24 @@ const props = defineProps({
 })
 
 const emit = defineEmits([
+  'retry-sessions', 'reconnect-run', 'retry-run-request', 'focus-diagnostic',
   'update:preflight-session-id',
   'update:preflight-file-paths-text',
   'refresh-session-resources',
   'run-pipeline-execution',
   'run-preflight',
 ])
+
+const runPercentage = computed(() => {
+  const progress = props.pipelineExecutionRun?.result?.progress
+  const value = progress?.percentage ?? progress?.progress
+  if (typeof value === 'number' && Number.isFinite(value)) return Math.max(0, Math.min(100, value))
+  if (progress?.current_stage === 'completed') return 100
+  if (Number(progress?.total_files) > 0) {
+    return Math.min(99, Math.max(0, Math.round(Number(progress.processed_count || 0) / Number(progress.total_files) * 100)))
+  }
+  return null
+})
 
 const preflightSessionIdModel = computed({
   get: () => props.preflightSessionId,

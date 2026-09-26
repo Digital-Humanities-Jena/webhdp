@@ -2486,6 +2486,7 @@ def list_hdp_component_installations():
 @require_admin
 def get_hdp_component_installation(installation_id):
     row = current_app.component_installer_service.get_installation(installation_id)
+    current_app.component_installer_service.reconcile_installation(row)
     return APIResponse.success(data={"installation": current_app.component_installer_service._serialize_installation(row)})
 
 

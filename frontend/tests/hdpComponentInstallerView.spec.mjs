@@ -19,6 +19,8 @@ const mocked = vi.hoisted(() => ({
   },
 }))
 
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ user: { id: 1 } }) }))
+
 vi.mock('vue-router', () => ({
   useRoute: () => mocked.route,
 }))
@@ -38,6 +40,7 @@ import HdpComponentInstallerView from '../src/views/tools/HdpComponentInstallerV
 
 describe('HDP component installer tools UI', () => {
   beforeEach(() => {
+    sessionStorage.clear()
     mocked.toolsService.getContext.mockReset()
     mocked.toolsService.listHdpComponentCatalog.mockReset()
     mocked.toolsService.getHdpComponentCatalogDiagnostics.mockReset()
@@ -500,6 +503,37 @@ describe('HDP component installer tools UI', () => {
     await flushPromises()
     expect(mocked.toast.success).not.toHaveBeenCalled()
     expect(wrapper.get('[role="alert"]').text()).toContain('Expected report missing')
+    wrapper.unmount()
+  })
+
+  it('shows the catalog before slow diagnostics finish', async () => {
+    mocked.toolsService.getHdpComponentCatalogDiagnostics.mockReturnValue(new Promise(() => {}))
+    const wrapper = mount(HdpComponentInstallerView)
+    await flushPromises()
+    expect(wrapper.text()).toContain('glTF/GLB Validator')
+    expect(wrapper.text()).not.toContain('Loading component catalog')
+    wrapper.unmount()
+  })
+
+  it('keeps the catalog usable when optional diagnostics fail', async () => {
+    mocked.toolsService.getHdpComponentCatalogDiagnostics.mockRejectedValue(new Error('Diagnostics unavailable'))
+    const wrapper = mount(HdpComponentInstallerView)
+    await flushPromises()
+    expect(wrapper.text()).toContain('glTF/GLB Validator')
+    expect(wrapper.text()).toContain('Catalog diagnostics are unavailable')
+    expect(wrapper.text()).not.toContain('No matching installable components')
+    wrapper.unmount()
+  })
+
+  it('reports skipped smoke tests without a passing notification', async () => {
+    mocked.toolsService.listHdpComponentInstallations.mockResolvedValue({ data: { installations: [{ installation_id: 'skip-1', component_key: 'validator', status: 'installed' }] } })
+    mocked.toolsService.testHdpComponentInstallation.mockResolvedValue({ data: { test: { success: true, status: 'skipped' } } })
+    const wrapper = mount(HdpComponentInstallerView)
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === 'Test').trigger('click')
+    await flushPromises()
+    expect(mocked.toast.success).not.toHaveBeenCalled()
+    expect(mocked.toast.warning).toHaveBeenCalledWith(expect.stringContaining('No workload was executed'))
     wrapper.unmount()
   })
 

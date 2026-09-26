@@ -83,3 +83,14 @@ def test_staged_mapping_preserves_duplicate_names_and_rejects_escape(tmp_path):
     request['staged_files'][0]['remote_path'] = str(tmp_path / 'private')
     with pytest.raises(ValueError):
         runner._collect_render_inputs(request, inputs)
+
+
+def test_changed_sif_is_rejected_before_process_start(tmp_path):
+    import pytest
+    runner = _load_runner()
+    image = tmp_path / 'changed.sif'
+    image.write_bytes(b'changed content')
+    with patch.object(runner.subprocess, 'run') as process:
+        with pytest.raises(ValueError, match='checksum changed'):
+            runner._generic_singularity_component('validator', {'profile': {'image': str(image), 'sif_sha256': '0' * 64}})
+    process.assert_not_called()

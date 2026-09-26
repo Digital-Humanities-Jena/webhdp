@@ -501,8 +501,13 @@ class NativePipelineSystemTestCase(unittest.TestCase):
         ]
 
         with self.app.app_context():
+            import yaml
             for component_dir in component_dirs:
-                self.native_service.import_component_from_path(str(component_dir))
+                manifest = yaml.safe_load((component_dir / "component.yaml").read_text())
+                for profile in manifest.get("execution", {}).get("profiles", []):
+                    if profile.get("runtime") == "docker":
+                        profile["image"] = "sha256:" + "a" * 64
+                self.native_service.import_component_from_manifest(manifest, source_path=str(component_dir))
             self.native_service._seed_state = "idle"
             self.native_service.ensure_seeded()
 
@@ -526,6 +531,97 @@ class NativePipelineSystemTestCase(unittest.TestCase):
             self.native_service._seed_state = "idle"
             self.native_service.ensure_seeded()
             self.assertEqual(PipelineVersion.query.count(), version_count)
+
+    def test_publication_retry_does_not_reactivate_an_older_version(self):
+        from uuid import uuid4
+        from services.registry_lock import OperationConflict
+        with self.app.app_context():
+            config = self.native_service.get_pipeline("render")["config"]
+            request_id = str(uuid4())
+            first = self.native_service.create_pipeline_version_from_config("render", config, request_id=request_id, created_by_user_id=self.user_id)
+            newer = self.native_service.create_pipeline_version_from_config("render", {**config, "name": "Newer revision"})
+            count = PipelineVersion.query.count()
+            retry = self.native_service.create_pipeline_version_from_config("render", config, request_id=request_id, created_by_user_id=self.user_id)
+            self.assertTrue(retry["reused"])
+            self.assertEqual(retry["publication_version"], first["publication_version"])
+            self.assertEqual(retry["active_version"], newer["active_version"])
+            self.assertEqual(PipelineVersion.query.count(), count)
+            with self.assertRaises(OperationConflict):
+                self.native_service.create_pipeline_version_from_config("render", {**config, "name": "Different request"}, request_id=request_id, created_by_user_id=self.user_id)
+
+    def test_queued_run_keeps_version_and_retries_reuse_it(self):
+        from uuid import uuid4
+        from services.registry_lock import OperationConflict
+        with self.app.app_context():
+            _, _, session = self._prepare_generic_pipeline_session("queued_version")
+            original = self.native_service.get_pipeline("render")
+            payload = {"request_id": str(uuid4()), "session_id": session.id, "local_file_paths": ["sample.glb"], "expected_version": original["active_version"]}
+            pending = self.native_service.create_pending_run("render", session_id=session.id, initiated_by_user_id=self.user_id, request_payload=payload)
+            updated = {**original["config"], "name": "New renderer revision"}
+            self.native_service.create_pipeline_version_from_config("render", updated)
+            retry = self.native_service.create_pending_run("render", session_id=session.id, initiated_by_user_id=self.user_id, request_payload=payload)
+            self.assertEqual(pending["run_id"], retry["run_id"])
+            self.assertTrue(retry["reused"])
+            with self.assertRaises(OperationConflict):
+                self.native_service.create_pending_run("render", session_id=session.id, initiated_by_user_id=self.user_id, request_payload={**payload, "local_file_paths": ["other.glb"]})
+            with patch.object(self.native_service, "_run_native_pipeline", return_value={"success": True}) as execute:
+                result = self.native_service.execute_registered_submission("render", {"db_session_id": session.id}, existing_run_public_id=pending["run_id"])
+            self.assertEqual(result["pipeline_version"], original["active_version"])
+            self.assertEqual(execute.call_args.args[0]["name"], original["config"]["name"])
+            with patch.object(self.native_service, "_run_native_pipeline") as duplicate:
+                self.native_service.execute_registered_submission("render", {"db_session_id": session.id}, existing_run_public_id=pending["run_id"])
+            duplicate.assert_not_called()
+            before = self.native_service.get_pipeline_run(pending["run_id"])
+            self.native_service.update_run_progress(pending["run_id"], {"status_message": "Late callback"})
+            self.assertEqual(self.native_service.get_pipeline_run(pending["run_id"])["result"], before["result"])
+
+    def test_preflight_token_binds_definition_user_and_file_selection(self):
+        from services.registry_lock import OperationConflict
+        with self.app.app_context():
+            directory, source, session = self._prepare_generic_pipeline_session("preflight_contract")
+            config = {"identifier": "checked", "name": "Checked", "version": "1.0.0", "steps": [{"id": "classify", "name": "Classify", "component_ref": "input_file_classification"}]}
+            saved = self.native_service.create_pipeline_version_from_config("checked", config)
+            request = {"pipeline_definition": saved["config"], "session_id": session.id, "local_file_paths": [str(source)]}
+            checked = self.native_service.preflight_pipeline_constructor(request, self.user_id)
+            payload = {"preflight_token": checked["preflight_token"], "session_id": session.id, "local_file_paths": [str(source)]}
+            self.native_service._verify_preflight(payload, saved["config"], self.user_id)
+            for changed, user in [({**payload, "local_file_paths": ["different.glb"]}, self.user_id), (payload, self.other_user_id), ({**payload, "preflight_token": "invalid"}, self.user_id)]:
+                with self.assertRaises(OperationConflict):
+                    self.native_service._verify_preflight(changed, saved["config"], user)
+            with self.assertRaises(OperationConflict):
+                self.native_service._verify_preflight(payload, {**saved["config"], "name": "Changed"}, self.user_id)
+
+    def test_publication_rejects_unpinned_container_artifacts(self):
+        with self.app.app_context():
+            for runtime, image in [("docker", "example/component:latest"), ("singularity", "/work/component.sif")]:
+                key = f"unpinned_{runtime}"
+                self.native_service.import_component_from_manifest({"metadata": {"name": key, "version": "1.0.0"}, "execution": {"profiles": [{"id": "container", "adapter": "container_cli", "runtime": runtime, "image": image, "entrypoint": ["run"]}]}})
+                config = {"name": key, "steps": [{"id": "process", "name": "Process", "component_ref": key, "execution_profile_ref": "container"}]}
+                with self.assertRaises(ValidationError) as caught:
+                    self.native_service.create_pipeline_version_from_config(key, config)
+                self.assertIn("HDP Components", str(caught.exception.details))
+
+    def test_run_details_require_access_to_its_session(self):
+        with self.app.app_context():
+            _, _, session = self._prepare_generic_pipeline_session("private_run")
+            queued = self.native_service.create_pending_run("render", session_id=session.id, initiated_by_user_id=self.user_id, request_payload={})
+            self.assertEqual(self.native_service.get_pipeline_run(queued["run_id"], self.user_id)["run_id"], queued["run_id"])
+            with self.assertRaises(ResourceNotFoundError):
+                self.native_service.get_pipeline_run(queued["run_id"], self.other_user_id)
+
+    def test_pipeline_component_version_does_not_follow_new_imports(self):
+        with self.app.app_context():
+            manifest = {"metadata": {"name": "stable_component", "version": "1.0.0"}, "execution": {"profiles": [{"id": "local", "adapter": "local_cli", "entrypoint": ["old-command"]}]}}
+            self.native_service.import_component_from_manifest(manifest)
+            saved = self.native_service.create_pipeline_version_from_config("stable", {"identifier": "stable", "name": "Stable", "version": "1.0.0", "steps": [{"id": "stable", "name": "Stable", "component_ref": "stable_component", "execution_profile_ref": "local"}]})
+            manifest["metadata"]["version"] = "2.0.0"
+            manifest["execution"]["profiles"][0]["entrypoint"] = ["new-command"]
+            self.native_service.import_component_from_manifest(manifest)
+            step = saved["config"]["steps"][0]
+            selected = self.native_service._step_component_version(step)
+            self.assertEqual(selected.version, "1.0.0")
+            self.assertIn("old-command", selected.manifest_json)
+            self.assertEqual(self.native_service.get_pipeline("stable")["components"][0]["version"], "1.0.0")
 
     def test_repeated_original_version_chooses_next_unused_version(self):
         with self.app.app_context():
@@ -1369,7 +1465,7 @@ class NativePipelineSystemTestCase(unittest.TestCase):
                     "    - id: container_default",
                     "      adapter: container_cli",
                     "      runtime: docker",
-                    "      image: example/component:latest",
+                    "      image: example/component@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                     "      entrypoint: [\"python\", \"/app/main.py\"]",
                     "      output_collection:",
                     "        - name: packaged_output",

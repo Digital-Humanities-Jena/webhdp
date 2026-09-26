@@ -108,7 +108,8 @@ class HpcLinkClient:
 
         if response.status_code >= 400:
             raise APIConnectionError(
-                f"HPC-Link returned HTTP {response.status_code}: {self._safe_error_text(response)}"
+                f"HPC-Link returned HTTP {response.status_code}: {self._safe_error_text(response)}",
+                details={"http_status": response.status_code}
             )
         if not response.content:
             return {}
@@ -134,7 +135,8 @@ class HpcLinkClient:
 
         if response.status_code >= 400:
             raise APIConnectionError(
-                f"HPC-Link returned HTTP {response.status_code}: {self._safe_error_text(response)}"
+                f"HPC-Link returned HTTP {response.status_code}: {self._safe_error_text(response)}",
+                details={"http_status": response.status_code}
             )
         if not response.content:
             return {}
@@ -170,7 +172,8 @@ class HpcLinkClient:
             ) as response:
                 if response.status_code >= 400:
                     raise APIConnectionError(
-                        f"HPC-Link returned HTTP {response.status_code}: {self._safe_error_text(response)}"
+                        f"HPC-Link returned HTTP {response.status_code}: {self._safe_error_text(response)}",
+                        details={"http_status": response.status_code}
                     )
                 bytes_written = 0
                 with open(destination_path, "wb") as handle:

@@ -256,3 +256,14 @@ def test_hpc_staging_includes_nested_archived_texture_without_other_records(tmp_
         metadata={'execution_context': {'hdpc_path': str(hdpc)}, 'record_context': {'record_id': 1}},
     )
     assert set(HpcLinkExecutionAdapter._local_paths_for_request(request)) == {str(model), str(archive), str(texture)}
+
+
+@patch("subprocess.run")
+def test_local_sif_checksum_mismatch_never_starts_container(mock_run, tmp_path):
+    image = tmp_path / "component.sif"
+    image.write_bytes(b"replacement image")
+    request = AdapterExecutionRequest(step_id="verified", profile={"runtime": "singularity", "image": str(image), "sif_sha256": "0" * 64}, workdir=str(tmp_path))
+    result = ContainerCliAdapter().execute(request)
+    assert result["success"] is False
+    assert "checksum changed" in result["error"]
+    mock_run.assert_not_called()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
 import os
 import shutil
@@ -226,6 +227,14 @@ class ContainerCliAdapter(SubprocessExecutionAdapter):
                 "error": "Container image is required",
                 "command": [],
             }
+        if runtime == "singularity" and request.profile.get("sif_sha256"):
+            try:
+                with Path(image).open("rb") as stream:
+                    checksum = hashlib.file_digest(stream, "sha256").hexdigest()
+                if checksum.lower() != str(request.profile["sif_sha256"]).lower():
+                    raise ValueError("SIF checksum changed since this pipeline was published")
+            except (OSError, ValueError) as exc:
+                return {"success": False, "status": "failed", "error": str(exc), "command": []}
         if runtime == "docker" and bool((request.profile.get("config") or {}).get("webhdp_contract")):
             return self._execute_webhdp_contract(request, image=str(image), entrypoint=entrypoint)
 
@@ -523,6 +532,8 @@ class HpcLinkExecutionAdapter(BaseExecutionAdapter):
         )
         payload = {
             "component_key": component_key,
+            "component_version": step.get("component_version") or request.profile.get("version"),
+            "profile": request.profile,
             "step_id": request.step_id,
             "inputs": request.inputs,
             "parameters": request.parameters,

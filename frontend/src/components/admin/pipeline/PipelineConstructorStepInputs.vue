@@ -29,7 +29,7 @@
           <div>
             <label class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Source Kind</label>
             <select
-              v-model="getStepBinding(field.name).type"
+              :aria-label="`Source type for ${field.label || field.name} in ${step.name}`" v-model="getStepBinding(field.name).type"
               class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
               :data-testid="`binding-type-${step.id}-${field.name}`"
               @change="actions.handleBindingTypeChange(step, field.name)"
@@ -43,7 +43,7 @@
           <div v-if="bindingNeedsSourceStep(field.name)">
             <label class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Source Step</label>
             <select
-              v-model="getStepBinding(field.name).source_step"
+              :aria-label="`Source step for ${field.label || field.name} in ${step.name}`" v-model="getStepBinding(field.name).source_step"
               class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
               :data-testid="`binding-source-step-${step.id}-${field.name}`"
               @change="actions.handleBindingSourceStepChange(step, field.name)"
@@ -62,7 +62,7 @@
           <div v-if="bindingNeedsSourceOutput(field.name)">
             <label class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Source Output</label>
             <select
-              v-model="getStepBinding(field.name).source_output"
+              :aria-label="`Source output for ${field.label || field.name} in ${step.name}`" v-model="getStepBinding(field.name).source_output"
               class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
               :data-testid="`binding-source-output-${step.id}-${field.name}`"
             >
@@ -79,7 +79,7 @@
 
           <div v-if="getStepBinding(field.name).type === 'artifact_json_value'" class="md:col-span-2">
             <label class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">JSONPath Selector</label>
-            <input
+            <input aria-label="JSONPath Selector"
               v-model.trim="getStepBinding(field.name).selector"
               type="text"
               class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"

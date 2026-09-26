@@ -2271,6 +2271,7 @@ while true; do sleep 120; done
             raise HTTPException(status_code=400, detail=f"Component '{key}:{safe_version}' has no entrypoint")
         profile["image"] = sif_path
         profile["sif_remote_path"] = sif_path
+        profile["sif_sha256"] = registry.get("sif_sha256")
         return {
             "component_key": key,
             "component_version": safe_version,
@@ -2278,6 +2279,18 @@ while true; do sleep 120; done
             "manifest_path": manifest_path,
             "sif_remote_path": sif_path,
         }
+
+    async def get_webhdp_component_installation(self, component_key: str, version: str) -> dict[str, Any]:
+        install_dir = self._webhdp_component_install_dir(component_key, version)
+        stdout, stderr, code = await ssh_manager.run_command(f"cat {shlex.quote(install_dir + '/component.json')}", timeout=30)
+        if code != 0:
+            raise HTTPException(status_code=404, detail="Installation is not yet confirmed")
+        registry = json.loads(stdout)
+        sif_path = self._ensure_remote_sif_path(registry["sif_remote_path"])
+        stdout, stderr, code = await ssh_manager.run_command(f"sha256sum {shlex.quote(sif_path)} | awk '{{print $1}}'", timeout=300)
+        if code != 0 or stdout.strip() != registry.get("sif_sha256"):
+            raise HTTPException(status_code=409, detail="Installed SIF checksum could not be confirmed")
+        return {**registry, "remote_install_dir": install_dir, "status": "installed"}
 
     async def validate_webhdp_component_install(
         self,
@@ -2366,10 +2379,13 @@ while true; do sleep 120; done
         sif_path = f"{install_dir}/component.sif"
         logs: dict[str, Any] = {}
         expected_sif_sha256 = self._clean_sha256(request.sif_sha256)
-        mkdir_stdout, mkdir_stderr, mkdir_exit = await ssh_manager.run_command(f"mkdir -p {shlex.quote(install_dir)}", timeout=30)
+        parent_dir = str(PurePosixPath(install_dir).parent)
+        mkdir_stdout, mkdir_stderr, mkdir_exit = await ssh_manager.run_command(
+            f"mkdir -p {shlex.quote(parent_dir)} && mkdir -m 700 {shlex.quote(install_dir)}", timeout=30
+        )
         logs["mkdir"] = {"stdout": mkdir_stdout, "stderr": mkdir_stderr, "exit_code": mkdir_exit}
         if mkdir_exit != 0:
-            raise HTTPException(status_code=500, detail=f"Could not create install directory: {mkdir_stderr or mkdir_stdout}")
+            raise HTTPException(status_code=409, detail="Component version directory already exists or could not be created. Existing artifacts are never overwritten; use a new component version after checking directory permissions.")
 
         if request.source_type == "remote_path":
             source_path = self._ensure_remote_sif_path(request.sif_source)
@@ -2405,25 +2421,26 @@ while true; do sleep 120; done
                 raise HTTPException(status_code=413, detail=f"SIF is too large (max {max_sif_bytes} bytes)")
 
         installed_sif_sha256 = ""
-        if expected_sif_sha256:
-            stdout, stderr, exit_code = await ssh_manager.run_command(
-                f"sha256sum {shlex.quote(sif_path)} | awk '{{print $1}}'",
-                timeout=300,
-            )
-            installed_sif_sha256 = stdout.strip().splitlines()[-1].strip().lower() if exit_code == 0 and stdout.strip() else ""
-            logs["sif_checksum"] = {
-                "stdout": stdout,
-                "stderr": stderr,
-                "exit_code": exit_code,
-                "expected_sha256": expected_sif_sha256,
-                "actual_sha256": installed_sif_sha256,
-            }
-            if exit_code != 0 or installed_sif_sha256 != expected_sif_sha256:
-                await ssh_manager.run_command(f"rm -f {shlex.quote(sif_path)}", timeout=20)
-                raise HTTPException(status_code=400, detail="Installed SIF SHA-256 did not match expected checksum")
+        # Always fingerprint installed artifacts, including sources without a supplied checksum.
+        stdout, stderr, exit_code = await ssh_manager.run_command(
+            f"sha256sum {shlex.quote(sif_path)} | awk '{{print $1}}'",
+            timeout=300,
+        )
+        installed_sif_sha256 = stdout.strip().splitlines()[-1].strip().lower() if exit_code == 0 and stdout.strip() else ""
+        logs["sif_checksum"] = {
+            "stdout": stdout,
+            "stderr": stderr,
+            "exit_code": exit_code,
+            "expected_sha256": expected_sif_sha256,
+            "actual_sha256": installed_sif_sha256,
+        }
+        if exit_code != 0 or not installed_sif_sha256 or (expected_sif_sha256 and installed_sif_sha256 != expected_sif_sha256):
+            await ssh_manager.run_command(f"rm -f {shlex.quote(sif_path)}", timeout=20)
+            raise HTTPException(status_code=400, detail="Installed SIF SHA-256 did not match expected checksum")
 
         manifest_json = json.dumps(request.manifest, sort_keys=True)
         registry = {
+            "request_id": request.request_id,
             "component_key": request.component_key,
             "version": request.version,
             "manifest_hash": request.manifest_hash,
@@ -2453,6 +2470,7 @@ while true; do sleep 120; done
             "sif_remote_path": sif_path,
             "manifest_path": manifest_path,
             "registry_path": registry_path,
+            "sif_sha256": installed_sif_sha256,
             "checks": validation.get("checks") or {},
             "logs": logs,
             "error": None,
@@ -2464,6 +2482,8 @@ while true; do sleep 120; done
         actor: AuthenticatedUser,
     ) -> dict[str, Any]:
         sif_path = self._ensure_remote_sif_path(request.sif_remote_path)
+        if not request.test:
+            return {"success": None, "status": "skipped", "warnings": ["No smoke test is declared. The workload was not executed."]}
         test_id = uuid.uuid4().hex
         test_dir = f"{self._settings.hpc_apps_root}/webhdp/test-runs/{test_id}"
         input_dir = f"{test_dir}/inputs"
@@ -2557,6 +2577,9 @@ while true; do sleep 120; done
             component_runtime = await self._load_webhdp_component_profile(request.component_key, version)
             payload["component_key"] = component_runtime["component_key"]
             payload["component_version"] = component_runtime["component_version"]
+            expected_checksum = request.profile.get("sif_sha256")
+            if expected_checksum and expected_checksum != component_runtime["profile"].get("sif_sha256"):
+                raise HTTPException(status_code=409, detail="Installed component checksum changed; refusing to execute a different artifact")
             payload["profile"] = component_runtime["profile"]
         else:
             payload["profile"] = {}

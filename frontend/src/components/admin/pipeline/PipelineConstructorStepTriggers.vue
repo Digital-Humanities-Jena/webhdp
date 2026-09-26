@@ -9,7 +9,7 @@
     <div class="mt-4 grid gap-3 md:grid-cols-2">
       <div>
         <label class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Default Behavior</label>
-        <select v-model="step.triggers.default_behavior" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+        <select aria-label="Default Behavior" v-model="step.triggers.default_behavior" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
           <option value="run">run</option>
           <option value="skip">skip</option>
         </select>

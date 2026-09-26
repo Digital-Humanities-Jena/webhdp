@@ -20,16 +20,37 @@ Reviewed 2026-09-26 through source inspection, regression tests and responsive b
 | Repeated saves requesting an existing version could collide with the next existing version. | Version selection advances until an unused number is found, keeping the stored row and configuration aligned. |
 | Enabled steps could depend on disabled producers or classifiers. | Server validation rejects these dependencies with instructions to enable the source or choose another one. |
 
+## Reliability priorities completed
+
+| Priority | Implemented behavior |
+| --- | --- |
+| Pin queued work to the checked definition. | Runs retain their pipeline version and persisted component versions. Saved definitions include component manifest hashes and pinned schemas. A signed, expiring preflight token binds the definition, user, session and selected paths. A later publication cannot change queued work. |
+| Pin container artifacts. | Docker installations retain their immutable image ID. Publication rejects mutable Docker tags and SIF profiles without checksums. HPC-Link records SIF checksums and component versions; local and remote SIF runners reject modified images before execution. Existing remote component version directories cannot be overwritten. Built-in Python handlers remain part of the application deployment. |
+| Report smoke tests honestly. | Missing test metadata returns `status: skipped`, `success: null`, and a separate readiness result. The interface never presents a skipped workload as a passing smoke test. |
+| Keep long runs recoverable. | Constructor execution is asynchronous. The server stores progress, results, step failures and artifacts. User-scoped browser recovery and run links reconnect without resubmitting. Progress uses reported completed-file counts; unknown durations remain indeterminate. |
+| Make retries and concurrent operations safe. | UUID request identities deduplicate runs, publications and installations. Publication identities survive restarts in the database. Cross-process registry locks protect version creation and installation; queued runs wait for session locks. Completed deliveries return stored results without rerunning processing. |
+| Recover uncertain installations. | Lost responses retain the original request identity. Recovery checks the remote registry, matching both request identity and manifest before registering the installed artifact. Unconfirmed outcomes stay visibly unresolved and cannot silently start duplicate installations. An incomplete remote version directory requires operator inspection and a new version rather than overwriting artifacts. |
+| Guide editing and repair. | Step cards collapse, show version/runtime/scope, and provide keyboard-accessible tabs. Removal identifies dependent steps and requests confirmation; removal and moves support Undo. Missing, disabled and out-of-order dependencies appear immediately with links to the affected connection. |
+| Make sample selection understandable. | The session selector shows uploaded filenames, dates and file counts. The session file picker is primary; manual absolute paths are advanced controls. Runtime, scope and trigger labels use clearer terms. |
+| Isolate optional diagnostics. | Catalog content renders independently of diagnostics, including when diagnostics are slow or unavailable. Errors are shown separately without hiding usable packages. Selection controls and external reference links are separate interactive elements. |
+
 ## Verification
 
-- Backend suite: **621 passed, 1 skipped**.
-- Frontend unit suite: **251 passed** across 71 files.
-- Focused browser suite: **12 passed**, covering Chromium and Firefox, including constructor layouts at 375 and 1536 pixels and the installer at 375 pixels.
+- Backend suite: **632 passed, 1 skipped**.
+- Frontend unit suite: **260 passed** across 72 files.
+- HPC-Link suite: **113 passed, 1 skipped**, with 3 passing subtests.
+- Focused browser suite: **14 passed** across Chromium and Firefox, including constructor layouts at 375 and 1536 pixels, the installer at 375 pixels, and run recovery after a page reload.
 - Production frontend build and whitespace checks passed.
+- The complete migration chain ran against a fresh SQLite database. The publication-request migration was also downgraded and upgraded again; both foreign keys were verified.
 - Desktop and narrow-screen screenshots were inspected.
+- Live validation on a Draco `vis` GPU allocation rendered OBJ, GLB and PLY fixtures, including a filename with spaces and Unicode. Each input produced two thumbnails. The existing SIF validator succeeded, and a deliberately incorrect checksum was rejected before execution.
 
-New regression cases cover stale responses, changed files and sources, interrupted preflight, rejected publication, cancelled discard, component import preserving edits, missing package sources, custom provenance, failed smoke tests, repeated version numbering and disabled dependencies. Existing suites continue to cover manifest schemas, bindings, triggers, output actions, installation and pipeline execution behavior.
+Regression tests include concurrent process locks, queued version pinning, changed manifests and artifacts, repeated request identities, publication retries after a newer version, session authorization, interrupted submissions, installation reconciliation, delayed progress callbacks, skipped smoke tests, unavailable diagnostics, dependency repair and keyboard controls.
 
-Browser API responses are controlled fixtures. These results do not constitute a live HPC installation or rendering test. The pre-execution configuration comparison detects intervening saves but does not atomically pin execution against a concurrent publication after that comparison. Existing execution API semantics are retained.
+Browser responses use controlled API fixtures. The live GPU check exercised the staged component runner and real rendering/SIF workloads; it did not exercise a newly deployed WebHDP-to-HPC-Link HTTP integration. The opt-in live installation acceptance test remains skipped when its adapter and SIF settings are absent. These distinctions are intentional: readiness, unit/browser verification and live workload execution are reported separately.
 
-Feature switches and deployment configuration are unchanged. No deployment, push or Zenodo publication is part of this change.
+## Deployment prerequisites
+
+Apply database migration `c8d9e0f12345` with the normal application migration procedure. Upgrade HPC-Link and its component runner together with WebHDP when deployment is authorized; remote installation recovery uses the component-status endpoint and persisted request identity. Importing a manifest with a mutable image is still possible, but publishing an enabled container step requires installation or an explicit immutable digest/checksum. Existing unverified optional components remain subject to the configured feature switches.
+
+Feature switches and deployment configuration are unchanged. No deployment, push, release-tag movement or Zenodo publication is part of this change.

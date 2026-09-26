@@ -6,7 +6,7 @@
     <div class="grid gap-3 md:grid-cols-2">
       <div>
         <label class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Parameter</label>
-        <select v-model="overrideRow.name" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" @change="actions.resetParameterOverrideValue(step, overrideRow)">
+        <select aria-label="Parameter" v-model="overrideRow.name" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" @change="actions.resetParameterOverrideValue(step, overrideRow)">
           <option value="">Select parameter</option>
           <option v-for="field in getAllParameterFields()" :key="field.name" :value="field.name">
             {{ field.label }}

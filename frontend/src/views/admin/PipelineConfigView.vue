@@ -205,6 +205,11 @@
               </div>
             </div>
 
+            <div v-if="dependencyIssues.length" role="alert" class="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+              <p class="font-semibold">Connections need attention</p>
+              <button v-for="(issue, index) in dependencyIssues" :key="index" type="button" class="mt-2 block text-left underline" @click="focusIssue(issue)">{{ issue.message }} Open connection</button>
+            </div>
+            <button v-if="undoSteps" type="button" class="mt-3 text-sm font-medium text-indigo-700 underline" @click="undoStepChange">Undo last step removal or move</button>
             <div v-if="editor.steps.length === 0" class="mt-6 rounded-2xl border border-dashed border-slate-300 px-6 py-14 text-center text-sm text-slate-500">
               Add components from the catalog to start constructing the pipeline.
             </div>
@@ -229,6 +234,16 @@
         <div :class="[diagnosticsPanelOpen ? 'block' : 'hidden', 'xl:col-span-2 2xl:col-span-1 2xl:block']">
           <PipelineConstructorSidePanel
           :execution-blocked-reason="executionBlockedReason"
+          :sessions="sessions"
+          :sessions-error="sessionsError"
+          :loading-sessions="loadingSessions"
+          :run-id="persistentRun.pending.value?.runId || ''"
+          :run-elapsed="persistentRun.elapsed.value"
+          :can-retry-request="Boolean(persistentRun.pending.value?.request)"
+          @retry-sessions="loadSessions"
+          @reconnect-run="persistentRun.refresh"
+          @retry-run-request="persistentRun.retry"
+          @focus-diagnostic="focusDiagnostic"
           :validation-result="validationResult"
           :preflight-result="preflightResult"
           :preflight-session-id="preflightSessionId"
@@ -269,6 +284,7 @@
 </template>
 
 <script setup>
+import { usePersistentPipelineRun } from '@/composables/usePersistentPipelineRun'
 import { computed, onMounted, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useRoute, onBeforeRouteLeave } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
@@ -307,7 +323,14 @@ const loading = ref(true)
 const validating = ref(false)
 const preflighting = ref(false)
 const saving = ref(false)
-const executingPipeline = ref(false)
+let publicationRequest = null
+const persistentRun = usePersistentPipelineRun(() => authStore.user?.id || 'current')
+const executingPipeline = persistentRun.active
+const sessions = ref([])
+const sessionsError = ref('')
+const loadingSessions = ref(false)
+const savedComponents = ref([])
+const undoSteps = ref(null)
 const validatingComponent = ref(false)
 const importingComponent = ref(false)
 const catalogPanelOpen = ref(false)
@@ -320,8 +343,8 @@ const selectedPipelineId = ref('')
 const validationResult = ref(null)
 const preflightResult = ref(null)
 const pipelineExecutionResult = ref(null)
-const pipelineExecutionRun = ref(null)
-const pipelineExecutionError = ref('')
+const pipelineExecutionRun = persistentRun.run
+const pipelineExecutionError = persistentRun.error
 const componentValidationResult = ref(null)
 const supportData = reactive({
   trigger_operators: [],
@@ -388,9 +411,10 @@ const loadedPipelineConfig = ref(null)
 const loadedPipelineId = ref('')
 const loadFailed = ref(false)
 let pipelineLoadToken = 0
-const busy = computed(() => loading.value || saving.value || validating.value || preflighting.value || executingPipeline.value || importingComponent.value || validatingComponent.value)
+const busy = computed(() => loading.value || saving.value || validating.value || preflighting.value || persistentRun.submitting.value || importingComponent.value || validatingComponent.value)
 const isDirty = computed(() => JSON.stringify(editor) !== cleanEditorSnapshot.value)
 const executionBlockedReason = computed(() => {
+  if (executingPipeline.value) return 'A run is active. Follow its progress below; you can leave and reconnect later.'
   if (busy.value) return 'Wait for the current operation to finish.'
   if (!savedEditorSnapshot.value || JSON.stringify(editor) !== savedEditorSnapshot.value) return 'Publish these changes before running. Runs use the saved version, not an editor draft.'
   if (!Number.isSafeInteger(Number(preflightSessionId.value)) || Number(preflightSessionId.value) <= 0) return 'Choose a valid session ID and its files in Preflight.'
@@ -547,7 +571,8 @@ function normalizeBinding(binding) {
 }
 
 function getComponentForStep(step) {
-  return componentMap.value[step.component_ref] || null
+  if (!step) return null
+  return savedComponents.value.find(item => item.key === step.component_ref && item.version === step.component_version) || componentMap.value[step.component_ref] || null
 }
 
 function getComponentProfiles(step) {
@@ -644,6 +669,8 @@ function buildStepState(component, rawStep = {}, stepIndex = 0, earlierStepDescr
     enabled: rawStep.enabled !== false,
     scope: rawStep.scope || defaultScopeForComponent(component?.key || rawStep.component_ref || rawStep.id),
     component_ref: rawStep.component_ref || component?.key,
+    component_version: rawStep.component_version || component?.version,
+    component_manifest_hash: rawStep.component_manifest_hash,
     execution_profile_ref: profileId,
     parameterForm: initializeParameterForm(component, rawStep.parameters || {}),
     structuredInputBindings: structuredBindings,
@@ -683,7 +710,7 @@ function hydrateEditor(config) {
   editor.tagsText = Array.isArray(config.tags) ? config.tags.join(', ') : ''
   const earlierStepDescriptors = []
   editor.steps = (config.steps || []).map((step, index) => {
-    const component = componentMap.value[step.component_ref || step.id]
+    const component = getComponentForStep(step)
     const hydratedStep = buildStepState(component, step, index, earlierStepDescriptors)
     earlierStepDescriptors.push({
       id: hydratedStep.id,
@@ -718,8 +745,7 @@ function resetEditor() {
   loadedPipelineId.value = ''
   loadedPipelineConfig.value = null
   pipelineExecutionResult.value = null
-  pipelineExecutionRun.value = null
-  pipelineExecutionError.value = ''
+  undoSteps.value = null
 }
 
 function cancelSessionResourceLoad() {
@@ -823,6 +849,7 @@ async function loadPipeline(identifier) {
   const response = await pipelineService.getPipeline(identifier)
   if (token !== pipelineLoadToken) return
   const config = response.data.pipeline.config || response.data.pipeline
+  savedComponents.value = response.data.pipeline.components || []
   hydrateEditor(config)
   loadedPipelineConfig.value = clone(config)
   loadedPipelineId.value = identifier
@@ -857,6 +884,7 @@ function addStepFromComponent(component) {
 }
 
 function moveStep(index, direction) {
+  undoSteps.value = clone(editor.steps)
   reorderMutableList(editor.steps, index, index + direction)
 }
 
@@ -874,6 +902,7 @@ function setStepDropTarget(step) {
 function dropStepOn(step) {
   const fromIndex = editor.steps.findIndex((entry) => entry.localKey === draggingStepKey.value)
   const toIndex = editor.steps.findIndex((entry) => entry.localKey === step.localKey)
+  undoSteps.value = clone(editor.steps)
   reorderMutableList(editor.steps, fromIndex, toIndex)
   endStepDrag()
 }
@@ -904,6 +933,10 @@ function duplicateStep(index) {
 }
 
 function removeStep(index) {
+  const step = editor.steps[index]
+  const dependants = editor.steps.filter(item => stepSources(item).some(binding => binding.source_step === step.id))
+  if (dependants.length && !window.confirm(`Remove ${step.name}? These steps depend on it: ${dependants.map(item => item.name).join(', ')}. Their connections will need updating. You can undo this removal.`)) return
+  undoSteps.value = clone(editor.steps)
   editor.steps.splice(index, 1)
 }
 
@@ -1325,6 +1358,8 @@ function serializeStep(step) {
     enabled: step.enabled !== false,
     scope: step.scope || 'record',
     component_ref: step.component_ref,
+    component_version: step.component_version,
+    component_manifest_hash: step.component_manifest_hash,
     execution_profile_ref: step.execution_profile_ref || 'builtin_default',
     parameters,
     input_bindings: [...structuredInputBindings, ...(advanced.input_bindings || [])],
@@ -1421,50 +1456,54 @@ async function runPreflight() {
 async function runPipelineExecution() {
   if (executionBlockedReason.value) { pipelineExecutionError.value = executionBlockedReason.value; return }
   diagnosticsPanelOpen.value = true
-  error.value = ''
-  successMessage.value = ''
-  pipelineExecutionError.value = ''
-  pipelineExecutionResult.value = null
-  pipelineExecutionRun.value = null
-  const localFilePaths = String(preflightFilePathsText.value || '')
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
-  if (!preflightSessionId.value) {
-    pipelineExecutionError.value = 'Session ID is required before running this pipeline.'
-    return
-  }
-  if (!localFilePaths.length) {
-    pipelineExecutionError.value = 'At least one local file path is required before running this pipeline.'
-    return
-  }
-  executingPipeline.value = true
-  try {
-    const payload = buildPipelinePayload()
-    const current = await pipelineService.getPipeline(payload.identifier)
-    if (JSON.stringify(current.data.pipeline.config || current.data.pipeline) !== JSON.stringify(loadedPipelineConfig.value)) throw new Error('The saved pipeline changed. Reload it and repeat preflight before running.')
-    const response = await pipelineService.executePipelineOnFiles(
-      Number(preflightSessionId.value),
-      localFilePaths,
-      true,
-      payload.identifier,
-      { abortOnCriticalError: true }
-    )
-    pipelineExecutionResult.value = response.data
-    const runId = response.data?.run_id || response.data?.result?.run_id
-    if (runId) {
-      const runResponse = await pipelineService.getPipelineRun(runId)
-      pipelineExecutionRun.value = runResponse.data?.run || runResponse.data
-    }
-    if (response.data?.result?.success === false || response.data?.result?.summary?.failed_count > 0 || pipelineExecutionRun.value?.status === 'failed') {
-      pipelineExecutionError.value = response.data?.result?.error || 'The run reported failures. Review the step results before retrying.'
-      toast.warning('Pipeline finished with failures')
-    } else toast.success('Pipeline execution completed')
-  } catch (err) {
-    pipelineExecutionError.value = err.error?.message || err.message || 'Failed to run pipeline.'
-  } finally {
-    executingPipeline.value = false
-  }
+  await persistentRun.start({
+    sessionId: Number(preflightSessionId.value),
+    paths: preflightFilePathsText.value.split('\n').map(path => path.trim()).filter(Boolean),
+    identifier: editor.identifier,
+    version: loadedPipelineConfig.value.version,
+    preflightToken: preflightResult.value?.preflight_token,
+  })
+}
+
+async function loadSessions() {
+  loadingSessions.value = true
+  sessionsError.value = ''
+  try { sessions.value = (await fileService.listSessions()).data?.sessions || [] }
+  catch (err) { sessionsError.value = err?.error?.message || err.message || 'Could not load sessions. Retry the session list.' }
+  finally { loadingSessions.value = false }
+}
+
+function stepSources(step) {
+  let advanced = {}
+  try { advanced = JSON.parse(step.advancedJson || '{}') } catch { /* JSON validation reports malformed advanced settings. */ }
+  const advancedBindings = [...(Array.isArray(advanced?.input_bindings) ? advanced.input_bindings : []), ...(Array.isArray(advanced?.parameter_bindings) ? advanced.parameter_bindings : [])].filter(Boolean).map(binding => ({ ...binding, advanced: true }))
+  return [...Object.values(step.structuredInputBindings || {}).filter(binding => binding?.enabled), ...advancedBindings, ...(step.triggers?.rules || []).flatMap(rule => rule.conditions || [])].filter(item => item?.source_step)
+}
+const dependencyIssues = computed(() => editor.steps.flatMap((step, index) => stepSources(step).flatMap(binding => {
+  const source = editor.steps.findIndex(item => item.id === binding.source_step)
+  const problem = source < 0 ? 'is missing' : source >= index ? 'must appear earlier' : !editor.steps[source].enabled && step.enabled ? 'is disabled' : ''
+  return problem ? [{ stepId: step.id, message: `${step.name}: source “${binding.source_step}” ${problem}.`, target: binding.target, advanced: binding.advanced, trigger: !binding.target }] : []
+})))
+function focusIssue(issue) {
+  const card = document.querySelector(`[data-testid="step-card-${CSS.escape(issue.stepId)}"]`)
+  if (!card) return
+  card.open = true
+  const tab = card.querySelector(`[data-tab="${issue.advanced ? 'advanced' : issue.trigger ? 'triggers' : 'inputs'}"]`)
+  tab?.click()
+  requestAnimationFrame(() => {
+    const target = issue.advanced ? card.querySelector('textarea[data-testid]') : issue.target ? card.querySelector(`[data-testid="binding-source-step-${CSS.escape(issue.stepId)}-${CSS.escape(issue.target)}"]`) : tab
+    ;(target || card.querySelector('input'))?.focus()
+    card.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  })
+}
+function focusDiagnostic(message) {
+  const step = editor.steps.find(item => String(message).includes(`'${item.id}'`))
+  if (step) focusIssue({ stepId: step.id, trigger: String(message).includes('trigger') })
+}
+function undoStepChange() {
+  if (!undoSteps.value) return
+  editor.steps = undoSteps.value
+  undoSteps.value = null
 }
 
 async function publishPipeline() {
@@ -1478,9 +1517,11 @@ async function publishPipeline() {
     validationResult.value = check.data
     diagnosticsPanelOpen.value = true
     if (check.data?.valid !== true) throw new Error('Resolve the validation errors before publishing this version.')
-    const response = await pipelineService.createPipelineVersion(payload.identifier, payload)
+    const fingerprint = JSON.stringify(payload)
+    if (publicationRequest?.fingerprint !== fingerprint) publicationRequest = { fingerprint, id: crypto.randomUUID() }
+    const response = await pipelineService.createPipelineVersion(payload.identifier, payload, { requestId: publicationRequest.id })
     await loadInitialData(payload.identifier)
-    successMessage.value = `Published ${response.data.pipeline.identifier} (${response.data.pipeline.active_version || response.data.pipeline.version || 'new version'}).${loadFailed.value ? ' Reload the saved version before testing it.' : ''}`
+    successMessage.value = `Published ${response.data.pipeline.identifier} (${response.data.pipeline.publication_version || response.data.pipeline.active_version || response.data.pipeline.version || 'new version'}).${loadFailed.value ? ' Reload the saved version before testing it.' : ''}`
   } catch (err) {
     error.value = err.error?.message || err.message || 'Failed to publish pipeline.'
   } finally {
@@ -1623,7 +1664,9 @@ onMounted(async () => {
   if (!authStore.user) {
     await authStore.fetchCurrentUser()
   }
-  await loadInitialData()
+  await Promise.all([loadInitialData(), loadSessions()])
+  await persistentRun.resume(new URLSearchParams(window.location.search).get('run'))
+  if (persistentRun.pending.value) diagnosticsPanelOpen.value = true
   if (route.path.startsWith('/tools')) {
     successMessage.value = ''
   }

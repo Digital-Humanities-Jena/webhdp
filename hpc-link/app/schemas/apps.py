@@ -445,6 +445,7 @@ class WebHdpComponentInstallValidateRequest(BaseModel):
 class WebHdpComponentInstallRequest(WebHdpComponentInstallValidateRequest):
     """Install a SIF-backed WebHDP component under the HPC app registry."""
     manifest_hash: str = Field(min_length=1, max_length=128)
+    request_id: Optional[str] = Field(default=None, min_length=1, max_length=36)
 
 
 class WebHdpComponentInstallResponse(BaseModel):
@@ -456,6 +457,7 @@ class WebHdpComponentInstallResponse(BaseModel):
     sif_remote_path: str
     manifest_path: str
     registry_path: str
+    sif_sha256: str
     checks: dict[str, Any] = Field(default_factory=dict)
     logs: dict[str, Any] = Field(default_factory=dict)
     error: Optional[str] = None

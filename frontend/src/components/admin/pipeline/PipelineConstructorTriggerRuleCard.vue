@@ -27,15 +27,15 @@
         </div>
         <div>
           <label class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Rule ID</label>
-          <input v-model.trim="rule.id" type="text" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+          <input aria-label="Rule ID" v-model.trim="rule.id" type="text" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
         </div>
         <div>
           <label class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Label</label>
-          <input v-model.trim="rule.label" type="text" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+          <input aria-label="Label" v-model.trim="rule.label" type="text" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
         </div>
         <div>
           <label class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Action</label>
-          <select v-model="rule.action" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+          <select aria-label="Action" v-model="rule.action" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
             <option value="run">run</option>
             <option value="skip">skip</option>
           </select>

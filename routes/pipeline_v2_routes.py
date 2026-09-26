@@ -9,7 +9,8 @@ from flask_jwt_extended import get_jwt_identity, jwt_required
 from api_utils import APIResponse
 from database.database import db
 from database.models import User, UserRole
-from exceptions import SecurityError
+from exceptions import SecurityError, ValidationError
+from uuid import UUID
 from routes.admin_routes import require_admin
 from routes.access_helpers import get_session_with_permission
 from schemas.native_pipeline_schemas import PipelineExecutionRequestSchema
@@ -120,12 +121,15 @@ def get_pipeline_v2(identifier):
 @jwt_required()
 @require_pipeline_author
 def create_pipeline_version_v2(identifier):
-    data = request.get_json() or {}
+    data = dict(request.get_json() or {})
+    request_id = data.pop("request_id", None)
+    activate = bool(data.pop("activate", True))
     user_id = get_jwt_identity()
     pipeline = current_app.native_pipeline_service.create_pipeline_version_from_config(
         identifier,
         data,
-        activate=bool(data.get("activate", True)),
+        activate=activate,
+        request_id=request_id,
         created_by_user_id=int(user_id) if user_id else None,
         mirror_legacy_config=True,
     )
@@ -158,8 +162,15 @@ def preflight_pipeline_constructor_v2():
 def execute_pipeline_v2(identifier):
     data = request.get_json() or {}
     user_id = get_jwt_identity()
+    try:
+        request_id = str(UUID(data["request_id"])) if data.get("request_id") else None
+    except (ValueError, TypeError, AttributeError):
+        raise ValidationError("request_id must be a UUID")
     payload = {
         "pipeline_identifier": identifier,
+        "request_id": request_id,
+        "expected_version": data.get("expected_version"),
+        "preflight_token": data.get("preflight_token"),
         "session_id": data.get("session_id"),
         "local_file_paths": data.get("local_file_paths") or [],
         "record_ids": data.get("record_ids") or [],
@@ -184,17 +195,27 @@ def execute_pipeline_v2(identifier):
             initiated_by_user_id=int(user_id) if user_id else None,
             request_payload=payload,
         )
-        task = _enqueue_submission_pipeline_task(
-            None,
-            identifier,
-            request_model.local_file_paths,
-            request_model.session_id,
-            request_model.is_sandbox,
-            request_model.abort_on_critical_error,
-            request_model.record_ids,
-            [item.model_dump(mode="python") for item in request_model.execution_items],
-            pending_run["run_id"],
-        )
+        if pending_run.get("reused"):
+            return APIResponse.accepted(data=pending_run, message="Reconnected to existing pipeline run")
+        try:
+            task = _enqueue_submission_pipeline_task(
+                None,
+                identifier,
+                request_model.local_file_paths,
+                request_model.session_id,
+                request_model.is_sandbox,
+                request_model.abort_on_critical_error,
+                request_model.record_ids,
+                [item.model_dump(mode="python") for item in request_model.execution_items],
+                pending_run["run_id"],
+            )
+        except Exception:
+            from database.models import PipelineRun, PipelineRunStatus
+            row = PipelineRun.query.filter_by(public_id=pending_run["run_id"]).one()
+            row.status = PipelineRunStatus.FAILED
+            row.error_message = "Could not enqueue this run. Retry with a new run after the worker connection is restored."
+            db.session.commit()
+            raise
         return APIResponse.accepted(
             data={
                 "run_id": pending_run["run_id"],
@@ -233,7 +254,7 @@ def execute_pipeline_v2(identifier):
 @pipeline_v2_bp.route("/runs/<run_id>", methods=["GET"])
 @jwt_required()
 def get_pipeline_run_v2(run_id):
-    run_payload = current_app.native_pipeline_service.get_pipeline_run(run_id)
+    run_payload = current_app.native_pipeline_service.get_pipeline_run(run_id, int(get_jwt_identity()))
     return APIResponse.success(data={"run": run_payload})
 
 

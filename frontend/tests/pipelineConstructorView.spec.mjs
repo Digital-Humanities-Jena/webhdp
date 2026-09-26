@@ -19,6 +19,7 @@ const mocked = vi.hoisted(() => ({
   },
   fileService: {
     getNodes: vi.fn(),
+    listSessions: vi.fn().mockResolvedValue({ data: { sessions: [{ id: 42, name: 'Test session' }] } }),
   },
   toast: {
     success: vi.fn(),
@@ -173,6 +174,7 @@ async function mountConstructorView({
   routePath = '/admin/pipelines',
 }) {
   resetServiceMocks()
+  mocked.fileService.listSessions.mockResolvedValue({ data: { sessions: [{ id: 42, name: 'Test session' }] } })
   mocked.route.path = routePath
   mocked.pipelineService.listPipelines.mockResolvedValue({
     data: {
@@ -304,6 +306,8 @@ async function dragAndDrop(wrapper, handleSelector, targetSelector) {
 
 describe('PipelineConfigView constructor interactions', () => {
   beforeEach(() => {
+  sessionStorage.clear()
+  mocked.fileService.listSessions.mockResolvedValue({ data: { sessions: [{ id: 42, name: 'Test session' }] } })
     mocked.route.path = '/admin/pipelines'
   })
 
@@ -925,7 +929,7 @@ describe('PipelineConfigView constructor interactions', () => {
       ['/tmp/model.glb'],
       true,
       'three_d_analysis_pipeline',
-      { abortOnCriticalError: true },
+      expect.objectContaining({ abortOnCriticalError: true, asyncExecution: true, requestId: expect.any(String), expectedVersion: '1.0.0' }),
     )
     expect(mocked.pipelineService.getPipelineRun).toHaveBeenCalledWith('run-3d')
     expect(wrapper.text()).toContain('profile_model')
@@ -1112,6 +1116,46 @@ describe('PipelineConfigView constructor interactions', () => {
     await flushPromises()
     expect(wrapper.get('input[aria-label="Name"]').element.value).toBe('Keep after import')
     expect(mocked.pipelineService.getPipeline).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
+  it('warns about dependent steps and restores removed connections with Undo', async () => {
+    const wrapper = await mountConstructorView({ pipelineConfig: { ...reliabilityConfig, steps: [
+      { id: 'produce', name: 'Produce', component_ref: 'consumer' },
+      { id: 'consume', name: 'Consume', component_ref: 'consumer', input_bindings: [{ kind: 'input', target: 'input_file', type: 'artifact_file', source_step: 'produce', source_output: 'output_file' }] },
+    ] } })
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    await wrapper.get('[data-testid="step-card-produce"]').findAll('button').find(button => button.text() === 'Remove').trigger('click')
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('Consume'))
+    expect(wrapper.text()).toContain('source “produce” is missing')
+    await wrapper.findAll('button').find(button => button.text().startsWith('Undo last step')).trigger('click')
+    expect(wrapper.find('[data-testid="step-card-produce"]').exists()).toBe(true)
+    expect(wrapper.text()).not.toContain('source “produce” is missing')
+    confirm.mockRestore()
+    wrapper.unmount()
+  })
+
+  it('keeps the editor usable while advanced JSON has invalid binding shapes', async () => {
+    const wrapper = await mountConstructorView({ pipelineConfig: reliabilityConfig })
+    const card = wrapper.find('[data-testid^="step-card-"]')
+    await card.get('[data-tab="advanced"]').trigger('click')
+    for (const value of ['null', '{"input_bindings": {}}', '{"parameter_bindings": [null]}', '{']) {
+      await card.get('textarea[data-testid^="advanced-json-"]').setValue(value)
+      expect(wrapper.text()).toContain('Pipeline Constructor')
+    }
+    wrapper.unmount()
+  })
+
+  it('flags a moved source immediately and provides keyboard-accessible settings tabs', async () => {
+    const wrapper = await mountConstructorView({ pipelineConfig: { ...reliabilityConfig, steps: [
+      { id: 'produce', name: 'Produce', component_ref: 'consumer' },
+      { id: 'consume', name: 'Consume', component_ref: 'consumer', input_bindings: [{ kind: 'input', target: 'input_file', type: 'artifact_file', source_step: 'produce', source_output: 'output_file' }] },
+    ] } })
+    const card = wrapper.get('[data-testid="step-card-produce"]')
+    await card.findAll('button').find(button => button.text() === 'Down').trigger('click')
+    expect(wrapper.text()).toContain('source “produce” must appear earlier')
+    await card.get('[role="tablist"]').trigger('keydown', { key: 'ArrowRight' })
+    expect(card.get('[data-tab="parameters"]').attributes('aria-selected')).toBe('true')
     wrapper.unmount()
   })
 

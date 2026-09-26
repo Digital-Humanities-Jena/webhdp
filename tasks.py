@@ -773,6 +773,11 @@ def execute_submission_pipeline_task(
             "timings": execution_output["timings"],
         }
     except Exception as exc:
+        from services.pipeline_execution_lock import PipelineAlreadyRunning
+        if isinstance(exc, PipelineAlreadyRunning):
+            if precreated_run_public_id:
+                raise self.retry(exc=exc, countdown=30, max_retries=None)
+            raise
         logger.error(f"Async pipeline submission {submission_id} failed: {exc}", exc_info=True)
         db.session.rollback()
 

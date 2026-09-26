@@ -10,12 +10,15 @@ import mimetypes
 import os
 import re
 import time
+from uuid import UUID
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import yaml
 from flask import current_app
+from itsdangerous import URLSafeTimedSerializer, BadSignature
+from services.registry_lock import serialize_registry, OperationConflict
 
 from constants import (
     LEGACY_PIPELINE_ALIASES,
@@ -34,6 +37,7 @@ from database.models import (
     PipelineBinding,
     PipelineDefinition,
     PipelineOutputAction,
+    PipelinePublicationRequest,
     PipelineRun,
     PipelineRunStatus,
     PipelineStep,
@@ -437,6 +441,7 @@ class NativePipelineSystemService:
             already_normalized=True,
         )
 
+    @serialize_registry("native-registry")
     def import_component_from_manifest(
         self,
         manifest: Dict[str, Any],
@@ -537,10 +542,15 @@ class NativePipelineSystemService:
             payload["canonical_identifier"] = canonical_identifier
         return payload
 
-    def get_pipeline_run(self, run_public_id: str) -> Dict[str, Any]:
+    def get_pipeline_run(self, run_public_id: str, user_id: Optional[int] = None) -> Dict[str, Any]:
         run = PipelineRun.query.filter_by(public_id=run_public_id).first()
         if run is None:
             raise ResourceNotFoundError("Pipeline run not found", details={"run_id": run_public_id})
+        if user_id is not None:
+            session = db.session.get(DBSession, run.session_id) if run.session_id else None
+            if session is None:
+                raise ResourceNotFoundError("Run session is unavailable")
+            self._assert_user_can_access_session(session, user_id)
         return self._serialize_pipeline_run(run)
 
     def get_playground_run(self, run_public_id: str) -> Dict[str, Any]:
@@ -603,7 +613,7 @@ class NativePipelineSystemService:
         summary_steps: List[Dict[str, Any]] = []
 
         for step in steps:
-            step_component = self._get_component_manifest_by_key(step.get("component_ref") or step.get("id"))
+            step_component = self._get_component_manifest_by_key(step.get("component_ref") or step.get("id"), step.get("component_version"))
             step_resolution_rows = []
             if step.get("scope") == "batch":
                 input_definitions = self._field_definition_map(step_component.get("inputs") or [])
@@ -731,6 +741,7 @@ class NativePipelineSystemService:
         return {
             "valid": True,
             "pipeline": normalized,
+            "preflight_token": self._preflight_signer().dumps({"config_hash": _hash_payload(normalized), "session_id": request_model.session_id, "paths": request_model.local_file_paths, "user_id": user_id}),
             "validation": validation,
             "steps": summary_steps,
         }
@@ -846,6 +857,7 @@ class NativePipelineSystemService:
         warnings = self._collect_pipeline_validation_warnings(normalized)
         return {"valid": len(errors) == 0, "normalized": normalized, "warnings": warnings, "errors": errors}
 
+    @serialize_registry("native-registry")
     def create_pipeline_version_from_config(
         self,
         identifier: str,
@@ -854,8 +866,22 @@ class NativePipelineSystemService:
         activate: bool = True,
         created_by_user_id: Optional[int] = None,
         mirror_legacy_config: bool = False,
+        request_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         self.ensure_seeded()
+        request_fingerprint = _hash_payload({"identifier": identifier, "config": pipeline_definition, "activate": activate})
+        if request_id:
+            try:
+                request_id = str(UUID(request_id))
+            except (ValueError, TypeError, AttributeError):
+                raise ValidationError("request_id must be a UUID")
+            previous = db.session.get(PipelinePublicationRequest, request_id)
+            if previous:
+                if previous.user_id != created_by_user_id or previous.fingerprint != request_fingerprint:
+                    raise OperationConflict("This publication request identifier was already used for different changes.")
+                version = db.session.get(PipelineVersion, previous.pipeline_version_id)
+                definition = db.session.get(PipelineDefinition, version.pipeline_definition_id)
+                return {**self._serialize_pipeline_definition(definition), "publication_version": version.version, "reused": True}
         canonical_identifier = self.resolve_pipeline_identifier(identifier)
         normalized = self._normalize_pipeline_config(pipeline_definition, identifier=canonical_identifier)
         PipelineDefinitionSchema.model_validate(normalized)
@@ -898,8 +924,10 @@ class NativePipelineSystemService:
                 self._mirror_pipeline_config(canonical_identifier, current_config)
                 if identifier != canonical_identifier:
                     self._mirror_pipeline_config(identifier, current_config)
+            if request_id:
+                db.session.add(PipelinePublicationRequest(request_id=request_id, fingerprint=request_fingerprint, pipeline_version_id=current_version.id, user_id=created_by_user_id))
             db.session.commit()
-            return self._serialize_pipeline_definition(definition)
+            return {**self._serialize_pipeline_definition(definition), "publication_version": current_version.version}
 
         requested_version = str(normalized.get("version") or "").strip()
         version_number = requested_version or _increment_semver(current_version.version if current_version else "1.0.0")
@@ -948,8 +976,10 @@ class NativePipelineSystemService:
             if identifier != canonical_identifier:
                 self._mirror_pipeline_config(identifier, normalized)
 
+        if request_id:
+            db.session.add(PipelinePublicationRequest(request_id=request_id, fingerprint=request_fingerprint, pipeline_version_id=version_row.id, user_id=created_by_user_id))
         db.session.commit()
-        return self._serialize_pipeline_definition(definition)
+        return {**self._serialize_pipeline_definition(definition), "publication_version": version_row.version}
 
     @staticmethod
     def _pipeline_semantic_hash(config: Dict[str, Any]) -> str:
@@ -957,6 +987,7 @@ class NativePipelineSystemService:
         comparable.pop("version", None)
         return _hash_payload(comparable)
 
+    @serialize_registry("native-registry")
     def create_pending_run(
         self,
         identifier: str,
@@ -966,6 +997,13 @@ class NativePipelineSystemService:
         request_payload: Dict[str, Any],
     ) -> Dict[str, Any]:
         self.ensure_seeded()
+        request_id = request_payload.get("request_id")
+        if request_id:
+            existing = PipelineRun.query.filter_by(public_id=request_id).first()
+            if existing:
+                if existing.initiated_by_user_id != initiated_by_user_id or _json_loads(existing.request_json, {}).get("request_fingerprint") != _hash_payload(request_payload):
+                    raise OperationConflict("This request identifier already belongs to another operation.")
+                return {"run_id": existing.public_id, "status": existing.status.value, "reused": True, "pipeline_identifier": identifier, "pipeline_version": db.session.get(PipelineVersion, existing.pipeline_version_id).version}
         canonical_identifier = self.resolve_pipeline_identifier(identifier)
         definition = PipelineDefinition.query.filter_by(identifier=canonical_identifier, is_active=True).first()
         if definition is None:
@@ -974,13 +1012,20 @@ class NativePipelineSystemService:
         if version_row is None:
             raise FileProcessingError(f"Pipeline '{identifier}' has no active version")
 
+        if request_payload.get("expected_version") and version_row.version != request_payload["expected_version"]:
+            raise OperationConflict("The active pipeline version changed. Reload it and repeat preflight.")
+        self._verify_preflight(request_payload, _json_loads(version_row.config_json, {}), initiated_by_user_id)
+        active_run = PipelineRun.query.filter(PipelineRun.session_id == session_id, PipelineRun.status.in_([PipelineRunStatus.PENDING, PipelineRunStatus.RUNNING])).first()
+        if active_run:
+            raise OperationConflict("This session already has an active run.", details={"run_id": active_run.public_id})
         pipeline_run = PipelineRun(
+            **({"public_id": request_id} if request_id else {}),
             pipeline_definition_id=definition.id,
             pipeline_version_id=version_row.id,
             session_id=session_id,
             initiated_by_user_id=initiated_by_user_id,
             status=PipelineRunStatus.PENDING,
-            request_json=_json_dumps(request_payload),
+            request_json=_json_dumps({**request_payload, "request_fingerprint": _hash_payload(request_payload)}),
             started_at=datetime.utcnow(),
         )
         db.session.add(pipeline_run)
@@ -994,7 +1039,7 @@ class NativePipelineSystemService:
 
     def update_run_progress(self, run_public_id: str, progress_payload: Dict[str, Any]) -> None:
         run = PipelineRun.query.filter_by(public_id=run_public_id).first()
-        if run is None:
+        if run is None or run.status not in {PipelineRunStatus.PENDING, PipelineRunStatus.RUNNING}:
             return
         run.result_json = _json_dumps({"status": "running", "progress": progress_payload})
         if run.status == PipelineRunStatus.PENDING:
@@ -1013,13 +1058,15 @@ class NativePipelineSystemService:
         definition = PipelineDefinition.query.filter_by(identifier=canonical_identifier, is_active=True).first()
         if definition is None:
             raise FileProcessingError(f"Pipeline '{identifier}' is not registered in the native pipeline system")
-        version_row = self._get_active_pipeline_version_row(definition)
+        pipeline_run = PipelineRun.query.filter_by(public_id=existing_run_public_id).first() if existing_run_public_id else None
+        if existing_run_public_id and (pipeline_run is None or pipeline_run.pipeline_definition_id != definition.id or pipeline_run.session_id != execution_context.get("db_session_id")):
+            raise ValidationError("The queued run does not match this pipeline and session")
+        if pipeline_run and pipeline_run.status in {PipelineRunStatus.COMPLETED, PipelineRunStatus.FAILED}:
+            return {**_json_loads(pipeline_run.result_json, {}), "success": pipeline_run.status == PipelineRunStatus.COMPLETED, "run_id": pipeline_run.public_id, "error": pipeline_run.error_message}
+        version_row = db.session.get(PipelineVersion, pipeline_run.pipeline_version_id) if pipeline_run else self._get_active_pipeline_version_row(definition)
         if version_row is None:
-            raise FileProcessingError(f"Pipeline '{identifier}' has no active version")
+            raise FileProcessingError(f"Pipeline '{identifier}' has no selected version")
         config = _json_loads(version_row.config_json, {})
-        pipeline_run = None
-        if existing_run_public_id:
-            pipeline_run = PipelineRun.query.filter_by(public_id=existing_run_public_id).first()
         if pipeline_run is None:
             pipeline_run = PipelineRun(
                 pipeline_definition_id=definition.id,
@@ -1049,19 +1096,6 @@ class NativePipelineSystemService:
             pipeline_run.pipeline_definition_id = definition.id
             pipeline_run.pipeline_version_id = version_row.id
             pipeline_run.session_id = execution_context.get("db_session_id")
-            pipeline_run.request_json = _json_dumps(
-                {
-                    "identifier": identifier,
-                    "canonical_identifier": canonical_identifier,
-                    "local_file_paths": execution_context.get("local_file_paths", []),
-                    "record_ids": execution_context.get("record_ids", []),
-                    "is_sandbox": execution_context.get("is_sandbox", True),
-                    "zenodo_environment": execution_context.get("zenodo_environment"),
-                    "credential_source": execution_context.get("credential_source"),
-                    "publishing_context": execution_context.get("publishing_context", {}),
-                    "abort_on_critical_error": execution_context.get("abort_on_critical_error", False),
-                }
-            )
             pipeline_run.started_at = pipeline_run.started_at or datetime.utcnow()
         db.session.commit()
 
@@ -1302,7 +1336,7 @@ class NativePipelineSystemService:
         db.session.flush()
 
         for order_index, step in enumerate(config.get("steps", []), start=1):
-            component_version_id = self._resolve_component_version_id(step.get("component_ref"))
+            component_version_id = self._step_component_version(step).id
             row = PipelineStep(
                 pipeline_version_id=version_row.id,
                 step_key=step["id"],
@@ -1443,14 +1477,16 @@ class NativePipelineSystemService:
         version_row = self._get_active_pipeline_version_row(definition)
         summary["active_version"] = version_row.version if version_row else None
         summary["config"] = _json_loads(version_row.config_json, {}) if version_row else {}
+        summary["components"] = [self._serialize_component_version(db.session.get(ComponentDefinition, row.component_definition_id), row) for row in {step.component_version_id: db.session.get(ComponentVersion, step.component_version_id) for step in version_row.steps if step.component_version_id}.values()] if version_row else []
         return summary
 
     def _serialize_pipeline_run(self, run: PipelineRun) -> Dict[str, Any]:
         return {
             "run_id": run.public_id,
+            "pipeline_version": db.session.get(PipelineVersion, run.pipeline_version_id).version,
             "status": run.status.value if hasattr(run.status, "value") else run.status,
-            "started_at": run.started_at.isoformat() if run.started_at else None,
-            "completed_at": run.completed_at.isoformat() if run.completed_at else None,
+            "started_at": run.started_at.isoformat() + "Z" if run.started_at else None,
+            "completed_at": run.completed_at.isoformat() + "Z" if run.completed_at else None,
             "request": _json_loads(run.request_json, {}),
             "result": _json_loads(run.result_json, {}),
             "timings": _json_loads(run.timings_json, {}),
@@ -1488,8 +1524,8 @@ class NativePipelineSystemService:
         return {
             "run_id": run.public_id,
             "status": run.status.value if hasattr(run.status, "value") else run.status,
-            "started_at": run.started_at.isoformat() if run.started_at else None,
-            "completed_at": run.completed_at.isoformat() if run.completed_at else None,
+            "started_at": run.started_at.isoformat() + "Z" if run.started_at else None,
+            "completed_at": run.completed_at.isoformat() + "Z" if run.completed_at else None,
             "request": _json_loads(run.request_json, {}),
             "result": _json_loads(run.result_json, {}),
             "logs": _json_loads(run.logs_json, {}),
@@ -1576,15 +1612,41 @@ class NativePipelineSystemService:
             }
         return sorted(combined.values(), key=lambda item: (str(item.get("scope") or ""), str(item.get("path") or "")))
 
-    def _get_component_manifest_by_key(self, component_key: str) -> Dict[str, Any]:
+    def _step_component_version(self, step):
+        definition = ComponentDefinition.query.filter_by(key=step.get("component_ref") or step["id"]).first()
+        if definition is None:
+            raise ValidationError("Component is not registered")
+        query = ComponentVersion.query.filter_by(component_definition_id=definition.id)
+        query = query.filter_by(version=step["component_version"]) if step.get("component_version") else query.filter_by(is_active=True)
+        version = query.order_by(ComponentVersion.created_at.desc()).first()
+        if version is None:
+            raise ValidationError("The selected component version is unavailable")
+        if step.get("component_manifest_hash") and step["component_manifest_hash"] != version.manifest_hash:
+            raise OperationConflict("The component manifest changed. Select a new component version and publish again.")
+        return version
+
+    def _preflight_signer(self):
+        return URLSafeTimedSerializer(current_app.config["SECRET_KEY"], salt="pipeline-preflight-v1")
+
+    def _verify_preflight(self, payload, config, user_id):
+        token = payload.get("preflight_token")
+        if not token:
+            return
+        try:
+            checked = self._preflight_signer().loads(token, max_age=3600)
+        except BadSignature as exc:
+            raise OperationConflict("Preflight expired or is invalid. Check the selected files again.") from exc
+        expected = {"config_hash": _hash_payload(self._normalize_pipeline_config(config)), "session_id": payload.get("session_id"), "paths": payload.get("local_file_paths"), "user_id": user_id}
+        if checked != expected:
+            raise OperationConflict("The definition or selected files changed. Repeat preflight before running.")
+
+    def _get_component_manifest_by_key(self, component_key: str, version: Optional[str] = None) -> Dict[str, Any]:
         definition = ComponentDefinition.query.filter_by(key=component_key, is_active=True).first()
         if definition is None:
             raise ValidationError("Component is not registered", details={"component_key": component_key})
-        version_row = (
-            ComponentVersion.query.filter_by(component_definition_id=definition.id, is_active=True)
-            .order_by(ComponentVersion.created_at.desc())
-            .first()
-        )
+        query = ComponentVersion.query.filter_by(component_definition_id=definition.id)
+        query = query.filter_by(version=version) if version else query.filter_by(is_active=True)
+        version_row = query.order_by(ComponentVersion.created_at.desc()).first()
         if version_row is None:
             raise ValidationError("Component has no active version", details={"component_key": component_key})
         manifest = _json_loads(version_row.manifest_json, {})
@@ -2943,6 +3005,8 @@ class NativePipelineSystemService:
 
     def _normalize_pipeline_config(self, pipeline_definition: Dict[str, Any], *, identifier: Optional[str] = None) -> Dict[str, Any]:
         raw = _deepcopy(pipeline_definition or {})
+        for transport_field in ("activate", "request_id"):
+            raw.pop(transport_field, None)
         raw["identifier"] = identifier or raw.get("identifier") or PREDEFINED_PIPELINE_ID
         raw.setdefault("name", raw["identifier"])
         raw.setdefault("description", "")
@@ -2984,6 +3048,14 @@ class NativePipelineSystemService:
             normalized_step.setdefault("component_ref", component_map.get(normalized_step.get("id"), normalized_step.get("id")))
             normalized_step.setdefault("execution_profile_ref", "builtin_default")
             normalized_step.setdefault("scope", scope_overrides.get(normalized_step.get("id"), "record"))
+            if not normalized_step.get("component_version"):
+                version_id = self._resolve_component_version_id(normalized_step["component_ref"])
+                component_version = db.session.get(ComponentVersion, version_id) if version_id else None
+                if component_version:
+                    normalized_step["component_version"] = component_version.version
+            if normalized_step.get("component_version"):
+                component_version = self._step_component_version(normalized_step)
+                normalized_step.setdefault("component_manifest_hash", component_version.manifest_hash)
             normalized_steps.append(normalized_step)
         raw["steps"] = normalized_steps
         validated = PipelineDefinitionSchema.model_validate(raw)
@@ -3062,11 +3134,19 @@ class NativePipelineSystemService:
         for step in pipeline_definition.get("steps", []):
             component_key = step.get("component_ref") or step.get("id")
             try:
-                manifest = self._get_component_manifest_by_key(component_key)
+                manifest = self._get_component_manifest_by_key(component_key, step.get("component_version"))
             except ValidationError as exc:
                 errors.append(f"Step '{step.get('id')}' references an unavailable component '{component_key}': {exc}")
                 continue
             manifests_by_step[step["id"]] = manifest
+            profile = next((item for item in manifest.get("execution", {}).get("profiles", []) if item.get("id") == step.get("execution_profile_ref")), {})
+            if step.get("enabled", True):
+                if profile.get("adapter") == "container_cli" and profile.get("runtime") == "docker":
+                    if not re.fullmatch(r"(?:sha256:|.+@sha256:)[a-fA-F0-9]{64}", str(profile.get("image") or "")):
+                        errors.append(f"Step '{step['id']}' uses a mutable Docker image. Install this component through HDP Components or specify an immutable SHA-256 image digest before publishing.")
+                if (profile.get("adapter") == "container_cli" and profile.get("runtime") == "singularity") or profile.get("handler") == "generic_singularity_component":
+                    if not re.fullmatch(r"[a-fA-F0-9]{64}", str(profile.get("sif_sha256") or "")):
+                        errors.append(f"Step '{step['id']}' has no pinned SIF checksum. Install and verify this component through HDP Components before publishing.")
             input_definitions = self._field_definition_map(manifest.get("inputs") or [])
             parameter_definitions = self._component_parameter_definition_map(manifest)
             input_types = {
@@ -3110,7 +3190,7 @@ class NativePipelineSystemService:
                         if source_manifest is None:
                             try:
                                 source_component_key = pipeline_definition["steps"][step_order[source_step]].get("component_ref") or source_step
-                                source_manifest = self._get_component_manifest_by_key(source_component_key)
+                                source_manifest = self._get_component_manifest_by_key(source_component_key, pipeline_definition["steps"][step_order[source_step]].get("component_version"))
                                 manifests_by_step[source_step] = source_manifest
                             except ValidationError:
                                 source_manifest = None
@@ -3182,7 +3262,7 @@ class NativePipelineSystemService:
             component_key = step.get("component_ref") or step_id
             manifest = None
             try:
-                manifest = self._get_component_manifest_by_key(component_key)
+                manifest = self._get_component_manifest_by_key(component_key, step.get("component_version"))
             except ValidationError:
                 manifest = None
             for binding_name in ("input_bindings", "parameter_bindings"):
@@ -3525,11 +3605,9 @@ class NativePipelineSystemService:
         component_definition = ComponentDefinition.query.filter_by(key=component_key).first()
         if component_definition is None:
             raise FileProcessingError(f"Component '{component_key}' is not registered")
-        component_version = (
-            ComponentVersion.query.filter_by(component_definition_id=component_definition.id, is_active=True)
-            .order_by(ComponentVersion.created_at.desc())
-            .first()
-        )
+        self._step_component_version(step)
+        persisted_step = self._find_pipeline_step(version_row, step["id"])
+        component_version = db.session.get(ComponentVersion, persisted_step.component_version_id) if persisted_step and persisted_step.component_version_id else self._step_component_version(step)
         if component_version is None:
             raise FileProcessingError(f"Component '{component_key}' has no active version")
         manifest = _json_loads(component_version.manifest_json, {})
@@ -3727,11 +3805,9 @@ class NativePipelineSystemService:
         component_definition = ComponentDefinition.query.filter_by(key=component_key).first()
         if component_definition is None:
             raise FileProcessingError(f"Component '{component_key}' is not registered")
-        component_version = (
-            ComponentVersion.query.filter_by(component_definition_id=component_definition.id, is_active=True)
-            .order_by(ComponentVersion.created_at.desc())
-            .first()
-        )
+        self._step_component_version(step)
+        persisted_step = self._find_pipeline_step(version_row, step["id"])
+        component_version = db.session.get(ComponentVersion, persisted_step.component_version_id) if persisted_step and persisted_step.component_version_id else self._step_component_version(step)
         if component_version is None:
             raise FileProcessingError(f"Component '{component_key}' has no active version")
         profile = self._get_profile_row(component_version, step.get("execution_profile_ref"))

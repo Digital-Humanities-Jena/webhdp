@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import hashlib
 import os
 import shutil
 import subprocess
@@ -420,6 +421,12 @@ def _usdz_component(request: dict[str, Any]) -> dict[str, Any]:
 def _generic_singularity_component(component_key: str, request: dict[str, Any]) -> dict[str, Any]:
     profile = request.get("profile") if isinstance(request.get("profile"), dict) else {}
     image = str(profile.get("image") or profile.get("sif_remote_path") or "").strip()
+    expected_checksum = profile.get("sif_sha256")
+    if expected_checksum:
+        with open(image, "rb") as source:
+            actual_checksum = hashlib.file_digest(source, "sha256").hexdigest()
+        if actual_checksum != expected_checksum:
+            raise ValueError("SIF checksum changed; refusing to run an unverified artifact")
     if not image:
         raise RuntimeError(f"Component {component_key!r} does not declare a Singularity image")
     entrypoint = profile.get("entrypoint")

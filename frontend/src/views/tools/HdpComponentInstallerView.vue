@@ -23,6 +23,11 @@
 
     <p class="text-sm text-slate-600">1. Choose package → 2. Validate → 3. Install → 4. Smoke test</p>
     <div v-if="actionError" role="alert" class="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">{{ actionError }}</div>
+    <div v-if="recovery" role="status" class="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm">
+      Installation {{ recovery.id }} is being tracked. Closing this page does not stop the server operation.
+      <button type="button" class="ml-2 font-medium underline" @click="reconnectInstallation">Reconnect</button>
+      <button type="button" class="ml-2 font-medium underline" :disabled="installing" @click="retryInstallation">Retry same request</button>
+    </div>
     <ProgressBar v-if="actionBusy" :label="validating ? 'Checking package and runtime…' : installing ? 'Installing component… This may take several minutes.' : 'Running the component smoke test…'" />
     <fieldset :disabled="actionBusy || !isEnabled" class="min-w-0 grid gap-6 xl:grid-cols-[minmax(0,1fr),24rem]">
       <div class="space-y-6">
@@ -63,16 +68,15 @@
 
             <LoadingSpinner v-if="catalogLoading" text="Loading component catalog…" />
             <div v-else-if="catalogError" role="alert" class="rounded-md border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{{ catalogError }} <button type="button" class="font-semibold underline" @click="loadCatalog">Try again</button></div>
-            <div v-else class="grid gap-3 lg:grid-cols-2">
-              <button
+            <p v-if="diagnosticsError" role="status" class="text-sm text-amber-800">{{ diagnosticsError }}</p>
+            <div v-if="!catalogLoading" class="grid gap-3 lg:grid-cols-2">
+              <article
                 v-for="component in filteredCatalog"
                 :key="catalogKey(component)"
-                :aria-pressed="selectedCatalogKey === catalogKey(component)"
-                type="button"
-                class="rounded-md border p-4 text-left transition hover:border-indigo-300 hover:bg-indigo-50/40"
+                class="rounded-md border p-4 transition hover:border-indigo-300"
                 :class="selectedCatalogKey === catalogKey(component) ? 'border-indigo-500 bg-indigo-50' : 'border-slate-200 bg-white'"
-                @click="selectCatalogComponent(component)"
               >
+                <button type="button" class="w-full rounded text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-500" :aria-pressed="selectedCatalogKey === catalogKey(component)" @click="selectCatalogComponent(component)">
                 <div class="flex items-start justify-between gap-3">
                   <div>
                     <p class="font-semibold text-slate-900">{{ component.label || component.component_key }}</p>
@@ -90,6 +94,7 @@
                   <span v-if="component.category" class="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">{{ component.category }}</span>
                   <span v-for="tag in component.tags || []" :key="tag" class="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">{{ tag }}</span>
                 </div>
+                </button>
                 <div v-if="component.git?.url || component.zenodo?.doi || component.docker_digest || component.sif_sha256" class="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
                   <a v-if="component.git?.url" :href="component.git.url" target="_blank" rel="noreferrer" class="text-indigo-700 hover:text-indigo-900" @click.stop>Git</a>
                   <a v-if="component.zenodo?.record_url" :href="component.zenodo.record_url" target="_blank" rel="noreferrer" class="text-indigo-700 hover:text-indigo-900" @click.stop>Zenodo</a>
@@ -97,7 +102,7 @@
                   <span v-if="component.docker_digest">Docker digest</span>
                   <span v-if="component.sif_sha256">SIF checksum</span>
                 </div>
-              </button>
+              </article>
             </div>
 
             <p v-if="!catalogLoading && !catalogError && filteredCatalog.length === 0" class="rounded-md border border-slate-200 p-6 text-center text-sm text-slate-500">
@@ -176,7 +181,7 @@
             <button type="button" class="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50" :disabled="!canValidate || validating || installing || testingId || !isEnabled" @click="validatePackage">
               {{ validating ? 'Validating...' : 'Validate Package' }}
             </button>
-            <button type="button" class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50" :disabled="!canInstall || installing || validating || testingId || !isEnabled" @click="installPackage">
+            <button type="button" class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50" :disabled="Boolean(recovery) || !canInstall || installing || validating || testingId || !isEnabled" @click="installPackage">
               {{ installing ? 'Installing...' : installButtonLabel }}
             </button>
             <button v-if="latestInstallation" type="button" class="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50" :disabled="actionBusy || !isEnabled || latestInstallation.status !== 'installed'" @click="testInstallation(latestInstallation)">
@@ -264,7 +269,8 @@
 </template>
 
 <script setup>
-import { computed, defineComponent, h, onMounted, ref, watch } from 'vue'
+import { onBeforeUnmount, computed, defineComponent, h, onMounted, ref, watch } from 'vue'
+import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import LoadingSpinner from '@/components/ui/LoadingSpinner.vue'
 import ProgressBar from '@/components/ui/ProgressBar.vue'
@@ -295,6 +301,7 @@ const installationsError = ref('')
 const validatedPayload = ref('')
 let catalogRequestId = 0
 const actionBusy = computed(() => validating.value || installing.value || Boolean(testingId.value))
+const authStore = useAuthStore()
 const installStrategy = ref('hpc_sif')
 const mode = ref('catalog')
 const catalogSource = ref('all')
@@ -320,6 +327,37 @@ const installing = ref(false)
 const loadingInstallations = ref(false)
 const testingId = ref('')
 const indexDiagnostics = ref(null)
+const diagnosticsError = ref('')
+const recovery = ref(null)
+let recoveryTimer
+let reconnecting = false
+let disposed = false
+const recoveryKey = () => `component-install:${authStore.user?.id || 'current'}`
+function saveRecovery() { try { sessionStorage.setItem(recoveryKey(), JSON.stringify(recovery.value)) } catch { /* Current-page recovery remains available. */ } }
+async function reconnectInstallation() {
+  clearTimeout(recoveryTimer)
+  if (!recovery.value || reconnecting) return
+  const requestId = recovery.value.id
+  reconnecting = true
+  try {
+    const response = await toolsService.getHdpComponentInstallation(requestId)
+    if (disposed || recovery.value?.id !== requestId) return
+    latestInstallation.value = response.data.installation
+    if (latestInstallation.value.status === 'installed') {
+      actionError.value = ''
+      recovery.value = null
+      saveRecovery()
+      await loadInstallations()
+    } else if (latestInstallation.value.status === 'failed') {
+      actionError.value = latestInstallation.value.error || 'Installation failed. Review its details before retrying.'
+      recovery.value = null
+      saveRecovery()
+    }
+  } catch (err) { actionError.value = err?.error?.message || err?.message || 'Installation status is unavailable. Reconnect or retry the same request.' }
+  finally { reconnecting = false }
+  if (recovery.value && !disposed) recoveryTimer = setTimeout(reconnectInstallation, 5000)
+}
+onBeforeUnmount(() => { disposed = true; clearTimeout(recoveryTimer) })
 
 const catalogWarnings = computed(() => catalogSummary.value?.warnings || [])
 const catalogCategories = computed(() => sortedUnique(catalog.value.map((item) => item.category).filter(Boolean)))
@@ -415,7 +453,7 @@ const progressSteps = computed(() => [
     id: 'test',
     label: 'Smoke test',
     detail: testResult.value?.test?.remote_test_dir || testResult.value?.test?.status || 'Pending',
-    state: testingId.value ? 'running' : testResult.value?.test?.success === true ? 'passed' : testResult.value?.test?.success === false ? 'failed' : 'pending',
+    state: testingId.value ? 'running' : testResult.value?.test?.status === 'skipped' ? 'warning' : testResult.value?.test?.success === true ? 'passed' : testResult.value?.test?.success === false ? 'failed' : 'pending',
   },
 ])
 
@@ -618,22 +656,24 @@ async function loadCatalog() {
   const requestId = ++catalogRequestId
   catalogLoading.value = true
   catalogError.value = ''
+  diagnosticsError.value = ''
+  indexDiagnostics.value = null
+  Promise.resolve().then(() => toolsService.getHdpComponentCatalogDiagnostics?.()).then(response => {
+    if (requestId === catalogRequestId) indexDiagnostics.value = response?.data || null
+  }).catch(() => {
+    if (requestId === catalogRequestId) diagnosticsError.value = 'Catalog diagnostics are unavailable. You can still choose and validate a package.'
+  })
   try {
-    const [response, diagnosticsResponse] = await Promise.all([
-      toolsService.listHdpComponentCatalog({ install_strategy: installStrategy.value, source: catalogSource.value }),
-      toolsService.getHdpComponentCatalogDiagnostics ? toolsService.getHdpComponentCatalogDiagnostics() : Promise.resolve({ data: null }),
-    ])
+    const response = await toolsService.listHdpComponentCatalog({ install_strategy: installStrategy.value, source: catalogSource.value })
     if (requestId !== catalogRequestId) return
     catalog.value = response.data?.components || []
     catalogSummary.value = response.data?.summary || { total: catalog.value.length, installable: catalog.value.length, warnings: [] }
-    indexDiagnostics.value = diagnosticsResponse.data || null
     if (!catalog.value.some(item => catalogKey(item) === selectedCatalogKey.value) && catalog.value.length > 0) {
       selectedCatalogKey.value = catalogKey(catalog.value[0])
       syncSelectedCatalogSource(catalog.value[0])
     }
   } catch (err) {
     if (requestId !== catalogRequestId) return
-    catalog.value = []
     catalogError.value = err?.error?.message || err?.message || 'Failed to load component catalog.'
   } finally {
     if (requestId === catalogRequestId) catalogLoading.value = false
@@ -683,29 +723,44 @@ async function validatePackage() {
 }
 
 async function installPackage() {
-  if (actionBusy.value || !isEnabled.value || !canInstall.value) return
+  if (recovery.value || actionBusy.value || !isEnabled.value || !canInstall.value) return
   actionError.value = ''
   installing.value = true
   installResult.value = null
   testResult.value = null
   try {
-    const response = await toolsService.installHdpComponent({
-      ...installPayload(),
-    })
+    recovery.value = { id: crypto.randomUUID(), payload: installPayload() }
+    saveRecovery()
+    const response = await toolsService.installHdpComponent({ ...recovery.value.payload, request_id: recovery.value.id })
     installResult.value = response.data || null
     latestInstallation.value = response.data?.installation || null
     if (latestInstallation.value?.status !== 'installed') throw new Error('Installation was not confirmed. Refresh installation history before retrying.')
     validatedPayload.value = ''
+    recovery.value = null
+    saveRecovery()
     success(installStrategy.value === 'local_container' ? 'Component installed locally.' : 'Component installed on HPC.')
     await loadInstallations()
   } catch (err) {
     actionError.value = err?.error?.message || err?.message || 'Installation could not be confirmed. Refresh installation history before retrying to avoid a duplicate request.'
     validatedPayload.value = ''
+    if (['VALIDATION_ERROR', 'OPERATION_CONFLICT', 'SECURITY_ERROR', 'FORBIDDEN'].includes(err?.error?.code)) { recovery.value = null; saveRecovery() }
     showError(actionError.value)
+    await reconnectInstallation()
     await loadInstallations()
   } finally {
     installing.value = false
   }
+}
+
+async function retryInstallation() {
+  if (!recovery.value || installing.value) return
+  installing.value = true
+  try { await toolsService.installHdpComponent({ ...recovery.value.payload, request_id: recovery.value.id }) }
+  catch (err) {
+    actionError.value = err?.error?.message || err?.message || 'Installation is not confirmed yet.'
+    if (['VALIDATION_ERROR', 'OPERATION_CONFLICT', 'SECURITY_ERROR', 'FORBIDDEN'].includes(err?.error?.code)) { recovery.value = null; saveRecovery() }
+  }
+  finally { installing.value = false; await reconnectInstallation() }
 }
 
 async function testInstallation(item) {
@@ -717,7 +772,8 @@ async function testInstallation(item) {
     const response = await toolsService.testHdpComponentInstallation(item.installation_id)
     testResult.value = response.data || null
     latestInstallation.value = response.data?.installation || item
-    if (response.data?.test?.success === true) success('Smoke test passed.')
+    if (response.data?.test?.status === 'skipped') warning('Smoke test skipped. No workload was executed; readiness alone is not a passing test.')
+    else if (response.data?.test?.success === true) success('Smoke test passed.')
     else {
       actionError.value = response.data?.test?.error || 'Smoke test did not pass. Review the test details before using this component.'
       warning(actionError.value)
@@ -736,5 +792,7 @@ watch(() => JSON.stringify(installPayload()), () => { clearActionResults() }, { 
 onMounted(async () => {
   await loadContext()
   await Promise.all([loadCatalog(), loadInstallations()])
+  try { recovery.value = JSON.parse(sessionStorage.getItem(recoveryKey()) || 'null') } catch { recovery.value = null }
+  if (recovery.value) await reconnectInstallation()
 })
 </script>

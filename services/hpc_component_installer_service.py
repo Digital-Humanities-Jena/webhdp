@@ -18,6 +18,8 @@ import shutil
 import subprocess
 import tempfile
 from datetime import datetime
+from uuid import UUID
+from services.registry_lock import serialize_registry, OperationConflict
 from pathlib import Path, PurePosixPath
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse
@@ -26,8 +28,8 @@ import yaml
 from flask import current_app
 
 from database.database import db
-from database.models import ComponentDefinition, ComponentVersion, HpcComponentInstallation, User
-from exceptions import ResourceNotFoundError, ValidationError
+from database.models import ComponentDefinition, ComponentVersion, HpcComponentInstallation, PipelineStep, User
+from exceptions import ResourceNotFoundError, ValidationError, APITimeoutError, APIConnectionError
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -455,7 +457,7 @@ class HpcComponentInstallerService:
         rows = HpcComponentInstallation.query.filter(
             HpcComponentInstallation.component_key == component_key,
             HpcComponentInstallation.version == version,
-            HpcComponentInstallation.status.in_(["installing", "installed"]),
+            HpcComponentInstallation.status.in_(["installing", "installed", "unknown"]),
         ).all()
         for row in rows:
             checks = _json_loads(row.checks_json, {})
@@ -578,9 +580,14 @@ class HpcComponentInstallerService:
             )
         except Exception as exc:
             return {"checked": True, "success": False, "error": str(exc)}
+        try:
+            image_id = json.loads(completed.stdout)[0]["Id"] if completed.returncode == 0 else None
+        except (ValueError, KeyError, IndexError, TypeError):
+            image_id = None
         return {
+            "image_id": image_id,
             "checked": True,
-            "success": completed.returncode == 0,
+            "success": completed.returncode == 0 and bool(image_id),
             "runtime": "docker",
             "image": image,
             "docker_path": docker_path,
@@ -715,6 +722,7 @@ class HpcComponentInstallerService:
                 profile["image"] = image
         return manifest
 
+    @serialize_registry("native-registry")
     def _register_installed_component(
         self,
         installed_manifest: Dict[str, Any],
@@ -739,6 +747,9 @@ class HpcComponentInstallerService:
                 already_normalized=True,
             )
 
+        if PipelineStep.query.filter_by(component_version_id=version_row.id).first():
+            if version_row.manifest_hash != _sha256(installed_manifest):
+                raise OperationConflict("This component version is used by a saved pipeline. Install a new version instead of replacing it.")
         merged_manifest = _json_loads(version_row.manifest_json, {})
         if not isinstance(merged_manifest, dict) or not merged_manifest:
             merged_manifest = json.loads(json.dumps(installed_manifest))
@@ -829,8 +840,9 @@ class HpcComponentInstallerService:
         )
         if not test_block:
             return {
-                "success": True,
+                "success": None,
                 "status": "skipped",
+                "readiness_confirmed": True,
                 "phase": "smoke_test",
                 "checks": readiness,
                 "warnings": ["No install.test smoke-test metadata is declared; only image readiness was checked."],
@@ -938,8 +950,22 @@ class HpcComponentInstallerService:
                 **({} if success else {"error": response_payload.get("error") or "Local container smoke test did not produce a successful response."}),
             }
 
+    @serialize_registry("component-installation")
     def install_component(self, payload: Dict[str, Any], *, user: User) -> Dict[str, Any]:
+        try:
+            request_id = str(UUID(payload["request_id"])) if payload.get("request_id") else None
+        except (ValueError, TypeError, AttributeError):
+            raise ValidationError("request_id must be a UUID")
+        fingerprint = _sha256({key: value for key, value in payload.items() if key != "request_id"})
+        if request_id:
+            existing = HpcComponentInstallation.query.filter_by(public_id=request_id).first()
+            if existing:
+                if existing.created_by != user.id or _json_loads(existing.checks_json, {}).get("request_fingerprint") != fingerprint:
+                    raise OperationConflict("This request identifier already belongs to another installation.")
+                self.reconcile_installation(existing)
+                return {"installation": self._serialize_installation(existing), "reused": True}
         validation = self.validate_install_payload(payload)
+        validation["checks"]["request_fingerprint"] = fingerprint
         strategy = validation["install_strategy"]
         required_check_name = "local_container" if strategy == INSTALL_STRATEGY_LOCAL_CONTAINER else "hpc_link"
         required_check = (validation.get("checks") or {}).get(required_check_name) or {}
@@ -962,6 +988,7 @@ class HpcComponentInstallerService:
         component_key = validation["component_key"]
         version = validation["version"]
         row = HpcComponentInstallation(
+            **({"public_id": request_id} if request_id else {}),
             component_key=component_key,
             version=version,
             status="installing",
@@ -977,7 +1004,10 @@ class HpcComponentInstallerService:
         try:
             if strategy == INSTALL_STRATEGY_LOCAL_CONTAINER:
                 image = validation["container"]["image"]
-                installed_manifest = self._with_local_container_image(manifest, image)
+                image_id = validation["checks"]["local_container"].get("image_id")
+                if not image_id:
+                    raise ValidationError("Docker did not report an immutable image ID")
+                installed_manifest = self._with_local_container_image(manifest, image_id)
                 imported = self._register_installed_component(
                     installed_manifest,
                     component_key=component_key,
@@ -1002,6 +1032,7 @@ class HpcComponentInstallerService:
                 return {"installation": self._serialize_installation(row), "component": imported}
 
             hpc_payload = {
+                "request_id": row.public_id,
                 "component_key": component_key,
                 "version": version,
                 "sif_source": validation["sif"]["sif_source"],
@@ -1017,7 +1048,14 @@ class HpcComponentInstallerService:
                 timeout=float(payload.get("timeout_seconds") or 7200),
             )
             sif_path = str(remote.get("sif_remote_path") or validation["sif"]["sif_source"])
+            checksum = remote.get("sif_sha256") or validation["sif"].get("sha256")
+            if not checksum:
+                raise ValidationError("HPC-Link did not report the installed SIF checksum. Upgrade the adapter before registering this component.")
             installed_manifest = self._with_installed_image(manifest, sif_path)
+            for profile in installed_manifest.get("execution", {}).get("profiles", []):
+                if profile.get("handler") == "generic_singularity_component":
+                    profile["sif_sha256"] = checksum
+                    profile["version"] = version
             imported = self._register_installed_component(
                 installed_manifest,
                 component_key=component_key,
@@ -1048,10 +1086,37 @@ class HpcComponentInstallerService:
             db.session.commit()
             return {"installation": self._serialize_installation(row), "component": imported}
         except Exception as exc:
-            row.status = "failed"
-            row.error = str(exc)
+            uncertain = strategy == INSTALL_STRATEGY_HPC_SIF and isinstance(exc, (APITimeoutError, APIConnectionError)) and ((getattr(exc, "details", {}) or {}).get("http_status") or 500) >= 500
+            row.status = "unknown" if uncertain else "failed"
+            row.error = "Remote installation outcome is unknown. Reconnect before retrying. " + str(exc) if uncertain else str(exc)
             db.session.commit()
             raise
+
+    @serialize_registry("native-registry")
+    def reconcile_installation(self, row):
+        checks = _json_loads(row.checks_json, {})
+        if row.status not in {"unknown", "installing"} or checks.get("install_strategy") != INSTALL_STRATEGY_HPC_SIF:
+            return
+        try:
+            remote = current_app.hpc_allocation_service.client().get(f"/api/apps/webhdp/components/{row.component_key}/{row.version}", timeout=30)
+        except (APIConnectionError, APITimeoutError):
+            return
+        if remote.get("request_id") != row.public_id or remote.get("manifest_hash") != row.manifest_hash or not remote.get("sif_sha256"):
+            return
+        manifest = self._with_installed_image(_json_loads(row.manifest_json, {}), remote["sif_remote_path"])
+        for profile in manifest.get("execution", {}).get("profiles", []):
+            if profile.get("handler") == "generic_singularity_component":
+                profile.update(sif_sha256=remote["sif_sha256"], version=row.version)
+        self._register_installed_component(manifest, component_key=row.component_key, version=row.version, source_path=remote["sif_remote_path"], source_type="hpc_installed")
+        version = ComponentVersion.query.join(ComponentDefinition).filter(ComponentDefinition.key == row.component_key, ComponentVersion.version == row.version).one()
+        row.component_version_id = version.id
+        row.status = "installed"
+        row.error = None
+        row.installed_at = datetime.utcnow()
+        row.sif_remote_path = remote["sif_remote_path"]
+        row.remote_install_dir = remote["remote_install_dir"]
+        row.manifest_json = _json_dumps(manifest)
+        db.session.commit()
 
     def list_installations(self) -> list[Dict[str, Any]]:
         rows = HpcComponentInstallation.query.order_by(HpcComponentInstallation.created_at.desc()).limit(100).all()
@@ -1072,7 +1137,7 @@ class HpcComponentInstallerService:
         checks = _json_loads(row.checks_json, {})
         strategy = checks.get("install_strategy") or INSTALL_STRATEGY_HPC_SIF
         if strategy == INSTALL_STRATEGY_LOCAL_CONTAINER:
-            image = str((checks.get("container_image") or {}).get("image") or row.remote_install_dir or "").strip()
+            image = str(self._local_container_profile(manifest).get("image") or row.remote_install_dir or "").strip()
             response = self._run_local_container_smoke_test(manifest, image, payload=payload)
             row.last_tested_at = datetime.utcnow()
             checks["last_test"] = response

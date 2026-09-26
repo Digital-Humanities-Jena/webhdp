@@ -49,6 +49,22 @@ def test_async_pipeline_conflict_preserves_active_session_state():
         notify.assert_not_called()
 
 
+def test_queued_run_retries_lock_contention_without_failing_the_session():
+    from services.pipeline_execution_lock import PipelineAlreadyRunning
+    from celery.exceptions import Retry
+    task = MagicMock()
+    task.retry.side_effect = Retry("Waiting for session")
+    with _submission_test_context() as context:
+        with patch("services.submission_pipeline_service.execute_submission_pipeline", side_effect=PipelineAlreadyRunning()), patch("tasks.notify_user") as notify:
+            with pytest.raises(Retry):
+                tasks.execute_submission_pipeline_task(task, None, "render", [context["source_path"]], context["session_id"], precreated_run_public_id="queued-run")
+        task.retry.assert_called_once()
+        assert task.retry.call_args.kwargs["countdown"] == 30
+        assert task.retry.call_args.kwargs["max_retries"] is None
+        assert db.session.get(DBSession, context["session_id"]).status == "processing"
+        notify.assert_not_called()
+
+
 def _create_submission_hdpc(path: str, root_dir: str, *, filename: str = "model.glb") -> str:
     uploads_dir = os.path.join(root_dir, "uploads")
     os.makedirs(uploads_dir, exist_ok=True)

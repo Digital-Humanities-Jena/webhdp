@@ -153,6 +153,7 @@ def flask_app():
                 return {
                     "success": True,
                     "sif_remote_path": "/work/apps/webhdp/components/example_validator/1.0.0/component.sif",
+                    "sif_sha256": "b" * 64,
                     "remote_install_dir": "/work/apps/webhdp/components/example_validator/1.0.0",
                     "checks": {"singularity": {"success": True}},
                     "logs": {"install": {"exit_code": 0}},
@@ -290,7 +291,7 @@ def test_validate_accepts_local_container_profile(mock_run, _mock_which, flask_a
     mock_run.return_value = subprocess.CompletedProcess(
         args=["docker", "image", "inspect"],
         returncode=0,
-        stdout="[]",
+        stdout=json.dumps([{"Id": "sha256:" + "a" * 64}]),
         stderr="",
     )
     service = HpcComponentInstallerService()
@@ -336,7 +337,7 @@ def test_install_local_container_imports_component_without_hpc_link(mock_run, _m
     mock_run.return_value = subprocess.CompletedProcess(
         args=["docker", "image", "inspect"],
         returncode=0,
-        stdout="[]",
+        stdout=json.dumps([{"Id": "sha256:" + "a" * 64}]),
         stderr="",
     )
     user = User(email="admin@example.com", role=UserRole.ADMIN, is_verified=True)
@@ -366,8 +367,8 @@ def test_install_local_container_imports_component_without_hpc_link(mock_run, _m
 @patch("services.hpc_component_installer_service.subprocess.run")
 def test_local_container_installation_runs_manifest_smoke_test(mock_run, _mock_which, flask_app):
     mock_run.side_effect = [
-        subprocess.CompletedProcess(args=["docker", "image", "inspect"], returncode=0, stdout="[]", stderr=""),
-        subprocess.CompletedProcess(args=["docker", "image", "inspect"], returncode=0, stdout="[]", stderr=""),
+        subprocess.CompletedProcess(args=["docker", "image", "inspect"], returncode=0, stdout=json.dumps([{"Id": "sha256:" + "a" * 64}]), stderr=""),
+        subprocess.CompletedProcess(args=["docker", "image", "inspect"], returncode=0, stdout=json.dumps([{"Id": "sha256:" + "a" * 64}]), stderr=""),
         subprocess.CompletedProcess(args=["docker", "run"], returncode=0, stdout='{"success": true}', stderr=""),
     ]
     user = User(email="admin@example.com", role=UserRole.ADMIN, is_verified=True)
@@ -393,7 +394,7 @@ def test_local_container_installation_runs_manifest_smoke_test(mock_run, _mock_w
     assert "none" in docker_run
     assert "WEBHDP_COMPONENT_REQUEST=/tmp/webhdp/request.json" in docker_run
     assert "WEBHDP_COMPONENT_KEY=local_profiler" in docker_run
-    assert "example/local-profiler:1.0.0" in docker_run
+    assert "sha256:" + "a" * 64 in docker_run
 
 
 @patch("services.hpc_component_installer_service.shutil.which", return_value="/usr/bin/docker")
@@ -402,7 +403,7 @@ def test_same_component_version_can_accumulate_local_and_hpc_profiles(mock_run, 
     mock_run.return_value = subprocess.CompletedProcess(
         args=["docker", "image", "inspect"],
         returncode=0,
-        stdout="[]",
+        stdout=json.dumps([{"Id": "sha256:" + "a" * 64}]),
         stderr="",
     )
     user = User(email="admin@example.com", role=UserRole.ADMIN, is_verified=True)
@@ -894,3 +895,60 @@ def test_hpc_link_acceptance_installs_prebuilt_sif_and_runs_smoke_test():
 
         db.session.remove()
         db.drop_all()
+
+
+@patch("services.hpc_component_installer_service.shutil.which", return_value="/usr/bin/docker")
+@patch("services.hpc_component_installer_service.subprocess.run")
+def test_install_retry_is_idempotent_and_missing_smoke_test_is_skipped(mock_run, _which, flask_app):
+    from uuid import uuid4
+    from services.registry_lock import OperationConflict
+    mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0, stdout=json.dumps([{"Id": "sha256:" + "a" * 64}]), stderr="")
+    user = User(email="retry@example.com", role=UserRole.ADMIN, is_verified=True)
+    user.set_password("password123")
+    db.session.add(user)
+    db.session.commit()
+    service = HpcComponentInstallerService()
+    payload = {"request_id": str(uuid4()), "manifest": LOCAL_CONTAINER_MANIFEST, "install_strategy": "local_container", "container_image": "example/local-profiler:1.0.0"}
+    first = service.install_component(payload, user=user)
+    retry = service.install_component(payload, user=user)
+    assert first["installation"]["installation_id"] == retry["installation"]["installation_id"]
+    assert retry["reused"] is True
+    assert mock_run.call_count == 1
+    with pytest.raises(OperationConflict):
+        service.install_component({**payload, "container_image": "different:tag"}, user=user)
+    result = service.test_installation(first["installation"]["installation_id"])
+    assert result["test"]["status"] == "skipped"
+    assert result["test"]["success"] is None
+    assert result["test"]["readiness_confirmed"] is True
+
+
+def test_interrupted_remote_install_reconciles_without_reposting(flask_app):
+    from uuid import uuid4
+    from exceptions import APITimeoutError
+    from unittest.mock import Mock
+    user = User(email="interrupted@example.com", role=UserRole.ADMIN, is_verified=True)
+    user.set_password("password123")
+    db.session.add(user)
+    db.session.commit()
+    service = HpcComponentInstallerService()
+    payload = {"request_id": str(uuid4()), "manifest": MANIFEST, "sif_source": "/work/source.sif"}
+    original_post = flask_app.fake_hpc_client.post
+    def interrupted(path, body, timeout=None):
+        if path.endswith('/install'):
+            raise APITimeoutError('Connection interrupted')
+        return original_post(path, body, timeout)
+    flask_app.fake_hpc_client.post = Mock(side_effect=interrupted)
+    with pytest.raises(APITimeoutError):
+        service.install_component(payload, user=user)
+    row = service.get_installation(payload['request_id'])
+    assert row.status == 'unknown'
+    flask_app.fake_hpc_client.get = Mock(return_value={"request_id": row.public_id, "manifest_hash": row.manifest_hash, "sif_sha256": "b" * 64, "sif_remote_path": "/work/installed/component.sif", "remote_install_dir": "/work/installed"})
+    flask_app.fake_hpc_client.get.return_value["request_id"] = "another-request"
+    service.reconcile_installation(row)
+    assert row.status == 'unknown'
+    flask_app.fake_hpc_client.get.return_value["request_id"] = row.public_id
+    service.reconcile_installation(row)
+    assert row.status == 'installed'
+    retry = service.install_component(payload, user=user)
+    assert retry['reused'] is True
+    assert flask_app.fake_hpc_client.post.call_count == 2

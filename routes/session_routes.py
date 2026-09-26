@@ -420,6 +420,7 @@ def _serialize_session_context(
     acting_user: User | None = None,
     publishing_context: dict[str, Any] | None = None,
     file_count: int | None = None,
+    display_name: str | None = None,
     institution_payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     publishing_context = publishing_context or publishing_context_service.describe_session(session_row)
@@ -429,6 +430,7 @@ def _serialize_session_context(
     session_state, workflow_phase, upload_stage = _resolve_session_state(session_row, metadata_fields)
     payload = {
         "id": session_row.id,
+        "name": display_name or f"Session {session_row.id}",
         "status": session_state,
         "legacy_status": session_row.status,
         "origin_type": str(getattr(session_row, "origin_type", None) or "workflow"),
@@ -2099,6 +2101,7 @@ def list_sessions():
         },
     )
     file_count_map = _get_session_file_counts(session_ids)
+    first_filename_map = dict(db.session.query(File.session_id, func.min(File.filename)).filter(File.session_id.in_(session_ids)).group_by(File.session_id).all()) if session_ids else {}
     publishing_context_map = publishing_context_service.describe_sessions(sessions)
     institution_payload_map = {
         row.id: row.to_dict()
@@ -2115,6 +2118,7 @@ def list_sessions():
                 acting_user=user,
                 publishing_context=publishing_context_map.get(session_row.id),
                 file_count=file_count_map.get(session_row.id, 0),
+                display_name=first_filename_map.get(session_row.id),
                 institution_payload=institution_payload_map.get(session_row.institution_id),
             )
         )

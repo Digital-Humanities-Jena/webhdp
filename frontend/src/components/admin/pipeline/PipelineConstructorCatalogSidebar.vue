@@ -5,7 +5,7 @@
         <div>
           <label class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Search Components</label>
           <input
-            v-model.trim="catalogSearchModel"
+            aria-label="Search components" v-model.trim="catalogSearchModel"
             type="text"
             class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
             placeholder="Search by name, tag, or keyword"
@@ -13,7 +13,7 @@
         </div>
         <div>
           <label class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Category</label>
-          <select v-model="catalogCategoryModel" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" data-testid="catalog-category-filter">
+          <select aria-label="Component category" v-model="catalogCategoryModel" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" data-testid="catalog-category-filter">
             <option value="">All categories</option>
             <option v-for="category in componentCategories" :key="category" :value="category">
               {{ category }}
@@ -22,7 +22,7 @@
         </div>
         <div>
           <label class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Tag</label>
-          <select v-model="catalogTagModel" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" data-testid="catalog-tag-filter">
+          <select aria-label="Component tag" v-model="catalogTagModel" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" data-testid="catalog-tag-filter">
             <option value="">All tags</option>
             <option v-for="tag in componentTags" :key="tag" :value="tag">
               {{ tag }}
@@ -31,7 +31,7 @@
         </div>
         <div>
           <label class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Execution Profile</label>
-          <select v-model="catalogProfileModel" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" data-testid="catalog-profile-filter">
+          <select aria-label="Runtime profile" v-model="catalogProfileModel" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" data-testid="catalog-profile-filter">
             <option value="">All profiles</option>
             <option v-for="profile in componentProfiles" :key="profile" :value="profile">
               {{ profile }}
@@ -73,7 +73,7 @@
             <button
               type="button"
               class="rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800"
-              :data-testid="`catalog-add-${component.key}`"
+              :aria-label="`Add ${component.name}`" :data-testid="`catalog-add-${component.key}`"
               @click="$emit('add-step-from-component', component)"
             >
               Add
@@ -103,7 +103,7 @@
       </p>
       <div class="mt-4 space-y-3">
         <input
-          v-model.trim="componentPathModel"
+          aria-label="Component manifest path" v-model.trim="componentPathModel"
           type="text"
           class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
           placeholder="/absolute/path/to/component"

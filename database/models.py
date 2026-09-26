@@ -1740,6 +1740,15 @@ class PipelineVersion(db.Model):
     )
 
 
+class PipelinePublicationRequest(db.Model):
+    __tablename__ = "pipeline_publication_requests"
+
+    request_id = db.Column(db.String(36), primary_key=True)
+    fingerprint = db.Column(db.String(64), nullable=False)
+    pipeline_version_id = db.Column(db.Integer, db.ForeignKey("pipeline_versions.id"), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"))
+
+
 class PipelineStep(db.Model):
     __tablename__ = "pipeline_steps"
 

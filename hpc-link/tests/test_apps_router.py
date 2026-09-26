@@ -627,6 +627,18 @@ class TestAppsRouter(unittest.TestCase):
         )
 
     @patch("app.services.apps_gateway.ssh_manager")
+    def test_install_never_overwrites_an_existing_version_directory(self, mock_ssh_manager):
+        service = HpcApplicationGatewayService()
+        service.validate_webhdp_component_install = AsyncMock(return_value={"success": True})
+        mock_ssh_manager.run_command = AsyncMock(return_value=("", "File exists", 1))
+        with self.assertRaises(HTTPException) as caught:
+            asyncio.run(service.install_webhdp_component(WebHdpComponentInstallRequest(component_key="validator", version="1.0.0", sif_source="/work/source.sif", source_type="remote_path", manifest_hash="hash"), self._admin_user()))
+        self.assertEqual(caught.exception.status_code, 409)
+        self.assertEqual(mock_ssh_manager.run_command.call_count, 1)
+        self.assertIn("mkdir -m 700", mock_ssh_manager.run_command.call_args.args[0])
+        mock_ssh_manager.open_sftp.assert_not_called()
+
+    @patch("app.services.apps_gateway.ssh_manager")
     def test_validate_webhdp_component_install_verifies_remote_sif_checksum(self, mock_ssh_manager):
         service = HpcApplicationGatewayService()
         checksum = "a" * 64
@@ -843,6 +855,7 @@ class TestAppsRouter(unittest.TestCase):
                 "sif_remote_path": "/work/apps/webhdp/components/gltf_validator/1.0.0/component.sif",
                 "manifest_path": "/work/apps/webhdp/components/gltf_validator/1.0.0/component.yaml",
                 "registry_path": "/work/apps/webhdp/components/gltf_validator/1.0.0/component.json",
+            "sif_sha256": "a" * 64,
                 "checks": {},
                 "logs": {},
                 "error": None,

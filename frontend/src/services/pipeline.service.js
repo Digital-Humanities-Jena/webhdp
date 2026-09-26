@@ -58,7 +58,8 @@ export default {
       url: `/pipelines/${identifier}/versions`,
       data: {
         ...config,
-        activate: options.activate !== false
+        activate: options.activate !== false,
+        request_id: options.requestId
       }
     })
   },
@@ -94,7 +95,10 @@ export default {
         record_ids: recordIds,
         is_sandbox: isSandbox,
         async_execution: options.asyncExecution === true,
-        abort_on_critical_error: options.abortOnCriticalError === true
+        abort_on_critical_error: options.abortOnCriticalError === true,
+        request_id: options.requestId,
+        expected_version: options.expectedVersion,
+        preflight_token: options.preflightToken
       }
     })
   },
@@ -137,7 +141,9 @@ export default {
   getPipelineRun(runId) {
     return requestV2({
       method: 'get',
-      url: `/runs/${runId}`
+      url: `/runs/${runId}`,
+      timeout: 15000,
+      suppressGlobalError: true
     })
   },
 
@@ -157,7 +163,10 @@ export default {
         local_file_paths: localFilePaths,
         is_sandbox: isSandbox,
         async_execution: options.asyncExecution === true,
-        abort_on_critical_error: options.abortOnCriticalError === true
+        abort_on_critical_error: options.abortOnCriticalError === true,
+        request_id: options.requestId,
+        expected_version: options.expectedVersion,
+        preflight_token: options.preflightToken
       }
     })
   },
@@ -177,7 +186,10 @@ export default {
         execution_items: executionItems,
         is_sandbox: isSandbox,
         async_execution: options.asyncExecution === true,
-        abort_on_critical_error: options.abortOnCriticalError === true
+        abort_on_critical_error: options.abortOnCriticalError === true,
+        request_id: options.requestId,
+        expected_version: options.expectedVersion,
+        preflight_token: options.preflightToken
       }
     })
   },

@@ -366,6 +366,12 @@ async def install_webhdp_component(request: Request, payload: WebHdpComponentIns
     )
 
 
+@router.get("/webhdp/components/{component_key}/{version}")
+async def get_webhdp_component_installation(request: Request, component_key: str, version: str):
+    require_admin_user(get_request_user(request))
+    return await hpc_application_service.get_webhdp_component_installation(component_key, version)
+
+
 @router.post("/webhdp/components/test")
 @limiter.limit("10/hour")
 async def test_webhdp_component(request: Request, payload: WebHdpComponentTestRequest):

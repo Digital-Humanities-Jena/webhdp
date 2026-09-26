@@ -157,6 +157,7 @@ def test_session_list_and_detail_include_permissions(session_governance_app):
     assert owner_session["permissions"]["can_download_hdpc"] is True
     assert owner_session["permissions"]["can_download_shared_hdpc"] is True
     assert owner_session["file_count"] == 2
+    assert owner_session["name"] == "shared-one.obj"
     assert owner_session["publishing_context"]["effective_credential_source"] == "system"
 
     manager_detail = client.get(

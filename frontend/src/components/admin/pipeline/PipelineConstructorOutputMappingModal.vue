@@ -51,7 +51,7 @@
           <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             <div>
               <label class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Source Output</label>
-              <select v-model="mapping.source_output" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+              <select aria-label="Source Output" v-model="mapping.source_output" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
                 <option value="">Select output</option>
                 <option v-for="output in getJsonOutputs(step)" :key="output.name" :value="output.name">
                   {{ output.label }}
@@ -60,11 +60,11 @@
             </div>
             <div>
               <label class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Selector</label>
-              <input v-model.trim="mapping.selector" type="text" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" placeholder="$.path.to.value" />
+              <input aria-label="Selector" v-model.trim="mapping.selector" type="text" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" placeholder="$.path.to.value" />
             </div>
             <div>
               <label class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Transform</label>
-              <select v-model="mapping.transform" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+              <select aria-label="Transform" v-model="mapping.transform" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
                 <option value="">identity</option>
                 <option v-for="transform in supportData.transforms" :key="transform.id" :value="transform.id">
                   {{ transform.id }}
@@ -73,7 +73,7 @@
             </div>
             <div class="md:col-span-2">
               <label class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Metadata Target Path</label>
-              <select v-model="mapping.target_field" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+              <select aria-label="Metadata Target Path" v-model="mapping.target_field" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
                 <option value="">Select target</option>
                 <option v-for="target in targetPaths" :key="`${target.scope || 'metadata'}:${target.path}`" :value="target.path">
                   {{ target.path }} - {{ target.label }}
@@ -82,7 +82,7 @@
             </div>
             <div>
               <label class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Overwrite Policy</label>
-              <select v-model="mapping.overwrite_policy" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+              <select aria-label="Overwrite Policy" v-model="mapping.overwrite_policy" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
                 <option value="">overwrite</option>
                 <option v-for="policy in supportData.overwrite_policies" :key="policy.id" :value="policy.id">
                   {{ policy.id }}
