@@ -907,8 +907,12 @@ class NativePipelineSystemService:
             pipeline_definition_id=definition.id,
             version=version_number,
         ).first()
-        if existing_same_version is not None:
+        while existing_same_version is not None:
             version_number = _increment_semver(existing_same_version.version)
+            existing_same_version = PipelineVersion.query.filter_by(
+                pipeline_definition_id=definition.id,
+                version=version_number,
+            ).first()
         normalized["version"] = version_number
         config_hash = _hash_payload(normalized)
 
@@ -3100,6 +3104,8 @@ class NativePipelineSystemService:
                         if step_order[source_step] >= step_order[step["id"]]:
                             errors.append(f"Step '{step['id']}' binding '{target}' must reference an earlier step, not '{source_step}'")
                             continue
+                        if step.get("enabled", True) and not pipeline_definition["steps"][step_order[source_step]].get("enabled", True):
+                            errors.append(f"Step '{step['id']}' binding '{target}' references disabled source step '{source_step}'. Enable it or choose another source.")
                         source_manifest = manifests_by_step.get(source_step)
                         if source_manifest is None:
                             try:
@@ -3146,6 +3152,8 @@ class NativePipelineSystemService:
                         if step_order[source_step] >= step_order[step["id"]]:
                             errors.append(f"Step '{step['id']}' trigger rule '{rule.get('id')}' must reference an earlier step, not '{source_step}'")
                             continue
+                        if step.get("enabled", True) and not pipeline_definition["steps"][step_order[source_step]].get("enabled", True):
+                            errors.append(f"Step '{step['id']}' trigger rule '{rule.get('id')}' references disabled classifier step '{source_step}'. Enable it or choose another source.")
                         source_manifest = manifests_by_step.get(source_step)
                         if source_manifest is None:
                             continue

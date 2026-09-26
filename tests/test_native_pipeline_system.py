@@ -527,6 +527,47 @@ class NativePipelineSystemTestCase(unittest.TestCase):
             self.native_service.ensure_seeded()
             self.assertEqual(PipelineVersion.query.count(), version_count)
 
+    def test_repeated_original_version_chooses_next_unused_version(self):
+        with self.app.app_context():
+            original = self.native_service.get_pipeline("render")["config"]
+            versions = []
+            for count in range(3):
+                config = {**original, "name": f"Renderer revision {count}"}
+                saved = self.native_service.create_pipeline_version_from_config("render", config)
+                versions.append(saved["active_version"])
+                self.assertEqual(saved["active_version"], saved["config"]["version"])
+            self.assertEqual(len(set(versions)), 3)
+
+    def test_enabled_input_binding_rejects_disabled_source(self):
+        config = {
+            "identifier": "disabled_source", "name": "Disabled source", "version": "1.0.0",
+            "steps": [
+                {"id": "convert", "component_ref": "any_to_usdz", "name": "Convert", "enabled": False},
+                {"id": "render", "component_ref": "fast_renderer", "name": "Render", "scope": "batch",
+                 "input_bindings": [{"kind": "input", "target": "input_files", "type": "artifact_file", "source_step": "convert", "source_output": "output_path"}]},
+            ],
+        }
+        with self.app.app_context():
+            result = self.native_service.validate_pipeline_config(config)
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("disabled source step 'convert'" in message for message in result["errors"]))
+
+    def test_enabled_trigger_rejects_disabled_classifier(self):
+        config = {
+            "identifier": "disabled_classifier", "name": "Disabled classifier", "version": "1.0.0",
+            "steps": [
+                {"id": "classify", "component_ref": "input_file_classification", "name": "Classify", "enabled": False},
+                {"id": "render", "component_ref": "fast_renderer", "name": "Render", "scope": "batch",
+                 "triggers": {"rules": [{"id": "mesh", "action": "run", "conditions": [
+                     {"source_type": "classifier_output", "source_step": "classify", "source_output": "classification_json", "field": "$.asset.model_kind", "operator": "eq", "value": "mesh"}
+                 ]}]}},
+            ],
+        }
+        with self.app.app_context():
+            result = self.native_service.validate_pipeline_config(config)
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("disabled classifier step 'classify'" in message for message in result["errors"]))
+
     def test_pipeline_version_row_and_config_version_stay_aligned_when_version_is_incremented(self):
         updated = {
             **PIPELINE_DEFINITION,

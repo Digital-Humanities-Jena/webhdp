@@ -7,7 +7,7 @@
             <p class="text-xs font-semibold uppercase tracking-[0.22em] text-emerald-700">Tools</p>
             <h2 class="mt-2 text-3xl font-semibold text-slate-950">Playground</h2>
             <p class="mt-2 max-w-3xl text-sm text-slate-600">
-              Explore manifest-backed HDP Components, open a generated test form, and execute a standalone Playground run against session data.
+              Test one HDP Component with files from an uploaded session. Review its inputs and outputs here before adding it to a pipeline.
             </p>
           </div>
 
@@ -33,25 +33,25 @@
         <div v-else class="space-y-6">
           <div class="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
             <div class="max-w-2xl text-sm text-slate-600">
-              Only components marked as Playground-capable are shown here. The generated modal renders from each component’s canonical Playground schema and submits through the native Playground execution API.
+              Choose a component, select session files and review its settings. A test form being available does not confirm that its runtime or HPC resources are ready.
             </div>
 
             <div class="flex flex-wrap items-center gap-3">
               <input
-                v-model.trim="searchQuery"
+                aria-label="Filter components" v-model.trim="searchQuery"
                 type="search"
                 class="w-full rounded-2xl border-slate-300 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:w-72"
                 placeholder="Filter components"
               >
               <select
-                v-model="selectedCategory"
+                aria-label="Component category" v-model="selectedCategory"
                 class="rounded-2xl border-slate-300 bg-white text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
               >
                 <option value="">All categories</option>
                 <option v-for="category in categoryOptions" :key="category" :value="category">{{ category }}</option>
               </select>
               <select
-                v-model="selectedTag"
+                aria-label="Component tag" v-model="selectedTag"
                 class="rounded-2xl border-slate-300 bg-white text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
               >
                 <option value="">All tags</option>
@@ -60,11 +60,13 @@
             </div>
           </div>
 
+          <div v-if="componentsError" role="alert" class="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">{{ componentsError }} <button type="button" class="font-semibold underline" @click="loadComponents">Retry components</button></div>
+          <div v-if="sessionsError" role="alert" class="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">{{ sessionsError }} <button type="button" class="font-semibold underline" @click="loadSessions">Retry sessions</button></div>
           <div v-if="loadingComponents" class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-6">
             <LoadingSpinner text="Loading Playground components..." />
           </div>
 
-          <div v-else-if="filteredComponents.length === 0" class="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-6 py-10 text-center">
+          <div v-else-if="!componentsError && filteredComponents.length === 0" class="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-6 py-10 text-center">
             <h3 class="text-lg font-semibold text-slate-900">No Playground components available</h3>
             <p class="mt-2 text-sm text-slate-500">
               {{ hasActiveFilters ? 'No components match the current filters.' : 'No components are currently marked as Playground-capable.' }}
@@ -92,7 +94,7 @@
                       {{ componentCategory(component) }}
                     </span>
                     <span class="rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.18em] text-emerald-700">
-                      Playground Ready
+                      Test form available
                     </span>
                   </div>
                   <h3 class="mt-3 text-xl font-semibold text-slate-950">{{ componentLabel(component) }}</h3>
@@ -154,6 +156,8 @@ const components = ref([])
 const sessions = ref([])
 const activeComponent = ref(null)
 const loadingComponents = ref(false)
+const componentsError = ref('')
+const sessionsError = ref('')
 const loadingSessions = ref(false)
 const searchQuery = ref('')
 const selectedCategory = ref('')
@@ -241,20 +245,28 @@ async function loadContext() {
 }
 
 async function loadComponents() {
+  if (loadingComponents.value) return
   loadingComponents.value = true
+  componentsError.value = ''
   try {
     const response = await pipelineService.listComponents({ playgroundOnly: true })
     components.value = response.data?.components || []
+  } catch (err) {
+    componentsError.value = err?.error?.message || err?.message || 'Could not load components.'
   } finally {
     loadingComponents.value = false
   }
 }
 
 async function loadSessions() {
+  if (loadingSessions.value) return
   loadingSessions.value = true
+  sessionsError.value = ''
   try {
     const response = await fileService.listSessions()
     sessions.value = response.data?.sessions || []
+  } catch (err) {
+    sessionsError.value = err?.error?.message || err?.message || 'Could not load sessions. Upload a file first if you have no sessions yet.'
   } finally {
     loadingSessions.value = false
   }

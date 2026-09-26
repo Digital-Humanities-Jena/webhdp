@@ -450,4 +450,57 @@ describe('HDP component installer tools UI', () => {
     expect(validateButton.attributes('disabled')).toBeDefined()
     expect(mocked.toolsService.validateHdpComponentInstall).not.toHaveBeenCalled()
   })
+  it('ignores a validation response for a source that has changed', async () => {
+    const wrapper = mount(HdpComponentInstallerView)
+    await flushPromises()
+    await wrapper.find('input[type="text"]').setValue('/work/one.sif')
+    let resolve
+    mocked.toolsService.validateHdpComponentInstall.mockImplementation(() => new Promise(done => { resolve = done }))
+    await wrapper.findAll('button').find(button => button.text() === 'Validate Package').trigger('click')
+    await wrapper.find('input[type="text"]').setValue('/work/two.sif')
+    resolve({ data: { checks: { hpc_link: { success: true } } } })
+    await flushPromises()
+    expect(wrapper.findAll('button').find(button => button.text() === 'Install on HPC').attributes('disabled')).toBeDefined()
+    expect(mocked.toast.success).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('does not carry a previous component source into another package', async () => {
+    const initial = await mocked.toolsService.listHdpComponentCatalog()
+    const second = { ...initial.data.components[0], component_key: 'second', label: 'Second component', manifest_text: 'metadata: {name: second}' }
+    mocked.toolsService.listHdpComponentCatalog.mockResolvedValue({ data: { components: [...initial.data.components, second] } })
+    const wrapper = mount(HdpComponentInstallerView)
+    await flushPromises()
+    await wrapper.find('input[type="text"]').setValue('/work/first.sif')
+    await wrapper.findAll('button').find(button => button.text().includes('Second component')).trigger('click')
+    expect(wrapper.find('input[type="text"]').element.value).toBe('')
+    expect(wrapper.findAll('button').find(button => button.text() === 'Validate Package').attributes('disabled')).toBeDefined()
+    wrapper.unmount()
+  })
+
+  it('does not attach catalog provenance to a custom manifest', async () => {
+    const wrapper = mount(HdpComponentInstallerView)
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === 'Custom manifest').trigger('click')
+    await wrapper.get('textarea').setValue('metadata: {name: custom, version: 1.0.0}')
+    await wrapper.find('input[type="text"]').setValue('/work/custom.sif')
+    mocked.toolsService.validateHdpComponentInstall.mockResolvedValue({ data: { checks: { hpc_link: { success: true } } } })
+    await wrapper.findAll('button').find(button => button.text() === 'Validate Package').trigger('click')
+    await flushPromises()
+    expect(mocked.toolsService.validateHdpComponentInstall.mock.calls[0][0].catalog_source).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('reports unsuccessful smoke tests without a success notification', async () => {
+    mocked.toolsService.listHdpComponentInstallations.mockResolvedValue({ data: { installations: [{ installation_id: 'test-1', component_key: 'validator', status: 'installed' }] } })
+    mocked.toolsService.testHdpComponentInstallation.mockResolvedValue({ data: { test: { success: false, error: 'Expected report missing' } } })
+    const wrapper = mount(HdpComponentInstallerView)
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === 'Test').trigger('click')
+    await flushPromises()
+    expect(mocked.toast.success).not.toHaveBeenCalled()
+    expect(wrapper.get('[role="alert"]').text()).toContain('Expected report missing')
+    wrapper.unmount()
+  })
+
 })

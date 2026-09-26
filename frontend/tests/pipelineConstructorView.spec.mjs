@@ -34,7 +34,7 @@ const mocked = vi.hoisted(() => ({
 vi.mock('@/services/pipeline.service', () => ({ default: mocked.pipelineService }))
 vi.mock('@/services/file.service', () => ({ default: mocked.fileService }))
 vi.mock('@/composables/useToast', () => ({ useToast: () => mocked.toast }))
-vi.mock('vue-router', () => ({ useRoute: () => mocked.route }))
+vi.mock('vue-router', () => ({ useRoute: () => mocked.route, onBeforeRouteLeave: vi.fn() }))
 
 import PipelineConfigView from '../src/views/admin/PipelineConfigView.vue'
 import { useAuthStore } from '../src/stores/auth.js'
@@ -914,6 +914,9 @@ describe('PipelineConfigView constructor interactions', () => {
 
     await wrapper.get('[data-testid="preflight-session-id"]').setValue('42')
     await wrapper.get('[data-testid="preflight-local-file-paths"]').setValue('/tmp/model.glb')
+    mocked.pipelineService.preflightPipelineConstructor.mockResolvedValue({ data: { valid: true, validation: { valid: true }, steps: [] } })
+    await wrapper.get('[data-testid="run-preflight"]').trigger('click')
+    await flushPromises()
     await wrapper.get('[data-testid="run-pipeline-execution"]').trigger('click')
     await flushPromises()
 
@@ -1025,4 +1028,91 @@ describe('PipelineConfigView constructor interactions', () => {
     const payload = await runPreflightAndGetPayload(wrapper)
     expect(payload.local_file_paths).toEqual(['/tmp/session/uploads/model_b.glb'])
   })
+  const reliabilityConfig = {
+    identifier: 'reliable', name: 'Reliable pipeline', version: '1.0.0', steps: [
+      { id: 'consume', name: 'Consume', component_ref: 'consumer', execution_profile_ref: 'builtin_default', scope: 'record' },
+    ],
+  }
+
+  it('invalidates validation on edits and ignores late validation responses', async () => {
+    const wrapper = await mountConstructorView({ pipelineConfig: reliabilityConfig })
+    let resolve
+    mocked.pipelineService.validatePipelineConfig.mockImplementation(() => new Promise(done => { resolve = done }))
+    await wrapper.get('[data-testid="validate-pipeline"]').trigger('click')
+    await wrapper.get('input[aria-label="Name"]').setValue('Changed during validation')
+    resolve({ data: { valid: true, errors: [], warnings: [] } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('Not checked for current edits')
+    expect(wrapper.text()).toContain('Unpublished changes')
+    expect(wrapper.get('[data-testid="run-pipeline-execution"]').attributes('disabled')).toBeDefined()
+    wrapper.unmount()
+  })
+
+  it('requires fresh preflight after file changes and publication after definition changes', async () => {
+    const wrapper = await mountConstructorView({ pipelineConfig: reliabilityConfig })
+    await wrapper.get('[data-testid="preflight-session-id"]').setValue('42')
+    await wrapper.get('[data-testid="preflight-local-file-paths"]').setValue('/tmp/model.glb')
+    mocked.pipelineService.preflightPipelineConstructor.mockResolvedValue({ data: { valid: true, validation: { valid: true }, steps: [] } })
+    await wrapper.get('[data-testid="run-preflight"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-testid="run-pipeline-execution"]').attributes('disabled')).toBeUndefined()
+    await wrapper.get('[data-testid="preflight-local-file-paths"]').setValue('/tmp/other.glb')
+    expect(wrapper.get('[data-testid="run-pipeline-execution"]').attributes('disabled')).toBeDefined()
+    await wrapper.get('input[aria-label="Name"]').setValue('Unpublished revision')
+    expect(wrapper.text()).toContain('Publish these changes before running')
+    expect(mocked.pipelineService.executePipelineOnFiles).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('revokes the previous preflight when a repeated check fails to complete', async () => {
+    const wrapper = await mountConstructorView({ pipelineConfig: reliabilityConfig })
+    await wrapper.get('[data-testid="preflight-session-id"]').setValue('42')
+    await wrapper.get('[data-testid="preflight-local-file-paths"]').setValue('/tmp/model.glb')
+    mocked.pipelineService.preflightPipelineConstructor.mockResolvedValueOnce({ data: { valid: true, validation: { valid: true }, steps: [] } })
+    await wrapper.get('[data-testid="run-preflight"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-testid="run-pipeline-execution"]').attributes('disabled')).toBeUndefined()
+    mocked.pipelineService.preflightPipelineConstructor.mockRejectedValueOnce(new Error('Connection interrupted'))
+    await wrapper.get('[data-testid="run-preflight"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-testid="run-pipeline-execution"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).toContain('Connection interrupted')
+    wrapper.unmount()
+  })
+
+  it('does not publish a definition that server validation rejected', async () => {
+    const wrapper = await mountConstructorView({ pipelineConfig: reliabilityConfig })
+    mocked.pipelineService.validatePipelineConfig.mockResolvedValue({ data: { valid: false, errors: ['Missing input source'] } })
+    await wrapper.findAll('button').find(button => button.text() === 'Publish Version').trigger('click')
+    await flushPromises()
+    expect(mocked.pipelineService.createPipelineVersion).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('Missing input source')
+    wrapper.unmount()
+  })
+
+  it('keeps the editor when discarding changes is cancelled', async () => {
+    const wrapper = await mountConstructorView({ pipelineConfig: reliabilityConfig })
+    await wrapper.get('input[aria-label="Name"]').setValue('Keep this work')
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    await wrapper.findAll('button').find(button => button.text() === 'New Pipeline').trigger('click')
+    expect(wrapper.get('input[aria-label="Name"]').element.value).toBe('Keep this work')
+    expect(confirm).toHaveBeenCalledOnce()
+    confirm.mockRestore()
+    wrapper.unmount()
+  })
+
+  it('preserves unpublished edits when importing a component', async () => {
+    const wrapper = await mountConstructorView({ pipelineConfig: reliabilityConfig })
+    await wrapper.get('input[aria-label="Name"]').setValue('Keep after import')
+    const path = wrapper.findAll('input').find(input => input.attributes('placeholder')?.includes('component'))
+    await path.setValue('/srv/components/example/component.yaml')
+    mocked.pipelineService.importComponent.mockResolvedValue({ data: {} })
+    const importButton = wrapper.findAll('button').find(button => button.text() === 'Import')
+    await importButton.trigger('click')
+    await flushPromises()
+    expect(wrapper.get('input[aria-label="Name"]').element.value).toBe('Keep after import')
+    expect(mocked.pipelineService.getPipeline).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
 })

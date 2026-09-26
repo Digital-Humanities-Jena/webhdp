@@ -4,10 +4,10 @@
       <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <h2 class="text-xl font-semibold text-slate-900">HDP Component Installer</h2>
-          <p class="mt-1 text-sm text-slate-600">Install HDP Components either on HPC through HPC-Link or locally as Docker-backed native components.</p>
+          <p class="mt-1 text-sm text-slate-600">Choose a component and where it will run, validate the exact package, then install and smoke-test it. Installed means registered; a passing smoke test confirms the test workload ran.</p>
         </div>
         <div class="flex flex-wrap gap-2">
-          <button type="button" class="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50" :disabled="catalogLoading" @click="loadCatalog">
+          <button type="button" class="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50" :disabled="catalogLoading || actionBusy" @click="loadCatalog">
             {{ catalogLoading ? 'Loading...' : 'Refresh Catalog' }}
           </button>
           <button type="button" class="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50" :disabled="loadingInstallations" @click="loadInstallations">
@@ -21,7 +21,10 @@
       </div>
     </section>
 
-    <section class="grid gap-6 xl:grid-cols-[minmax(0,1fr),24rem]">
+    <p class="text-sm text-slate-600">1. Choose package → 2. Validate → 3. Install → 4. Smoke test</p>
+    <div v-if="actionError" role="alert" class="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">{{ actionError }}</div>
+    <ProgressBar v-if="actionBusy" :label="validating ? 'Checking package and runtime…' : installing ? 'Installing component… This may take several minutes.' : 'Running the component smoke test…'" />
+    <fieldset :disabled="actionBusy || !isEnabled" class="min-w-0 grid gap-6 xl:grid-cols-[minmax(0,1fr),24rem]">
       <div class="space-y-6">
         <div class="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
           <div class="mb-5">
@@ -43,12 +46,12 @@
               <button type="button" :class="sourceClass('remote')" @click="setCatalogSource('remote')">Remote indexes</button>
             </div>
             <div class="grid gap-3 lg:grid-cols-[minmax(0,1fr),12rem,12rem]">
-              <input v-model.trim="catalogSearch" type="search" class="rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" placeholder="Search components" />
-              <select v-model="catalogCategory" class="rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+              <input aria-label="Search components" v-model.trim="catalogSearch" type="search" class="rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" placeholder="Search components" />
+              <select aria-label="Component category" v-model="catalogCategory" class="rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
                 <option value="">All categories</option>
                 <option v-for="category in catalogCategories" :key="category" :value="category">{{ category }}</option>
               </select>
-              <select v-model="catalogTag" class="rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+              <select aria-label="Component tag" v-model="catalogTag" class="rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
                 <option value="">All tags</option>
                 <option v-for="tag in catalogTags" :key="tag" :value="tag">{{ tag }}</option>
               </select>
@@ -58,10 +61,13 @@
               {{ catalogWarnings.length }} catalog warning{{ catalogWarnings.length === 1 ? '' : 's' }}. Expand raw catalog details below for paths and messages.
             </div>
 
-            <div class="grid gap-3 lg:grid-cols-2">
+            <LoadingSpinner v-if="catalogLoading" text="Loading component catalog…" />
+            <div v-else-if="catalogError" role="alert" class="rounded-md border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{{ catalogError }} <button type="button" class="font-semibold underline" @click="loadCatalog">Try again</button></div>
+            <div v-else class="grid gap-3 lg:grid-cols-2">
               <button
                 v-for="component in filteredCatalog"
-                :key="`${component.component_key}:${component.version}`"
+                :key="catalogKey(component)"
+                :aria-pressed="selectedCatalogKey === catalogKey(component)"
                 type="button"
                 class="rounded-md border p-4 text-left transition hover:border-indigo-300 hover:bg-indigo-50/40"
                 :class="selectedCatalogKey === catalogKey(component) ? 'border-indigo-500 bg-indigo-50' : 'border-slate-200 bg-white'"
@@ -94,7 +100,7 @@
               </button>
             </div>
 
-            <p v-if="!catalogLoading && filteredCatalog.length === 0" class="rounded-md border border-slate-200 p-6 text-center text-sm text-slate-500">
+            <p v-if="!catalogLoading && !catalogError && filteredCatalog.length === 0" class="rounded-md border border-slate-200 p-6 text-center text-sm text-slate-500">
               No matching installable components.
             </p>
           </div>
@@ -108,7 +114,7 @@
               </label>
             </div>
             <textarea
-              v-model="customManifestText"
+              aria-label="Component manifest YAML" v-model="customManifestText"
               rows="18"
               class="w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-xs text-slate-800 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
               placeholder="Paste component.yaml"
@@ -143,7 +149,7 @@
         <div class="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
           <h3 class="text-lg font-semibold text-slate-900">{{ sourceTitle }}</h3>
           <input
-            v-model.trim="sourceValue"
+            :aria-label="sourceTitle" v-model.trim="sourceValue"
             type="text"
             class="mt-3 w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
             :placeholder="sourcePlaceholder"
@@ -165,6 +171,7 @@
             placeholder="Optional SIF SHA-256 checksum"
             @input="clearActionResults"
           />
+          <p class="mt-3 text-sm text-slate-600">{{ canInstall ? 'This exact package passed readiness checks. Install it, then run its smoke test.' : 'Validate after changing the manifest, runtime or source. Installation stays unavailable until readiness checks pass.' }}</p>
           <div class="mt-4 flex flex-wrap gap-3">
             <button type="button" class="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50" :disabled="!canValidate || validating || installing || testingId || !isEnabled" @click="validatePackage">
               {{ validating ? 'Validating...' : 'Validate Package' }}
@@ -172,7 +179,7 @@
             <button type="button" class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50" :disabled="!canInstall || installing || validating || testingId || !isEnabled" @click="installPackage">
               {{ installing ? 'Installing...' : installButtonLabel }}
             </button>
-            <button v-if="latestInstallation" type="button" class="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50" :disabled="testingId === latestInstallation.installation_id || latestInstallation.status !== 'installed'" @click="testInstallation(latestInstallation)">
+            <button v-if="latestInstallation" type="button" class="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50" :disabled="actionBusy || !isEnabled || latestInstallation.status !== 'installed'" @click="testInstallation(latestInstallation)">
               {{ testingId === latestInstallation.installation_id ? 'Testing...' : 'Run Smoke Test' }}
             </button>
           </div>
@@ -191,7 +198,7 @@
               <span :class="stepClass(step.state)" class="mt-0.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full text-xs font-bold">{{ stepLabel(step.state) }}</span>
               <div>
                 <p class="text-sm font-medium text-slate-900">{{ step.label }}</p>
-                <p class="text-xs text-slate-500">{{ step.detail }}</p>
+                <p class="break-all text-xs text-slate-500">{{ step.detail }}</p>
               </div>
             </div>
           </div>
@@ -201,7 +208,7 @@
           <h3 class="text-sm font-semibold text-slate-900">Validation Checks</h3>
           <div class="mt-3 space-y-2 text-sm">
             <div v-for="check in validationChecks" :key="check.name" class="flex items-center justify-between gap-3">
-              <span class="text-slate-700">{{ check.name }}</span>
+              <span class="text-slate-700">{{ check.name }}<span v-if="check.message" class="block text-xs text-slate-500">{{ check.message }}</span></span>
               <span :class="check.success ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'" class="rounded-full px-2 py-0.5 text-xs font-semibold">
                 {{ check.success ? 'passed' : 'warning' }}
               </span>
@@ -215,11 +222,13 @@
           <pre class="mt-3 max-h-80 overflow-auto rounded-md bg-slate-950 p-3 text-xs text-slate-100">{{ prettyJson({ summary: catalogSummary, warnings: catalogWarnings, diagnostics: indexDiagnostics }) }}</pre>
         </details>
       </aside>
-    </section>
+    </fieldset>
 
     <section class="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
       <h3 class="text-lg font-semibold text-slate-900">Installations</h3>
-      <div class="mt-4 overflow-x-auto">
+      <LoadingSpinner v-if="loadingInstallations" class="mt-4" text="Loading installation history…" />
+      <p v-if="installationsError" role="alert" class="mt-3 text-sm text-rose-700">{{ installationsError }}</p>
+      <div v-if="!loadingInstallations" class="mt-4 overflow-x-auto">
         <table class="min-w-full divide-y divide-slate-200 text-sm">
           <thead class="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
             <tr>
@@ -239,12 +248,12 @@
               <td class="max-w-md truncate px-3 py-2 text-slate-600">{{ item.sif_remote_path || item.container_image || 'n/a' }}</td>
               <td class="px-3 py-2 text-slate-600">{{ formatDate(item.updated_at) }}</td>
               <td class="px-3 py-2 text-right">
-                <button type="button" class="text-sm font-medium text-indigo-700 hover:text-indigo-900 disabled:opacity-50" :disabled="testingId === item.installation_id || item.status !== 'installed'" @click="testInstallation(item)">
+                <button type="button" class="text-sm font-medium text-indigo-700 hover:text-indigo-900 disabled:opacity-50" :disabled="actionBusy || !isEnabled || item.status !== 'installed'" @click="testInstallation(item)">
                   {{ testingId === item.installation_id ? 'Testing...' : 'Test' }}
                 </button>
               </td>
             </tr>
-            <tr v-if="installations.length === 0">
+            <tr v-if="!installationsError && installations.length === 0">
               <td colspan="6" class="px-3 py-8 text-center text-slate-500">No installed components yet.</td>
             </tr>
           </tbody>
@@ -257,6 +266,8 @@
 <script setup>
 import { computed, defineComponent, h, onMounted, ref, watch } from 'vue'
 import { useToast } from '@/composables/useToast'
+import LoadingSpinner from '@/components/ui/LoadingSpinner.vue'
+import ProgressBar from '@/components/ui/ProgressBar.vue'
 import toolsService from '@/services/tools.service'
 
 const ResultPanel = defineComponent({
@@ -266,8 +277,8 @@ const ResultPanel = defineComponent({
     emptyText: { type: String, required: true },
   },
   setup(props) {
-    return () => h('section', { class: 'rounded-lg border border-slate-200 bg-white p-6 shadow-sm' }, [
-      h('h3', { class: 'text-lg font-semibold text-slate-900' }, props.title),
+    return () => h('details', { class: 'rounded-lg border border-slate-200 bg-white p-6 shadow-sm' }, [
+      h('summary', { class: 'cursor-pointer text-sm font-semibold text-slate-900' }, props.title),
       props.payload
         ? h('pre', { class: 'mt-4 max-h-96 overflow-auto rounded-md bg-slate-950 p-4 text-xs text-slate-100' }, JSON.stringify(props.payload, null, 2))
         : h('p', { class: 'mt-4 text-sm text-slate-500' }, props.emptyText),
@@ -278,6 +289,12 @@ const ResultPanel = defineComponent({
 const { success, warning, error: showError } = useToast()
 
 const isEnabled = ref(false)
+const actionError = ref('')
+const catalogError = ref('')
+const installationsError = ref('')
+const validatedPayload = ref('')
+let catalogRequestId = 0
+const actionBusy = computed(() => validating.value || installing.value || Boolean(testingId.value))
 const installStrategy = ref('hpc_sif')
 const mode = ref('catalog')
 const catalogSource = ref('all')
@@ -307,7 +324,7 @@ const indexDiagnostics = ref(null)
 const catalogWarnings = computed(() => catalogSummary.value?.warnings || [])
 const catalogCategories = computed(() => sortedUnique(catalog.value.map((item) => item.category).filter(Boolean)))
 const catalogTags = computed(() => sortedUnique(catalog.value.flatMap((item) => item.tags || [])))
-const selectedCatalogComponent = computed(() => catalog.value.find((item) => catalogKey(item) === selectedCatalogKey.value) || null)
+const selectedCatalogComponent = computed(() => mode.value === 'catalog' ? (catalog.value.find((item) => catalogKey(item) === selectedCatalogKey.value) || null) : null)
 const activeManifestText = computed(() => mode.value === 'catalog' ? (selectedCatalogComponent.value?.manifest_text || '') : customManifestText.value)
 const sourceValue = computed({
   get() {
@@ -326,7 +343,7 @@ const sourcePlaceholder = computed(() => installStrategy.value === 'local_contai
 const installButtonLabel = computed(() => installStrategy.value === 'local_container' ? 'Install Locally' : 'Install on HPC')
 const canValidate = computed(() => Boolean(activeManifestText.value.trim() && sourceValue.value.trim()))
 const readinessCheckKey = computed(() => installStrategy.value === 'local_container' ? 'local_container' : 'hpc_link')
-const canInstall = computed(() => Boolean(validation.value && !validation.value.duplicate && validation.value.checks?.[readinessCheckKey.value]?.success === true))
+const canInstall = computed(() => Boolean(validatedPayload.value === JSON.stringify(installPayload()) && validation.value && !validation.value.duplicate && validation.value.checks?.[readinessCheckKey.value]?.success === true))
 const activeComponentSummary = computed(() => {
   const component = selectedCatalogComponent.value
   const metadata = component?.manifest?.metadata || {}
@@ -364,7 +381,8 @@ const validationChecks = computed(() => {
   const checks = validation.value?.checks || {}
   return Object.entries(checks).map(([name, value]) => ({
     name,
-    success: value?.success !== false,
+    success: value?.success === true,
+    message: value?.error || value?.message || (value?.success === true ? '' : 'No passing result reported.'),
   }))
 })
 
@@ -385,7 +403,7 @@ const progressSteps = computed(() => [
     id: 'validate',
     label: 'Validate package',
     detail: validation.value?.component_key || 'Pending',
-    state: validating.value ? 'running' : validation.value ? (validation.value.checks?.[readinessCheckKey.value]?.success === false ? 'warning' : 'passed') : 'pending',
+    state: validating.value ? 'running' : validation.value ? (validation.value.checks?.[readinessCheckKey.value]?.success === true ? 'passed' : 'warning') : 'pending',
   },
   {
     id: 'install',
@@ -421,15 +439,11 @@ function catalogSifSource(component) {
 function syncSelectedCatalogSource(component) {
   if (installStrategy.value === 'local_container') {
     const image = catalogContainerImage(component)
-    if (image) {
-      containerImage.value = image
-    }
+    containerImage.value = image
     return
   }
   const sif = catalogSifSource(component)
-  if (sif) {
-    sifSource.value = sif
-  }
+  sifSource.value = sif
 }
 
 function modeClass(target) {
@@ -513,6 +527,8 @@ function prettyJson(value) {
 }
 
 function clearActionResults() {
+  validatedPayload.value = ''
+  actionError.value = ''
   validation.value = null
   installResult.value = null
   testResult.value = null
@@ -520,11 +536,13 @@ function clearActionResults() {
 }
 
 function setMode(nextMode) {
+  if (actionBusy.value) return
   mode.value = nextMode
   clearActionResults()
 }
 
 async function setInstallStrategy(nextStrategy) {
+  if (actionBusy.value) return
   if (installStrategy.value === nextStrategy) return
   installStrategy.value = nextStrategy
   selectedCatalogKey.value = ''
@@ -533,6 +551,7 @@ async function setInstallStrategy(nextStrategy) {
 }
 
 async function setCatalogSource(nextSource) {
+  if (actionBusy.value) return
   if (catalogSource.value === nextSource) return
   catalogSource.value = nextSource
   selectedCatalogKey.value = ''
@@ -541,6 +560,7 @@ async function setCatalogSource(nextSource) {
 }
 
 function selectCatalogComponent(component) {
+  if (actionBusy.value) return
   selectedCatalogKey.value = catalogKey(component)
   syncSelectedCatalogSource(component)
   clearActionResults()
@@ -594,40 +614,49 @@ async function loadContext() {
 }
 
 async function loadCatalog() {
+  if (actionBusy.value) return
+  const requestId = ++catalogRequestId
   catalogLoading.value = true
+  catalogError.value = ''
   try {
     const [response, diagnosticsResponse] = await Promise.all([
       toolsService.listHdpComponentCatalog({ install_strategy: installStrategy.value, source: catalogSource.value }),
       toolsService.getHdpComponentCatalogDiagnostics ? toolsService.getHdpComponentCatalogDiagnostics() : Promise.resolve({ data: null }),
     ])
+    if (requestId !== catalogRequestId) return
     catalog.value = response.data?.components || []
     catalogSummary.value = response.data?.summary || { total: catalog.value.length, installable: catalog.value.length, warnings: [] }
     indexDiagnostics.value = diagnosticsResponse.data || null
-    if (!selectedCatalogKey.value && catalog.value.length > 0) {
+    if (!catalog.value.some(item => catalogKey(item) === selectedCatalogKey.value) && catalog.value.length > 0) {
       selectedCatalogKey.value = catalogKey(catalog.value[0])
       syncSelectedCatalogSource(catalog.value[0])
     }
   } catch (err) {
+    if (requestId !== catalogRequestId) return
     catalog.value = []
-    showError(err?.message || 'Failed to load component catalog.')
+    catalogError.value = err?.error?.message || err?.message || 'Failed to load component catalog.'
   } finally {
-    catalogLoading.value = false
+    if (requestId === catalogRequestId) catalogLoading.value = false
   }
 }
 
 async function loadInstallations() {
   loadingInstallations.value = true
+  installationsError.value = ''
   try {
     const response = await toolsService.listHdpComponentInstallations()
     installations.value = response.data?.installations || []
   } catch (err) {
-    showError(err?.message || 'Failed to load component installations.')
+    installationsError.value = err?.error?.message || err?.message || 'Could not load installation history. Use Refresh Installs to retry.'
   } finally {
     loadingInstallations.value = false
   }
 }
 
 async function validatePackage() {
+  if (actionBusy.value || !isEnabled.value || !canValidate.value) return
+  actionError.value = ''
+  const snapshot = JSON.stringify(installPayload())
   validating.value = true
   validation.value = null
   installResult.value = null
@@ -637,20 +666,25 @@ async function validatePackage() {
     const response = await toolsService.validateHdpComponentInstall({
       ...installPayload(),
     })
+    if (snapshot !== JSON.stringify(installPayload())) return
     validation.value = response.data
-    if (validation.value?.checks?.[readinessCheckKey.value]?.success === false) {
+    validatedPayload.value = snapshot
+    if (validation.value?.checks?.[readinessCheckKey.value]?.success !== true) {
       warning(installStrategy.value === 'local_container' ? 'Package checks completed, but the local Docker image is not ready.' : 'Package checks completed, but HPC-Link is not ready.')
     } else {
       success('Component package validated.')
     }
   } catch (err) {
-    showError(err?.message || 'Validation failed.')
+    actionError.value = err?.error?.message || err?.message || 'Validation failed. Review the source and manifest, then try again.'
+    showError(actionError.value)
   } finally {
     validating.value = false
   }
 }
 
 async function installPackage() {
+  if (actionBusy.value || !isEnabled.value || !canInstall.value) return
+  actionError.value = ''
   installing.value = true
   installResult.value = null
   testResult.value = null
@@ -660,39 +694,44 @@ async function installPackage() {
     })
     installResult.value = response.data || null
     latestInstallation.value = response.data?.installation || null
+    if (latestInstallation.value?.status !== 'installed') throw new Error('Installation was not confirmed. Refresh installation history before retrying.')
+    validatedPayload.value = ''
     success(installStrategy.value === 'local_container' ? 'Component installed locally.' : 'Component installed on HPC.')
     await loadInstallations()
   } catch (err) {
-    showError(err?.message || 'Installation failed.')
+    actionError.value = err?.error?.message || err?.message || 'Installation could not be confirmed. Refresh installation history before retrying to avoid a duplicate request.'
+    validatedPayload.value = ''
+    showError(actionError.value)
+    await loadInstallations()
   } finally {
     installing.value = false
   }
 }
 
 async function testInstallation(item) {
+  if (actionBusy.value || !isEnabled.value || item.status !== 'installed') return
+  actionError.value = ''
   testingId.value = item.installation_id
   testResult.value = null
   try {
     const response = await toolsService.testHdpComponentInstallation(item.installation_id)
     testResult.value = response.data || null
     latestInstallation.value = response.data?.installation || item
-    success(response.data?.test?.success ? 'Smoke test passed.' : 'Smoke test completed with issues.')
+    if (response.data?.test?.success === true) success('Smoke test passed.')
+    else {
+      actionError.value = response.data?.test?.error || 'Smoke test did not pass. Review the test details before using this component.'
+      warning(actionError.value)
+    }
     await loadInstallations()
   } catch (err) {
-    showError(err?.message || 'Smoke test failed.')
+    actionError.value = err?.error?.message || err?.message || 'Smoke test failed.'
+    showError(actionError.value)
   } finally {
     testingId.value = ''
   }
 }
 
-watch([catalogCategory, catalogTag, catalogSearch], () => {
-  if (filteredCatalog.value.length > 0 && !filteredCatalog.value.some((item) => catalogKey(item) === selectedCatalogKey.value)) {
-    const nextComponent = filteredCatalog.value[0]
-    selectedCatalogKey.value = catalogKey(nextComponent)
-    syncSelectedCatalogSource(nextComponent)
-    clearActionResults()
-  }
-})
+watch(() => JSON.stringify(installPayload()), () => { clearActionResults() }, { flush: 'sync' })
 
 onMounted(async () => {
   await loadContext()

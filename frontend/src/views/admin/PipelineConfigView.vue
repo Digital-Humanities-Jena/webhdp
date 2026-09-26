@@ -6,8 +6,7 @@
         <div>
           <h1 class="text-2xl font-semibold text-slate-900">Pipeline Constructor</h1>
           <p class="mt-2 max-w-3xl text-sm text-slate-600">
-            Build native HDP pipelines from manifest-backed components, wire step inputs to previous outputs,
-            define trigger presets, and publish immutable pipeline versions.
+            Add components in execution order, connect their inputs, then validate and publish a version. Preflight checks sample files; running a pipeline performs real processing.
           </p>
         </div>
 
@@ -29,6 +28,8 @@
           <select
             v-if="pipelines.length > 0"
             v-model="selectedPipelineId"
+            aria-label="Select pipeline"
+            :disabled="busy"
             class="col-span-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm sm:w-64"
             @change="handlePipelineSelection"
           >
@@ -40,14 +41,15 @@
           <button
             type="button"
             class="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 sm:px-4"
-            @click="resetEditor"
+            :disabled="busy"
+            @click="requestNewPipeline"
           >
             New Pipeline
           </button>
           <button
             type="button"
             class="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-50 sm:px-4"
-            :disabled="loading || validating"
+            :disabled="busy"
             @click="validateConfig"
             data-testid="validate-pipeline"
           >
@@ -56,7 +58,7 @@
           <button
             type="button"
             class="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-50 sm:px-4"
-            :disabled="loading || preflighting"
+            :disabled="busy"
             @click="runPreflight"
             data-testid="run-preflight"
           >
@@ -65,7 +67,7 @@
           <button
             type="button"
             class="rounded-xl bg-indigo-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 disabled:opacity-50 sm:px-4"
-            :disabled="loading || saving"
+            :disabled="busy"
             @click="publishPipeline"
           >
             {{ saving ? 'Publishing...' : 'Publish Version' }}
@@ -74,18 +76,27 @@
         </div>
       </header>
 
-      <div v-if="error" class="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+      <div v-if="error" role="alert" class="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
         {{ error }}
       </div>
-      <div v-if="successMessage" class="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+      <div v-if="successMessage" role="status" class="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
         {{ successMessage }}
       </div>
 
+      <div class="flex flex-wrap items-center gap-3 text-sm" role="status">
+        <span class="rounded-full bg-slate-100 px-3 py-1 font-medium text-slate-700">{{ isDirty ? 'Unpublished changes' : savedEditorSnapshot ? 'Saved version loaded' : 'New pipeline' }}</span>
+        <span class="text-slate-600">{{ busy ? 'Working… Please wait before changing the configuration.' : '1. Configure → 2. Validate → 3. Publish version → 4. Preflight & run' }}</span>
+        <button type="button" class="font-medium text-indigo-700 underline" :disabled="busy || !editor.identifier" @click="exportDefinition">Export definition</button>
+      </div>
+      <ProgressBar v-if="busy && !loading" :label="executingPipeline ? 'Running the saved pipeline…' : saving ? 'Validating and publishing version…' : preflighting ? 'Checking sample files…' : 'Checking component configuration…'" />
+      <div v-if="loadFailed" class="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm">
+        The workspace could not be loaded. <button type="button" class="font-semibold text-indigo-700 underline" :disabled="busy" @click="loadInitialData()">Retry loading</button>
+      </div>
       <div v-if="loading" class="rounded-2xl border border-slate-200 bg-white px-6 py-16 shadow-sm">
         <LoadingSpinner size="lg" text="Loading constructor workspace..." />
       </div>
 
-      <div v-else class="grid gap-5 xl:grid-cols-[18rem,minmax(0,1fr)] 2xl:grid-cols-[19rem,minmax(48rem,1fr),22rem]">
+      <fieldset v-else :disabled="busy" class="min-w-0 grid gap-5 xl:grid-cols-[18rem,minmax(0,1fr)] 2xl:grid-cols-[19rem,minmax(0,1fr),22rem]">
         <div :class="[catalogPanelOpen ? 'block' : 'hidden', 'xl:block']">
           <PipelineConstructorCatalogSidebar
           :catalog-search="catalogSearch"
@@ -135,19 +146,19 @@
             <div class="mt-6 grid gap-4 md:grid-cols-2">
               <div>
                 <label class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Identifier</label>
-                <input v-model.trim="editor.identifier" type="text" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" />
+                <input aria-label="Identifier" v-model.trim="editor.identifier" type="text" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" />
               </div>
               <div>
                 <label class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Name</label>
-                <input v-model.trim="editor.name" type="text" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" />
+                <input aria-label="Name" v-model.trim="editor.name" type="text" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" />
               </div>
               <div>
                 <label class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Version</label>
-                <input v-model.trim="editor.version" type="text" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" />
+                <input aria-label="Version" v-model.trim="editor.version" type="text" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" />
               </div>
               <div>
                 <label class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Status</label>
-                <select v-model="editor.status" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+                <select aria-label="Status" v-model="editor.status" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
                   <option value="active">active</option>
                   <option value="draft">draft</option>
                   <option value="archived">archived</option>
@@ -155,11 +166,11 @@
               </div>
               <div>
                 <label class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Modality</label>
-                <input v-model.trim="editor.modality" type="text" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" />
+                <input aria-label="Modality" v-model.trim="editor.modality" type="text" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" />
               </div>
               <div>
                 <label class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Processing Mode</label>
-                <select v-model="editor.processingMode" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+                <select aria-label="Processing Mode" v-model="editor.processingMode" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
                   <option value="root">root</option>
                   <option value="record">record</option>
                   <option value="batch">batch</option>
@@ -170,6 +181,7 @@
             <div class="mt-4">
               <label class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Tags</label>
               <input
+                aria-label="Tags"
                 v-model.trim="editor.tagsText"
                 type="text"
                 class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
@@ -179,7 +191,7 @@
 
             <div class="mt-4">
               <label class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Description</label>
-              <textarea v-model="editor.description" rows="3" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" />
+              <textarea aria-label="Description" v-model="editor.description" rows="3" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" />
             </div>
           </section>
 
@@ -216,6 +228,7 @@
 
         <div :class="[diagnosticsPanelOpen ? 'block' : 'hidden', 'xl:col-span-2 2xl:col-span-1 2xl:block']">
           <PipelineConstructorSidePanel
+          :execution-blocked-reason="executionBlockedReason"
           :validation-result="validationResult"
           :preflight-result="preflightResult"
           :preflight-session-id="preflightSessionId"
@@ -231,9 +244,10 @@
           @update:preflight-file-paths-text="preflightFilePathsText = $event"
           @refresh-session-resources="refreshSessionResources"
           @run-pipeline-execution="runPipelineExecution"
+          @run-preflight="runPreflight"
           />
         </div>
-      </div>
+      </fieldset>
     </div>
 
     <PipelineConstructorOutputMappingModal
@@ -255,9 +269,10 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { computed, onMounted, onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { useRoute, onBeforeRouteLeave } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import ProgressBar from '@/components/ui/ProgressBar.vue'
 import LoadingSpinner from '@/components/ui/LoadingSpinner.vue'
 import PipelineConstructorCatalogSidebar from '@/components/admin/pipeline/PipelineConstructorCatalogSidebar.vue'
 import PipelineConstructorOutputMappingModal from '@/components/admin/pipeline/PipelineConstructorOutputMappingModal.vue'
@@ -367,6 +382,57 @@ function createEmptyEditor() {
 }
 
 const editor = reactive(createEmptyEditor())
+const cleanEditorSnapshot = ref(JSON.stringify(editor))
+const savedEditorSnapshot = ref('')
+const loadedPipelineConfig = ref(null)
+const loadedPipelineId = ref('')
+const loadFailed = ref(false)
+let pipelineLoadToken = 0
+const busy = computed(() => loading.value || saving.value || validating.value || preflighting.value || executingPipeline.value || importingComponent.value || validatingComponent.value)
+const isDirty = computed(() => JSON.stringify(editor) !== cleanEditorSnapshot.value)
+const executionBlockedReason = computed(() => {
+  if (busy.value) return 'Wait for the current operation to finish.'
+  if (!savedEditorSnapshot.value || JSON.stringify(editor) !== savedEditorSnapshot.value) return 'Publish these changes before running. Runs use the saved version, not an editor draft.'
+  if (!Number.isSafeInteger(Number(preflightSessionId.value)) || Number(preflightSessionId.value) <= 0) return 'Choose a valid session ID and its files in Preflight.'
+  if (!preflightFilePathsText.value.trim()) return 'Choose at least one session file in Preflight.'
+  if (preflightResult.value?.valid !== true) return 'Run Preflight for this version and these files before starting.'
+  return ''
+})
+function confirmDiscard() {
+  return !isDirty.value || window.confirm('Discard unpublished pipeline changes? Export the definition first if you want to keep a copy.')
+}
+function requestNewPipeline() {
+  if (!busy.value && confirmDiscard()) resetEditor()
+}
+function exportDefinition() {
+  try {
+    const blob = new Blob([JSON.stringify(buildPipelinePayload(), null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'pipeline-definition.json'
+    link.click()
+    URL.revokeObjectURL(url)
+  } catch (err) { error.value = err.message }
+}
+function warnBeforeUnload(event) {
+  if (!isDirty.value && !busy.value) return
+  event.preventDefault()
+  event.returnValue = ''
+}
+onBeforeRouteLeave(() => busy.value ? false : confirmDiscard())
+onBeforeUnmount(() => {
+  pipelineLoadToken += 1
+  cancelSessionResourceLoad()
+  window.removeEventListener('beforeunload', warnBeforeUnload)
+})
+watch(componentPath, () => { componentValidationResult.value = null }, { flush: 'sync' })
+watch(editor, () => {
+  validationResult.value = null
+  preflightResult.value = null
+  successMessage.value = ''
+}, { deep: true, flush: 'sync' })
+watch([preflightSessionId, preflightFilePathsText], () => { preflightResult.value = null }, { flush: 'sync' })
 
 const isAdmin = computed(() => authStore.user?.role === 'admin')
 const componentMap = computed(() => {
@@ -625,6 +691,8 @@ function hydrateEditor(config) {
     })
     return hydratedStep
   })
+  cleanEditorSnapshot.value = JSON.stringify(editor)
+  savedEditorSnapshot.value = cleanEditorSnapshot.value
 }
 
 function resetEditor() {
@@ -645,6 +713,13 @@ function resetEditor() {
   endStepDrag()
   endTriggerRuleDrag()
   endOutputMappingDrag()
+  cleanEditorSnapshot.value = JSON.stringify(editor)
+  savedEditorSnapshot.value = ''
+  loadedPipelineId.value = ''
+  loadedPipelineConfig.value = null
+  pipelineExecutionResult.value = null
+  pipelineExecutionRun.value = null
+  pipelineExecutionError.value = ''
 }
 
 function cancelSessionResourceLoad() {
@@ -744,8 +819,14 @@ async function refreshSessionResources() {
 }
 
 async function loadPipeline(identifier) {
+  const token = ++pipelineLoadToken
   const response = await pipelineService.getPipeline(identifier)
-  hydrateEditor(response.data.pipeline.config || response.data.pipeline)
+  if (token !== pipelineLoadToken) return
+  const config = response.data.pipeline.config || response.data.pipeline
+  hydrateEditor(config)
+  loadedPipelineConfig.value = clone(config)
+  loadedPipelineId.value = identifier
+  selectedPipelineId.value = identifier
 }
 
 function clearCatalogFilters() {
@@ -1278,12 +1359,17 @@ function buildPipelinePayload() {
 }
 
 async function validateConfig() {
+  if (busy.value) return
+  diagnosticsPanelOpen.value = true
   error.value = ''
   successMessage.value = ''
   validating.value = true
+  validationResult.value = null
   try {
     const payload = buildPipelinePayload()
+    const snapshot = JSON.stringify(editor)
     const response = await pipelineService.validatePipelineConfig(payload)
+    if (snapshot !== JSON.stringify(editor)) return
     validationResult.value = response.data
     if (response.data.valid) {
       toast.success('Pipeline validation passed')
@@ -1298,24 +1384,33 @@ async function validateConfig() {
 }
 
 async function runPreflight() {
+  if (busy.value) return
+  diagnosticsPanelOpen.value = true
   error.value = ''
   successMessage.value = ''
   pipelineExecutionError.value = ''
   preflighting.value = true
+  preflightResult.value = null
+  validationResult.value = null
   try {
     const payload = buildPipelinePayload()
     const localFilePaths = String(preflightFilePathsText.value || '')
       .split('\n')
       .map((line) => line.trim())
       .filter(Boolean)
+    if (!Number.isSafeInteger(Number(preflightSessionId.value)) || Number(preflightSessionId.value) <= 0 || !localFilePaths.length) throw new Error('Choose a valid session ID and at least one file for preflight.')
+    const snapshot = JSON.stringify(editor)
+    const context = JSON.stringify([preflightSessionId.value, preflightFilePathsText.value])
     const response = await pipelineService.preflightPipelineConstructor({
       pipeline_definition: payload,
       session_id: Number(preflightSessionId.value),
       local_file_paths: localFilePaths,
     })
+    if (snapshot !== JSON.stringify(editor) || context !== JSON.stringify([preflightSessionId.value, preflightFilePathsText.value])) return
     preflightResult.value = response.data
     validationResult.value = response.data.validation
-    toast.success('Pipeline preflight completed')
+    if (response.data.valid === true) toast.success('Pipeline preflight completed')
+    else toast.warning('Preflight found problems. Review the diagnostics before running.')
   } catch (err) {
     error.value = err.error?.message || err.message || 'Failed to preflight pipeline.'
   } finally {
@@ -1324,6 +1419,8 @@ async function runPreflight() {
 }
 
 async function runPipelineExecution() {
+  if (executionBlockedReason.value) { pipelineExecutionError.value = executionBlockedReason.value; return }
+  diagnosticsPanelOpen.value = true
   error.value = ''
   successMessage.value = ''
   pipelineExecutionError.value = ''
@@ -1344,6 +1441,8 @@ async function runPipelineExecution() {
   executingPipeline.value = true
   try {
     const payload = buildPipelinePayload()
+    const current = await pipelineService.getPipeline(payload.identifier)
+    if (JSON.stringify(current.data.pipeline.config || current.data.pipeline) !== JSON.stringify(loadedPipelineConfig.value)) throw new Error('The saved pipeline changed. Reload it and repeat preflight before running.')
     const response = await pipelineService.executePipelineOnFiles(
       Number(preflightSessionId.value),
       localFilePaths,
@@ -1357,7 +1456,10 @@ async function runPipelineExecution() {
       const runResponse = await pipelineService.getPipelineRun(runId)
       pipelineExecutionRun.value = runResponse.data?.run || runResponse.data
     }
-    toast.success('Pipeline execution completed')
+    if (response.data?.result?.success === false || response.data?.result?.summary?.failed_count > 0 || pipelineExecutionRun.value?.status === 'failed') {
+      pipelineExecutionError.value = response.data?.result?.error || 'The run reported failures. Review the step results before retrying.'
+      toast.warning('Pipeline finished with failures')
+    } else toast.success('Pipeline execution completed')
   } catch (err) {
     pipelineExecutionError.value = err.error?.message || err.message || 'Failed to run pipeline.'
   } finally {
@@ -1366,14 +1468,19 @@ async function runPipelineExecution() {
 }
 
 async function publishPipeline() {
+  if (busy.value) return
   error.value = ''
   successMessage.value = ''
   saving.value = true
   try {
     const payload = buildPipelinePayload()
+    const check = await pipelineService.validatePipelineConfig(payload)
+    validationResult.value = check.data
+    diagnosticsPanelOpen.value = true
+    if (check.data?.valid !== true) throw new Error('Resolve the validation errors before publishing this version.')
     const response = await pipelineService.createPipelineVersion(payload.identifier, payload)
-    successMessage.value = `Published ${response.data.pipeline.identifier} (${response.data.pipeline.active_version || response.data.pipeline.version || 'new version'}).`
     await loadInitialData(payload.identifier)
+    successMessage.value = `Published ${response.data.pipeline.identifier} (${response.data.pipeline.active_version || response.data.pipeline.version || 'new version'}).${loadFailed.value ? ' Reload the saved version before testing it.' : ''}`
   } catch (err) {
     error.value = err.error?.message || err.message || 'Failed to publish pipeline.'
   } finally {
@@ -1382,13 +1489,16 @@ async function publishPipeline() {
 }
 
 async function validateComponentPath() {
+  if (busy.value) return
   if (!componentPath.value) {
     toast.error('Component path is required')
     return
   }
   validatingComponent.value = true
   try {
-    const response = await pipelineService.validateComponentManifest(componentPath.value)
+    const path = componentPath.value
+    const response = await pipelineService.validateComponentManifest(path)
+    if (path !== componentPath.value) return
     componentValidationResult.value = response.data
     toast.success('Component manifest validated')
   } catch (err) {
@@ -1399,6 +1509,7 @@ async function validateComponentPath() {
 }
 
 async function importComponentPath() {
+  if (busy.value) return
   if (!componentPath.value) {
     toast.error('Component path is required')
     return
@@ -1407,7 +1518,10 @@ async function importComponentPath() {
   try {
     await pipelineService.importComponent(componentPath.value)
     toast.success('Component imported')
-    await loadInitialData(selectedPipelineId.value || editor.identifier || '')
+    const response = await pipelineService.listComponents()
+    components.value = response.data.components || []
+    validationResult.value = null
+    preflightResult.value = null
   } catch (err) {
     toast.error(err.error?.message || err.message || 'Failed to import component')
   } finally {
@@ -1416,15 +1530,18 @@ async function importComponentPath() {
 }
 
 async function handlePipelineSelection() {
-  if (!selectedPipelineId.value) {
-    resetEditor()
-    return
-  }
-  await loadPipeline(selectedPipelineId.value)
+  if (busy.value || !confirmDiscard()) { selectedPipelineId.value = loadedPipelineId.value; return }
+  if (!selectedPipelineId.value) { resetEditor(); return }
+  loading.value = true
+  try { await loadPipeline(selectedPipelineId.value) }
+  catch (err) { selectedPipelineId.value = loadedPipelineId.value; error.value = err.error?.message || err.message || 'Could not load the selected pipeline. Your editor is unchanged.' }
+  finally { loading.value = false }
 }
 
 async function loadInitialData(preferredPipelineId = '') {
+  error.value = ''
   loading.value = true
+  loadFailed.value = false
   try {
     const [pipelinesResponse, componentsResponse, supportResponse] = await Promise.all([
       pipelineService.listPipelines(),
@@ -1443,6 +1560,7 @@ async function loadInitialData(preferredPipelineId = '') {
       resetEditor()
     }
   } catch (err) {
+    loadFailed.value = true
     error.value = err.error?.message || err.message || 'Failed to load pipeline constructor workspace.'
   } finally {
     loading.value = false
@@ -1501,6 +1619,7 @@ const stepCardActions = {
 }
 
 onMounted(async () => {
+  window.addEventListener('beforeunload', warnBeforeUnload)
   if (!authStore.user) {
     await authStore.fetchCurrentUser()
   }
