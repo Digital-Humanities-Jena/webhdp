@@ -65,6 +65,7 @@ test('keeps upload controls stable during transfer and restores them after failu
     await pending
     await fulfillJson(route, { error: { message: 'Transfer interrupted. Try again.' } }, 503)
   })
+  await page.route(apiV1('/sessions/file/recover'), route => fulfillJson(route, { error: { message: 'Transfer interrupted. Select the original file to retry.', code: 'NOT_FOUND' } }, 404))
   await page.locator('#file-upload').setInputFiles({ name: 'model.glb', mimeType: 'model/gltf-binary', buffer: Buffer.from('glb') })
   await page.getByTestId('upload-primary-action').click()
   await expect(page.getByRole('progressbar')).toHaveAccessibleName('Uploading and checking your file…')

@@ -575,6 +575,55 @@ class NativePipelineSystemTestCase(unittest.TestCase):
             self.native_service.update_run_progress(pending["run_id"], {"status_message": "Late callback"})
             self.assertEqual(self.native_service.get_pipeline_run(pending["run_id"])["result"], before["result"])
 
+    def test_abrupt_exit_reconciles_without_replaying_remote_work(self):
+        from uuid import uuid4
+        with self.app.app_context():
+            _, _, session = self._prepare_generic_pipeline_session("interrupted")
+            payload = {"request_id": str(uuid4()), "session_id": session.id}
+            queued = self.native_service.create_pending_run("render", session_id=session.id, initiated_by_user_id=self.user_id, request_payload=payload)
+            with patch.object(self.native_service, "_run_native_pipeline", side_effect=SystemExit("worker terminated")) as execute:
+                with self.assertRaises(SystemExit):
+                    self.native_service.execute_registered_submission("render", {"db_session_id": session.id}, existing_run_public_id=queued["run_id"])
+                redelivery = self.native_service.execute_registered_submission("render", {"db_session_id": session.id}, existing_run_public_id=queued["run_id"])
+                self.assertFalse(redelivery["success"])
+                recovered = self.native_service.get_pipeline_run(queued["run_id"], self.user_id)
+                self.assertEqual(recovered["status"], "failed")
+                self.assertTrue(recovered["result"]["interrupted"])
+                self.assertNotIn("_dispatch", recovered["request"])
+                retry = self.native_service.create_pending_run("render", session_id=session.id, initiated_by_user_id=self.user_id, request_payload=payload)
+                self.assertTrue(retry["reused"])
+                result = self.native_service.execute_registered_submission("render", {"db_session_id": session.id}, existing_run_public_id=queued["run_id"])
+                self.assertFalse(result["success"])
+                execute.assert_called_once()
+            new = self.native_service.create_pending_run("render", session_id=session.id, initiated_by_user_id=self.user_id, request_payload={"request_id": str(uuid4()), "session_id": session.id})
+            self.assertNotEqual(new["run_id"], queued["run_id"])
+
+    def test_live_worker_lock_prevents_false_interruption(self):
+        from test_workflow_transition_reliability import locked_by_other_process
+        from database.models import PipelineRunStatus
+        with self.app.app_context():
+            _, _, session = self._prepare_generic_pipeline_session("live_worker")
+            queued = self.native_service.create_pending_run("render", session_id=session.id, initiated_by_user_id=self.user_id, request_payload={})
+            row = PipelineRun.query.filter_by(public_id=queued["run_id"]).one()
+            row.status = PipelineRunStatus.RUNNING
+            db.session.commit()
+            with locked_by_other_process(session.hdpc_path):
+                self.assertEqual(self.native_service.get_pipeline_run(row.public_id)["status"], "running")
+            self.assertEqual(self.native_service.get_pipeline_run(row.public_id)["status"], "failed")
+
+    def test_interruption_before_dispatch_can_be_recovered(self):
+        with self.app.app_context():
+            _, _, session = self._prepare_generic_pipeline_session("interrupted_dispatch")
+            queued = self.native_service.create_pending_run("render", session_id=session.id, initiated_by_user_id=self.user_id, request_payload={})
+            with patch("services.pipeline_run_recovery.owner_alive", return_value=False):
+                self.assertEqual(self.native_service.get_pipeline_run(queued["run_id"])["status"], "failed")
+
+    def test_unknown_task_monitor_does_not_fail_queued_run(self):
+        with self.app.app_context():
+            _, _, session = self._prepare_generic_pipeline_session("unknown_dispatch")
+            queued = self.native_service.create_pending_run("render", session_id=session.id, initiated_by_user_id=self.user_id, request_payload={})
+            self.assertEqual(self.native_service.get_pipeline_run(queued["run_id"])["status"], "pending")
+
     def test_preflight_token_binds_definition_user_and_file_selection(self):
         from services.registry_lock import OperationConflict
         with self.app.app_context():

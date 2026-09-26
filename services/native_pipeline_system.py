@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from services.pipeline_run_recovery import guard_native_run, reconcile_run, process_owner
+
 import copy
 import hashlib
 import json
@@ -551,6 +553,7 @@ class NativePipelineSystemService:
             if session is None:
                 raise ResourceNotFoundError("Run session is unavailable")
             self._assert_user_can_access_session(session, user_id)
+        reconcile_run(run)
         return self._serialize_pipeline_run(run)
 
     def get_playground_run(self, run_public_id: str) -> Dict[str, Any]:
@@ -1003,6 +1006,7 @@ class NativePipelineSystemService:
             if existing:
                 if existing.initiated_by_user_id != initiated_by_user_id or _json_loads(existing.request_json, {}).get("request_fingerprint") != _hash_payload(request_payload):
                     raise OperationConflict("This request identifier already belongs to another operation.")
+                reconcile_run(existing)
                 return {"run_id": existing.public_id, "status": existing.status.value, "reused": True, "pipeline_identifier": identifier, "pipeline_version": db.session.get(PipelineVersion, existing.pipeline_version_id).version}
         canonical_identifier = self.resolve_pipeline_identifier(identifier)
         definition = PipelineDefinition.query.filter_by(identifier=canonical_identifier, is_active=True).first()
@@ -1019,6 +1023,8 @@ class NativePipelineSystemService:
         self._verify_preflight(request_payload, _json_loads(version_row.config_json, {}), initiated_by_user_id, lod_snapshot=lod_snapshot)
         active_run = PipelineRun.query.filter(PipelineRun.session_id == session_id, PipelineRun.status.in_([PipelineRunStatus.PENDING, PipelineRunStatus.RUNNING])).first()
         if active_run:
+            reconcile_run(active_run)
+        if active_run and active_run.status in {PipelineRunStatus.PENDING, PipelineRunStatus.RUNNING}:
             raise OperationConflict("This session already has an active run.", details={"run_id": active_run.public_id})
         pipeline_run = PipelineRun(
             **({"public_id": request_id} if request_id else {}),
@@ -1027,7 +1033,7 @@ class NativePipelineSystemService:
             session_id=session_id,
             initiated_by_user_id=initiated_by_user_id,
             status=PipelineRunStatus.PENDING,
-            request_json=_json_dumps({**request_payload, "request_fingerprint": _hash_payload(request_payload), "lod_snapshot": lod_snapshot}),
+            request_json=_json_dumps({**request_payload, "request_fingerprint": _hash_payload(request_payload), "lod_snapshot": lod_snapshot, "_dispatch": {"state": "preparing", "owner": process_owner()}}),
             started_at=datetime.utcnow(),
         )
         db.session.add(pipeline_run)
@@ -1048,6 +1054,7 @@ class NativePipelineSystemService:
             run.status = PipelineRunStatus.RUNNING
         db.session.commit()
 
+    @guard_native_run
     def execute_registered_submission(
         self,
         identifier: str,
@@ -1489,7 +1496,7 @@ class NativePipelineSystemService:
             "status": run.status.value if hasattr(run.status, "value") else run.status,
             "started_at": run.started_at.isoformat() + "Z" if run.started_at else None,
             "completed_at": run.completed_at.isoformat() + "Z" if run.completed_at else None,
-            "request": _json_loads(run.request_json, {}),
+            "request": {key: value for key, value in _json_loads(run.request_json, {}).items() if not key.startswith("_")},
             "result": _json_loads(run.result_json, {}),
             "timings": _json_loads(run.timings_json, {}),
             "error": run.error_message,
@@ -5052,7 +5059,7 @@ class NativePipelineSystemService:
                 "lod_format": standard, "lod_completed": index, "lod_total": count,
             })
         suspend_previous_artifacts(execution_context["hdpc_path"], record_context["record_id"])
-        generated_outputs, manifest = generate_artifacts(record_context["specific_output_dir"], specification, register, progress)
+        generated_outputs, manifest = generate_artifacts(record_context["specific_output_dir"], specification, register, progress, hdpc_path=execution_context["hdpc_path"], record_id=record_context["record_id"])
         for standard, result in manifest["formats"].items():
             result = dict(result)
             if result["status"] == "failed":

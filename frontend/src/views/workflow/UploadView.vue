@@ -978,6 +978,8 @@ textures/albedo.jpg</pre>
         <!-- Error Message -->
         <div v-if="error" data-testid="upload-error" role="alert" class="mt-4 bg-red-50 border border-red-400 text-red-700 px-4 py-3 rounded">
           <p>{{ error }}</p>
+          <router-link v-if="workflowStore.sessionId && !hasFailures" :to="`/uploads/${workflowStore.sessionId}`" class="mt-2 inline-block text-sm underline">Review upload</router-link>
+          <button v-if="singleUploadNeedsRestart" type="button" class="ml-4 text-sm underline" @click="startNewFileUpload">Start a new upload</button>
           <button v-if="hasFailures"
                   @click="handleResume"
                   class="mt-2 text-sm font-bold underline hover:text-red-900 focus:outline-none">
@@ -996,7 +998,7 @@ textures/albedo.jpg</pre>
           <p v-if="uploadMonitorUnavailable" role="status" class="mt-3 text-sm text-amber-800">
             Progress updates are temporarily unavailable. Your upload may still be running. Reconnecting automatically…
           </p>
-          <router-link v-if="uploadMode === 'directory' && workflowStore.sessionId" :to="`/uploads/${workflowStore.sessionId}`" class="mt-3 inline-block text-sm font-medium text-indigo-700 underline">
+          <router-link v-if="workflowStore.sessionId" :to="`/uploads/${workflowStore.sessionId}`" class="mt-3 inline-block text-sm font-medium text-indigo-700 underline">
             Open upload monitor
           </router-link>
         </div>
@@ -1053,7 +1055,8 @@ textures/albedo.jpg</pre>
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { isPermanentProgressError, progressRetryDelay, waitForProgress } from '@/utils/progressMonitoring'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useWorkflowStore } from '@/stores/workflow'
@@ -1246,6 +1249,67 @@ const hpcAllocationButtonLabel = computed(() => {
   if (hpcAllocation.value?.status === 'allocating') return 'Allocating'
   return 'Request HPC resources'
 })
+
+const uploadMonitor = new AbortController()
+let disposed = false
+onBeforeUnmount(() => { disposed = true; uploadMonitor.abort() })
+const pauseMonitoring = (delay) => waitForProgress(delay, uploadMonitor.signal)
+const SINGLE_UPLOAD_STATE_KEY = () => `single_upload_state:${authStore.user?.id}`
+const readSingleUploadState = () => {
+  try { return JSON.parse(sessionStorage.getItem(SINGLE_UPLOAD_STATE_KEY()) || 'null') } catch { return null }
+}
+const saveSingleUploadState = (state) => {
+  try {
+    if (state) sessionStorage.setItem(SINGLE_UPLOAD_STATE_KEY(), JSON.stringify(state))
+    else sessionStorage.removeItem(SINGLE_UPLOAD_STATE_KEY())
+  } catch { /* The same request remains available while this view is open. */ }
+}
+let singleUploadState = null
+const singleUploadNeedsRestart = ref(false)
+const startNewFileUpload = () => {
+  singleUploadState = null
+  singleUploadNeedsRestart.value = false
+  saveSingleUploadState(null)
+  workflowStore.resetWorkflow()
+  error.value = ''
+}
+const finishSingleUpload = (data) => {
+  if (disposed) return
+  workflowStore.setBatchMode(false)
+  workflowStore.setSessionId(data.session_id)
+  workflowStore.setUploadedFiles(data.foundFiles || [])
+  singleUploadState = null
+  saveSingleUploadState(null)
+  success.value = 'File uploaded and checked.'
+  continueAfterUpload()
+}
+const uploadRecoveryMessage = (err) => err?.error?.message || err?.response?.data?.error?.message || err?.message || 'Select the original file to retry this upload.'
+const recoverSingleUpload = async (token) => {
+  let failures = 0
+  while (!disposed) {
+    try {
+      const response = await api.post('/sessions/file/recover', { submit_token: token }, { suppressGlobalError: true, signal: uploadMonitor.signal })
+      if (disposed) return
+      const data = response.data
+      if (!data?.session_id || !['completed', 'processing', 'failed'].includes(data.status)) throw Object.assign(new Error('Upload could not be confirmed. Select the original file to retry the saved request.'), { terminal: true })
+      failures = 0
+      uploadMonitorUnavailable.value = false
+      workflowStore.setSessionId(data.session_id)
+      if (data.status === 'completed') { finishSingleUpload(data); return }
+      if (data.status === 'failed') {
+        singleUploadNeedsRestart.value = true
+        throw Object.assign(new Error('This upload was interrupted. Review the saved session before starting a new upload.'), { terminal: true })
+      }
+      uploadStatusMessage.value = 'Recovering the accepted upload…'
+    } catch (err) {
+      if (disposed || err.code === 'MONITOR_CANCELLED') return
+      if (err.terminal || isPermanentProgressError(err)) throw err
+      uploadMonitorUnavailable.value = true
+      failures += 1
+    }
+    await pauseMonitoring(progressRetryDelay(failures))
+  }
+}
 
 const DIRECTORY_UPLOAD_STATE_KEY = 'directory_upload_state_v1'
 const DIRECTORY_PAGE_SIZE = 15
@@ -2251,68 +2315,50 @@ const finalizeBatchRecordResolutionReview = async ({
 }
 
 const pollProgress = async (sessionId, taskId = null) => {
-    // 1. Poll Coordinator Task (if taskId provided)
-    if (taskId) {
-        let coordinatorDone = false
-        while (!coordinatorDone) {
-            try {
-              const taskRes = await api.get(`/sessions/tasks/${taskId}`)
-              const taskData = taskRes.data
-              const status = taskData?.state
-
-              if (status === 'SUCCESS' || status === 'coordinator_completed') {
-                  // Check for logical failure returned as result
-                  if (taskData.status === 'failed') {
-                      throw new Error(taskData.error || 'Coordinator task failed')
-                  }
-                  coordinatorDone = true
-              } else if (status === 'FAILURE') {
-                  throw new Error(taskData.error || 'Coordinator failed (System Error)')
-              }
-              await new Promise(r => setTimeout(r, 1000))
-            } catch (e) {
-              throw e
-            }
+  let coordinatorDone = !taskId
+  let failures = 0
+  while (!disposed) {
+    try {
+      if (!coordinatorDone) {
+        const response = await api.get(`/sessions/tasks/${taskId}`, { suppressGlobalError: true, signal: uploadMonitor.signal })
+        if (disposed) throw Object.assign(new Error('Monitoring stopped'), { code: 'MONITOR_CANCELLED' })
+        const task = response.data || {}
+        if (['FAILURE', 'REVOKED'].includes(task.state) || task.status === 'failed') {
+          throw Object.assign(new Error(task.error || 'Upload processing stopped. Review the upload monitor before retrying.'), { terminal: true })
         }
-    }
-
-    // 2. Poll Real File Progress
-    uploadStage.value = 3 // Processing files
-
-    while (true) {
-        try {
-          const progressRes = await api.get(`/sessions/${sessionId}/progress`, { suppressGlobalError: true })
-          const uploadProgress = progressRes.data?.upload_progress || {}
-          const percent = uploadProgress.percent ?? progressRes.data?.percent ?? null
-          const failed = uploadProgress.failed_count ?? progressRes.data?.failed ?? 0
-          const currentStage = uploadProgress.current_stage || progressRes.data?.current_stage
-
-          progressPercent.value = percent
-          uploadMonitorUnavailable.value = false
-          uploadStatusMessage.value = uploadProgress.status_message || 'Processing files...'
-
-          if (currentStage === 'failed') {
-              hasFailures.value = true
-              error.value = uploadProgress.status_message || 'Upload processing failed.'
-              break
-          }
-
-          if (percent >= 100) {
-              if (failed > 0) {
-                  hasFailures.value = true
-                  error.value = `${failed} files failed to process.`
-                  break
-              } else {
-                  uploadStage.value = 4 // Complete
-                  break
-              }
-          }
-        } catch (e) {
-          uploadMonitorUnavailable.value = true
-          console.warn("Progress poll failed", e)
+        coordinatorDone = ['SUCCESS', 'coordinator_completed'].includes(task.state)
+      } else {
+        uploadStage.value = 3
+        const response = await api.get(`/sessions/${sessionId}/progress`, { suppressGlobalError: true, signal: uploadMonitor.signal })
+        if (disposed) throw Object.assign(new Error('Monitoring stopped'), { code: 'MONITOR_CANCELLED' })
+        const data = response.data || {}
+        const progress = data.upload_progress || {}
+        const percent = progress.percent ?? data.percent ?? null
+        const failed = progress.failed_count ?? data.failed ?? 0
+        const stage = progress.current_stage || data.current_stage
+        progressPercent.value = percent
+        uploadStatusMessage.value = progress.status_message || 'Processing files…'
+        if (stage === 'failed' || (percent >= 100 && failed > 0)) {
+          hasFailures.value = true
+          error.value = progress.status_message || `${failed} files failed to process.`
+          return
         }
-        await new Promise(r => setTimeout(r, 1000))
+        if (percent >= 100) { uploadStage.value = 4; return }
+      }
+      uploadMonitorUnavailable.value = false
+      failures = 0
+    } catch (err) {
+      if (disposed || err.code === 'MONITOR_CANCELLED') throw err
+      if (err.terminal || isPermanentProgressError(err)) {
+        uploadMonitorUnavailable.value = false
+        throw Object.assign(new Error(err.terminal ? err.message : 'This upload is no longer accessible. Return to your uploads to review its status.'), { terminal: true })
+      }
+      uploadMonitorUnavailable.value = true
+      failures += 1
     }
+    await pauseMonitoring(progressRetryDelay(failures))
+  }
+  throw Object.assign(new Error('Monitoring stopped'), { code: 'MONITOR_CANCELLED' })
 }
 
 const handleResume = async () => {
@@ -2338,6 +2384,7 @@ const handleResume = async () => {
             })
         }
     } catch (e) {
+        if (disposed) return
         error.value = "Failed to resume: " + (e.message || e)
         hasFailures.value = true // Re-enable resume button
     } finally {
@@ -2455,7 +2502,7 @@ const waitForHpcAllocationReady = async ({ maxAttempts = 60, delayMs = 5000 } = 
       throw new Error(hpcAllocation.value?.last_error || `HPC-Link allocation ended with status ${hpcAllocation.value?.status}.`)
     }
     uploadStatusMessage.value = `Waiting for HPC-Link allocation (${hpcAllocation.value?.status || 'queued'})...`
-    await new Promise(resolve => window.setTimeout(resolve, delayMs))
+    await pauseMonitoring(delayMs)
   }
   throw new Error('HPC-Link allocation did not become ready in time.')
 }
@@ -2463,12 +2510,20 @@ const waitForHpcAllocationReady = async ({ maxAttempts = 60, delayMs = 5000 } = 
 onMounted(async () => {
   await Promise.all([
     loadHpcStatus(),
-    resumeSavedDirectoryUpload()
+    (async () => {
+      singleUploadState = readSingleUploadState()
+      if (!singleUploadState?.submit_token) return resumeSavedDirectoryUpload()
+      uploading.value = true
+      try { await recoverSingleUpload(singleUploadState.submit_token) }
+      catch (err) { if (!disposed) error.value = uploadRecoveryMessage(err) }
+      finally { if (!disposed) uploading.value = false }
+    })()
   ])
 })
 
 const handleUpload = async () => {
   if (uploading.value || !canUpload.value) return
+  singleUploadNeedsRestart.value = false
   uploadMonitorUnavailable.value = false
   uploading.value = true
   error.value = ''
@@ -2502,12 +2557,14 @@ const handleUpload = async () => {
   try {
     if (uploadMode.value === 'file') {
       const file = selectedFiles.value[0]
-      const response = await fileService.uploadFile(file, buildWorkspacePayload())
-      workflowStore.setSessionId(response.data.session_id)
-      workflowStore.setUploadedFiles(response.data.foundFiles || [])
-      success.value = 'Files uploaded successfully!'
-
-      continueAfterUpload()
+      const workspace = buildWorkspacePayload()
+      const fingerprint = JSON.stringify([file.name, file.size, file.lastModified, workspace])
+      const saved = singleUploadState || readSingleUploadState()
+      singleUploadState = saved?.fingerprint === fingerprint ? saved : { submit_token: createSubmitToken(), fingerprint }
+      saveSingleUploadState(singleUploadState)
+      const response = await fileService.uploadFile(file, { ...workspace, submit_token: singleUploadState.submit_token })
+      if (response.data.status === 'processing' || response.data.status === 'failed') await recoverSingleUpload(singleUploadState.submit_token)
+      else finishSingleUpload(response.data)
 
     } else {
        // Directory/ZIP Mode
@@ -2669,12 +2726,18 @@ const handleUpload = async () => {
     }
 
   } catch (err) {
+    if (disposed || err.code === 'MONITOR_CANCELLED') return
     console.error('Upload error:', err)
     let errorMessage = 'Operation failed.'
     const backendError = err?.response?.data?.error || err?.error || null
     const isValidationFailure = backendError?.code === 'VALIDATION_ERROR'
 
-    if (uploadMode.value === 'directory' && directorySubmitToken && !isValidationFailure) {
+    if (uploadMode.value === 'file' && singleUploadState?.submit_token && !isValidationFailure && !err.terminal && !isPermanentProgressError(err)) {
+      try { await recoverSingleUpload(singleUploadState.submit_token); return }
+      catch (recoveryError) { if (disposed) return; error.value = uploadRecoveryMessage(recoveryError); return }
+    }
+
+    if (uploadMode.value === 'directory' && directorySubmitToken && !isValidationFailure && !err.terminal) {
       try {
         const recovered = await recoverDirectorySubmission(directorySubmitToken)
         if (recovered?.session_id) {

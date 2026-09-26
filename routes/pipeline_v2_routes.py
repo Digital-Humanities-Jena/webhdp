@@ -25,7 +25,18 @@ pipeline_v2_bp = Blueprint("pipeline_v2", __name__)
 def _enqueue_submission_pipeline_task(*args):
     from tasks import execute_submission_pipeline_task
 
-    return execute_submission_pipeline_task.delay(*args)
+    from database.models import PipelineRun
+    from database.database import db
+    import json
+    run_id = args[-1]
+    row = PipelineRun.query.filter_by(public_id=run_id).one()
+    task = execute_submission_pipeline_task.apply_async(args=args, task_id=run_id)
+    db.session.refresh(row)
+    payload = json.loads(row.request_json)
+    payload['_dispatch'].update(state='queued', task_id=task.id)
+    row.request_json = json.dumps(payload)
+    db.session.commit()
+    return task
 
 
 def _current_user_can_author_pipelines() -> bool:

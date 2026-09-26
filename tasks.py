@@ -665,7 +665,7 @@ def start_upload_coordinator(self, session_id, zip_path, msf_path, storage_mode,
 
 
 
-@celery.task(bind=True)
+@celery.task(bind=True, acks_late=True, reject_on_worker_lost=True)
 def execute_submission_pipeline_task(
     self,
     submission_id,
@@ -700,6 +700,19 @@ def execute_submission_pipeline_task(
         )
 
     try:
+        delivery = getattr(getattr(self, "request", None), "delivery_info", None) or {}
+        if not precreated_run_public_id and delivery.get("redelivered") is True:
+            # Older callers have no stable native run identity. Never replay their remote actions.
+            from services.pipeline_execution_lock import session_pipeline_lock
+            session_row = db.session.get(DBSession, db_session_id)
+            if not session_row or not session_row.hdpc_path:
+                raise FileProcessingError("Interrupted submission has no available project.")
+            with session_pipeline_lock(session_row.hdpc_path):
+                previous = db.session.get(Submission, submission_id) if submission_id is not None else None
+                if previous and previous.status in {"completed", "failed"}:
+                    return {"submission_id": submission_id, "status": previous.status,
+                            "result": json.loads(previous.result or "{}"), "timings": json.loads(previous.timings or "{}")}
+                raise FileProcessingError("Processing was interrupted. Existing files and drafts were kept. Review record results and HPC activity before starting another run.")
         if submission_id is not None:
             submission = db.session.get(Submission, submission_id)
             if not submission:
@@ -816,7 +829,7 @@ def execute_submission_pipeline_task(
                     dedupe_key=f"submission:{submission_id}:pipeline:failed" if submission_id is not None else None,
                 )
 
-            if precreated_run_public_id:
+            if precreated_run_public_id and not isinstance(exc, PipelineAlreadyRunning):
                 run_row = PipelineRun.query.filter_by(public_id=precreated_run_public_id).first()
                 if run_row:
                     run_row.status = "failed"
@@ -999,12 +1012,16 @@ def execute_session_batch_operation_task(
             result=result,
             error=None,
         )
+        summary = result.get("summary") or {}
+        completed, failed, skipped = (int(summary.get(key, 0)) for key in ("completed", "failed", "skipped"))
+        outcome_severity = "error" if failed and not completed else "warning" if failed or skipped else "success"
+        outcome_title = "Session batch needs attention" if failed else "Session batch finished"
         notify_user(
             recipient_user_id=requested_by_user_id,
             notification_type="session_batch.completed",
-            severity="success",
-            title="Session batch operation completed",
-            body=f"{operation_type} completed for session #{session_id}.",
+            severity=outcome_severity,
+            title=outcome_title,
+            body=f"Session #{session_id}: {completed} completed, {failed} failed, {skipped} skipped. Open record actions for details.",
             actor_user_id=requested_by_user_id,
             session_id=session_id,
             entity_type="session_batch_task",

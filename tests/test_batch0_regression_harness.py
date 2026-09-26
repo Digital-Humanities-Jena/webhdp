@@ -65,6 +65,18 @@ def test_queued_run_retries_lock_contention_without_failing_the_session():
         notify.assert_not_called()
 
 
+def test_untracked_redelivery_does_not_repeat_remote_work():
+    from exceptions import FileProcessingError
+    task = MagicMock()
+    task.request.delivery_info = {"redelivered": True}
+    with _submission_test_context() as context:
+        with patch("services.submission_pipeline_service.execute_submission_pipeline") as execute, patch("tasks.notify_user"):
+            with pytest.raises(FileProcessingError, match="interrupted"):
+                tasks.execute_submission_pipeline_task(task, None, "render", [context["source_path"]], context["session_id"])
+        execute.assert_not_called()
+        assert db.session.get(DBSession, context["session_id"]).status == "failed"
+
+
 def _create_submission_hdpc(path: str, root_dir: str, *, filename: str = "model.glb") -> str:
     uploads_dir = os.path.join(root_dir, "uploads")
     os.makedirs(uploads_dir, exist_ok=True)

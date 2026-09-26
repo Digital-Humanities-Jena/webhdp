@@ -101,6 +101,8 @@ export const recordFileStatusLabel = (status) => ({
   validation_pending: 'Validation required',
   validation_pending_uploaded: 'Uploaded; revalidation required',
   pending: 'Pending upload',
+  removal_pending: 'Pending removal from draft',
+  disabled: 'Not included',
   uploaded: 'Uploaded',
   upload_error: 'Upload failed',
 }[status] || String(status || 'pending').replaceAll('_', ' '))

@@ -279,19 +279,26 @@
 
         <div v-if="processing" class="text-center py-12">
           <div class="mb-8">
-            <LoadingSpinner size="lg" text="Processing submission..." />
-            <p role="status" class="mt-4 text-sm text-indigo-700 font-medium">{{ statusMessage }}</p>
+            <LoadingSpinner v-if="!monitoringStopped" size="lg" text="Processing submission..." />
+            <p role="status" class="mt-4 text-sm text-indigo-700 font-medium">{{ monitoringStopped ? 'Progress monitoring stopped' : statusMessage }}</p>
           </div>
 
           <div v-if="monitorUnavailable" role="status" class="max-w-md mx-auto mb-6 rounded-lg border border-amber-200 bg-amber-50 p-4 text-left text-sm text-amber-900">
-            Progress updates are temporarily unavailable. Processing may still be running. Reconnecting automatically; you do not need to submit again.
+            <template v-if="monitoringStopped">
+              This run is no longer accessible. Processing may still be running; do not submit it again.
+              <div class="mt-2 flex gap-4">
+                <button type="button" class="underline" @click="startProgressPolling">Check access again</button>
+                <router-link to="/dashboard" class="underline">Return to sessions</router-link>
+              </div>
+            </template>
+            <template v-else>Progress updates are temporarily unavailable. Processing may still be running. Reconnecting automatically; you do not need to submit again.</template>
           </div>
           <div v-if="pendingRun && !pendingRun.confirmed" class="mb-4">
             <button type="button" :disabled="submitting" class="text-indigo-700 underline disabled:opacity-50" @click="retryPendingRun">Retry this request</button>
             <p class="text-sm text-slate-600">This uses the same operation ID and will reconnect if processing has already started.</p>
           </div>
           <p v-if="workflowSaveWarning" role="status" class="max-w-md mx-auto mb-4 text-sm text-amber-800">{{ workflowSaveWarning }}</p>
-          <ProgressBar class="max-w-md mx-auto mb-6" :percentage="processingProgress?.percent" label="Processing progress" />
+          <ProgressBar v-if="!monitoringStopped" class="max-w-md mx-auto mb-6" :percentage="processingProgress?.percent" label="Processing progress" />
 
           <div v-if="processingProgress" class="max-w-md mx-auto mb-6 text-left bg-indigo-50 border border-indigo-100 rounded-lg p-4">
             <dl class="space-y-2 text-xs">
@@ -505,6 +512,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { isPermanentProgressError, progressRetryDelay } from '@/utils/progressMonitoring'
 import { useRoute, useRouter } from 'vue-router'
 import { useWorkflowStore } from '@/stores/workflow'
 import { useToast } from '@/composables/useToast'
@@ -555,6 +563,17 @@ const recordResolutionLoading = ref(false)
 const hpcPreflightState = ref('idle')
 const hpcPreflightMessage = ref('HDP Component runtimes will be checked before processing starts.')
 const monitorUnavailable = ref(false)
+const monitoringStopped = ref(false)
+let monitorFailures = 0
+let monitorGeneration = 0
+const handleMonitorError = (err) => {
+  monitorUnavailable.value = true
+  monitorFailures += 1
+  if (isPermanentProgressError(err)) {
+    monitoringStopped.value = true
+    stopProgressPolling()
+  }
+}
 const pendingRun = ref(null)
 let disposed = false
 let nativePollInFlight = false
@@ -854,8 +873,9 @@ const formattedCurrentStage = computed(() => {
 })
 
 const stopProgressPolling = () => {
+  monitorGeneration += 1
   if (progressPollTimer.value) {
-    clearInterval(progressPollTimer.value)
+    clearTimeout(progressPollTimer.value)
     progressPollTimer.value = null
   }
 }
@@ -1328,6 +1348,7 @@ const pollSubmissionProgress = async () => {
     const response = await submissionService.getSubmissionProgress(submissionId.value)
     const payload = response.data || {}
     monitorUnavailable.value = false
+    monitorFailures = 0
 
     if (payload.progress) {
       applyProgressUpdate(payload.progress)
@@ -1348,7 +1369,8 @@ const pollSubmissionProgress = async () => {
       handleFailedSubmissionPayload(payload)
     }
   } catch (pollErr) {
-    monitorUnavailable.value = true
+    if (disposed) return
+    handleMonitorError(pollErr)
     console.warn('Submission progress poll failed:', pollErr)
   }
 }
@@ -1362,6 +1384,7 @@ const pollNativeRunProgress = async () => {
     const response = await pipelineService.getPipelineRun(pipelineRunId.value)
     if (disposed || requestedRunId !== pipelineRunId.value) return
     monitorUnavailable.value = false
+    monitorFailures = 0
     const runPayload = response.data?.run || {}
     if (runPayload.run_id && pendingRun.value) {
       pendingRun.value.confirmed = true
@@ -1404,7 +1427,7 @@ const pollNativeRunProgress = async () => {
     }
   } catch (pollErr) {
     if (disposed || requestedRunId !== pipelineRunId.value) return
-    monitorUnavailable.value = true
+    handleMonitorError(pollErr)
     console.warn('Native pipeline run poll failed:', pollErr)
   } finally {
     nativePollInFlight = false
@@ -1414,11 +1437,17 @@ const pollNativeRunProgress = async () => {
 const startProgressPolling = () => {
   stopProgressPolling()
   if (disposed) return
+  monitoringStopped.value = false
   const poller = pipelineRunId.value ? pollNativeRunProgress : pollSubmissionProgress
-  poller()
-  progressPollTimer.value = setInterval(() => {
-    poller()
-  }, 1000)
+  const generation = monitorGeneration
+  const tick = async () => {
+    if (generation !== monitorGeneration) return
+    await poller()
+    if (generation === monitorGeneration && !disposed && processing.value && !monitoringStopped.value) {
+      progressPollTimer.value = setTimeout(tick, progressRetryDelay(monitorFailures))
+    }
+  }
+  tick()
 }
 
 onMounted(async () => {

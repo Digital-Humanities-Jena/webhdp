@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from services.pipeline_execution_lock import serialize_project_mutation
+
 import json
 import os
 import sqlite3
@@ -583,6 +585,7 @@ def _register_file_set_for_version(
     }
 
 
+@serialize_project_mutation
 def prepare_new_version_draft(
     hdpc_path: str,
     *,
@@ -822,6 +825,7 @@ def prepare_new_version_draft(
         conn.close()
 
 
+@serialize_project_mutation
 def create_api_draft(
     hdpc_path: str,
     local_record_id: int,
@@ -937,7 +941,7 @@ def create_api_draft(
         _upsert_links(cursor, int(local_record_id), response_payload.get("links", {}))
         _store_snapshot(cursor, int(local_record_id), "draft_created", response_payload, http_status=response.status_code)
         cursor.execute(
-            "UPDATE record_files_map SET upload_status = 'pending', upload_timestamp = NULL WHERE record_id = ?",
+            "UPDATE record_files_map SET upload_status = CASE WHEN upload_status IN ('disabled', 'removal_pending') THEN 'disabled' WHEN upload_status LIKE 'validation_pending%' THEN 'validation_pending' ELSE 'pending' END, upload_timestamp = NULL WHERE record_id = ?",
             (int(local_record_id),),
         )
         conn.commit()
@@ -951,6 +955,7 @@ def create_api_draft(
         conn.close()
 
 
+@serialize_project_mutation
 def discard_draft(
     hdpc_path: str,
     local_record_id: int,
@@ -1057,7 +1062,7 @@ def discard_draft(
         cursor.execute(
             """
             UPDATE record_files_map
-            SET upload_status = 'pending',
+            SET upload_status = CASE WHEN upload_status IN ('disabled', 'removal_pending') THEN 'disabled' WHEN upload_status LIKE 'validation_pending%' THEN 'validation_pending' ELSE 'pending' END,
                 upload_timestamp = NULL,
                 upload_error = NULL,
                 upload_response_json = NULL,
@@ -1091,6 +1096,7 @@ def discard_draft(
         conn.close()
 
 
+@serialize_project_mutation
 def publish_record(
     hdpc_path: str,
     local_record_id: int,
@@ -1104,6 +1110,8 @@ def publish_record(
     readiness = record_lod_readiness(hdpc_path, local_record_id)
     if not readiness['ready']:
         return {'success': False, 'error': 'Metadata validation is incomplete. Retry metadata generation before publishing.', 'readiness': readiness}
+    if readiness['pending_upload_count']:
+        return {'success': False, 'error': 'Files still need syncing. Upload pending files before publishing.', 'readiness': readiness}
     conn = connect_hdpc(hdpc_path, timeout=30, row_factory=sqlite3.Row)
     try:
         project_id = ensure_hdpc_schema(conn, hdpc_path)
@@ -1195,6 +1203,38 @@ def publish_record(
         conn.close()
 
 
+def _remove_disabled_exports(conn, cursor, record_id, refresh_url, token, http):
+    rows = cursor.execute("""SELECT rfm.file_id, sf.filename FROM record_files_map rfm
+        JOIN source_files sf ON sf.file_id = rfm.file_id
+        WHERE record_id = ? AND upload_status = 'removal_pending'""", (record_id,)).fetchall()
+    if not rows:
+        return []
+    if not refresh_url:
+        raise ValueError('Cannot reconcile disabled exports: draft refresh link is missing.')
+    response = http.get(refresh_url, params={'access_token': token}, timeout=30)
+    payload = _response_payload(response)
+    if response.status_code != 200 or not isinstance(payload.get('files'), list):
+        raise ValueError('Cannot check disabled exports on Zenodo. Retry file sync.')
+    remote = {str(item.get('filename') or item.get('key')): item for item in payload['files']}
+    removed = []
+    for row in rows:
+        item = remote.get(row['filename'])
+        if item:
+            url = (item.get('links') or {}).get('self')
+            if not url:
+                raise ValueError('Cannot remove disabled export: file link is missing.')
+            response = http.delete(url, params={'access_token': token}, timeout=60)
+            if response.status_code not in (200, 204, 404):
+                raise ValueError('Could not remove disabled export. Retry file sync.')
+        cursor.execute("""UPDATE record_files_map SET upload_status = 'disabled',
+            zenodo_file_id = NULL, zenodo_file_key = NULL, zenodo_file_links_json = NULL,
+            upload_timestamp = NULL WHERE record_id = ? AND file_id = ?""", (record_id, row['file_id']))
+        conn.commit()
+        removed.append(row['filename'])
+    return removed
+
+
+@serialize_project_mutation
 def upload_files_for_deposition(
     hdpc_path: str,
     local_record_id: int,
@@ -1229,6 +1269,8 @@ def upload_files_for_deposition(
         if not bucket_url:
             return {"success": False, "error": "Bucket URL not found in stored Zenodo draft"}
 
+        removed_disabled = _remove_disabled_exports(conn, cursor, int(local_record_id), refresh_url, token, http)
+        refresh_remote_state = refresh_remote_state or bool(removed_disabled)
         deleted_inherited_files: list[str] = []
         if prune_inherited_files:
             retain_rows = cursor.execute(
@@ -1236,7 +1278,7 @@ def upload_files_for_deposition(
                 SELECT COALESCE(sf.filename, rfm.file_path) AS filename
                 FROM record_files_map rfm
                 LEFT JOIN source_files sf ON sf.file_id = rfm.file_id
-                WHERE rfm.record_id = ?
+                WHERE rfm.record_id = ? AND rfm.upload_status != 'disabled'
                 """,
                 (int(local_record_id),),
             ).fetchall()
@@ -1406,6 +1448,7 @@ def upload_files_for_deposition(
         conn.close()
 
 
+@serialize_project_mutation
 def append_community_to_record(
     hdpc_path: str,
     local_record_id: int,
@@ -1477,6 +1520,7 @@ def append_community_to_record(
         conn.close()
 
 
+@serialize_project_mutation
 def remove_community_from_record(
     hdpc_path: str,
     local_record_id: int,
@@ -1769,6 +1813,7 @@ def _update_record_communities(
     }
 
 
+@serialize_project_mutation
 def create_new_version_with_files(
     hdpc_path: str,
     *,

@@ -3098,6 +3098,20 @@ def get_task_status(task_id):
     return APIResponse.success(data=response)
 
 
+@session_bp.route("/file/recover", methods=["POST"])
+@jwt_required()
+def recover_file_submission():
+    from services.single_upload_recovery import recover_single_upload
+    token = _normalize_submit_token((request.get_json(silent=True) or {}).get('submit_token'))
+    if not token:
+        return APIResponse.validation_error('submit_token is required')
+    result = recover_single_upload(int(get_jwt_identity()), token)
+    if result is None:
+        return APIResponse.not_found('No matching upload was found. Select the original file to retry.')
+    result.pop('fingerprint', None)
+    return APIResponse.success(data=result)
+
+
 @session_bp.route("/directory/recover", methods=["POST"])
 @jwt_required()
 def recover_directory_submission():
@@ -4785,7 +4799,7 @@ def record_lod_recovery(session_id, local_record_id):
     """Inspect or retry local metadata generation without remote side effects."""
     from pathlib import Path
     from contextlib import nullcontext
-    from services.lod_artifact_service import generate_artifacts, suspend_previous_artifacts, FILENAMES, complete_format_states, record_lod_readiness
+    from services.lod_artifact_service import generate_artifacts, suspend_previous_artifacts, FILENAMES, complete_format_states, record_lod_readiness, policy_error
     from services.lod_reliability import digest
     from flask import send_file
     import io
@@ -4811,6 +4825,8 @@ def record_lod_recovery(session_id, local_record_id):
             status = (manifest.get('formats') or {}).get(requested_format) or {}
             if requested_format not in FILENAMES or status.get('status') != 'generated' or (status.get('validation') or {}).get('valid') is not True:
                 return APIResponse.validation_error('Only validated metadata exports can be downloaded')
+            if policy_error(manifest, requested_format, status):
+                return APIResponse.validation_error('Validation requirements changed. Revalidate metadata before downloading.')
             artifact = paths[0].parent / FILENAMES[requested_format]
             if not artifact.resolve().is_relative_to(root.resolve()):
                 return APIResponse.validation_error('The metadata export is outside this record')
@@ -4832,9 +4848,13 @@ def record_lod_recovery(session_id, local_record_id):
                 result = add_local_source_files(session.hdpc_path, absolute_file_paths=[path], record_id_to_associate=local_record_id, pipeline_name='lod_generation', step_name='metadata_generator', validation_reports={path: validation})
                 if not result.get('success') or result.get('errors_count'):
                     raise ValueError('Could not register the validated artifact')
-            _, manifest = generate_artifacts(str(paths[0].parent), manifest['request'], register)
+            _, manifest = generate_artifacts(str(paths[0].parent), manifest['request'], register, hdpc_path=session.hdpc_path, record_id=local_record_id)
     for standard, status in manifest['formats'].items():
         if status.get('status') == 'generated' and standard in FILENAMES:
+            issue = policy_error(manifest, standard, status)
+            if issue:
+                status.update(success=False, status='revalidation_required', error=issue)
+                continue
             artifact = paths[0].parent / FILENAMES[standard]
             try:
                 intact = artifact.resolve().is_relative_to(root.resolve()) and digest(artifact.read_bytes()) == status.get('sha256')

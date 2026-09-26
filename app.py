@@ -499,6 +499,8 @@ def _create_session_dirs(
         access_mode="full",
     )
     db.session.add(db_session)
+    from services.single_upload_recovery import persist_single_upload_identity
+    persist_single_upload_identity(db_session)
     db.session.commit()
 
     # Store in Flask session
@@ -545,8 +547,12 @@ def readiness_check():
     return jsonify({"success": report["ready"], "data": report}), status_code
 
 
+from services.single_upload_recovery import single_upload_request
+
+
 @app.route("/api/v1/sessions/file", methods=["POST"])
 @jwt_required()
+@single_upload_request(SINGLE_FILE_ALLOWED_EXTENSIONS)
 def api_start_session_file():
     """
     API endpoint for file upload (Vue frontend compatible)
@@ -696,6 +702,11 @@ def api_start_session_file():
         try:
             if db_session:
                 db_session.status = "scanned"
+                from flask import g
+                if getattr(g, 'single_upload_identity', None):
+                    from services.single_upload_recovery import RESULT_FIELD
+                    db.session.add(UserMetadata(session_id=db_session_id, field_name=RESULT_FIELD,
+                        field_value=json.dumps({'foundFiles': scan_data.get('foundFiles', []), 'session_id': db_session_id, 'file_id': db_file.id})))
                 db.session.commit()
         except Exception as e_inner:
             app.logger.error(f"Failed to update session {db_session_id} status to scanned: {e_inner}")

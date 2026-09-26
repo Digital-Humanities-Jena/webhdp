@@ -1,5 +1,5 @@
 import { flushPromises, mount } from '@vue/test-utils'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 
 const mocked = vi.hoisted(() => ({
   route: {
@@ -110,6 +110,7 @@ const baseRecordResolutionCandidate = {
 }
 
 describe('SubmitView record-resolution plan', () => {
+  afterEach(() => vi.useRealTimers())
   beforeEach(() => {
     sessionStorage.clear()
     mocked.workflowState.persistWorkflowState.mockReset().mockResolvedValue(undefined)
@@ -408,6 +409,39 @@ describe('SubmitView record-resolution plan', () => {
     expect(mocked.pipelineService.listPipelines).not.toHaveBeenCalled()
     expect(wrapper.text()).not.toContain('Configuration offline')
     wrapper.unmount()
+  })
+
+  it.each([403, 404, 410])('stops accepted-run monitoring on permanent error %s', async status => {
+    vi.useFakeTimers()
+    readySubmission()
+    sessionStorage.setItem('guided-pipeline-run:42', JSON.stringify({ runId: 'accepted-run', confirmed: true }))
+    mocked.pipelineService.getPipelineRun.mockRejectedValue({ status })
+    const wrapper = mountSubmit()
+    await flushPromises()
+    expect(wrapper.text()).toContain('Progress monitoring stopped')
+    expect(wrapper.text()).toContain('Check access again')
+    expect(wrapper.find('loading-spinner-stub').exists()).toBe(false)
+    await vi.advanceTimersByTimeAsync(60000)
+    expect(mocked.pipelineService.getPipelineRun).toHaveBeenCalledTimes(1)
+    expect(mocked.pipelineService.executePipelineWithPlan).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+  it('resumes the same run after a transient outage with backoff', async () => {
+    vi.useFakeTimers()
+    readySubmission()
+    sessionStorage.setItem('guided-pipeline-run:42', JSON.stringify({ runId: 'accepted-run', confirmed: true }))
+    mocked.pipelineService.getPipelineRun.mockRejectedValueOnce({ status: 503 })
+    const wrapper = mountSubmit()
+    await flushPromises()
+    expect(wrapper.text()).toContain('Reconnecting automatically')
+    await vi.advanceTimersByTimeAsync(1999)
+    expect(mocked.pipelineService.getPipelineRun).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(mocked.pipelineService.getPipelineRun).toHaveBeenCalledTimes(2)
+    expect(wrapper.text()).not.toContain('Reconnecting automatically')
+    wrapper.unmount()
+    await vi.advanceTimersByTimeAsync(60000)
+    expect(mocked.pipelineService.getPipelineRun).toHaveBeenCalledTimes(2)
   })
 
 })

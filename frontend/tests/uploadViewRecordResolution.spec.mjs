@@ -1,5 +1,5 @@
 import { flushPromises, mount } from '@vue/test-utils'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 
 const mocked = vi.hoisted(() => ({
   router: {
@@ -72,7 +72,9 @@ vi.mock('@/services/api', () => ({ default: mocked.api }))
 import UploadView from '../src/views/workflow/UploadView.vue'
 
 describe('UploadView record-resolution gating', () => {
+  afterEach(() => vi.useRealTimers())
   beforeEach(() => {
+    sessionStorage.clear()
     Object.values(mocked.router).forEach((fn) => fn.mockReset())
     Object.values(mocked.toast).forEach((fn) => fn.mockReset())
     Object.values(mocked.fileService).forEach((fn) => fn.mockReset())
@@ -252,4 +254,91 @@ describe('UploadView record-resolution gating', () => {
     expect(wrapper.text()).toContain('Review the affected candidates below and save the plan before continuing.')
     expect(mocked.router.push).not.toHaveBeenCalled()
   })
+  const mountUpload = () => mount(UploadView, { global: { stubs: { StepIndicator: true, 'router-link': true } } })
+  it.each([403, 404, 410])('stops monitoring permanent upload error %s', async status => {
+    vi.useFakeTimers()
+    const wrapper = mountUpload()
+    await flushPromises()
+    mocked.api.get.mockRejectedValue({ status })
+    await expect(wrapper.vm.$.setupState.pollProgress(42)).rejects.toThrow('no longer accessible')
+    const calls = mocked.api.get.mock.calls.length
+    await vi.advanceTimersByTimeAsync(60000)
+    expect(mocked.api.get).toHaveBeenCalledTimes(calls)
+    wrapper.unmount()
+  })
+  it('backs off transient upload errors and cancels monitoring when leaving', async () => {
+    vi.useFakeTimers()
+    const wrapper = mountUpload()
+    await flushPromises()
+    mocked.api.get.mockReset().mockRejectedValue({ status: 503 })
+    const polling = wrapper.vm.$.setupState.pollProgress(42).catch(error => error)
+    await flushPromises()
+    expect(mocked.api.get).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(mocked.api.get).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
+    expect((await polling).code).toBe('MONITOR_CANCELLED')
+    await vi.advanceTimersByTimeAsync(60000)
+    expect(mocked.api.get).toHaveBeenCalledTimes(2)
+  })
+  it('recovers a direct upload after a lost acknowledgement without uploading again', async () => {
+    const wrapper = mountUpload()
+    await flushPromises()
+    mocked.fileService.uploadFile.mockRejectedValue(new Error('Lost response'))
+    mocked.api.post.mockResolvedValue({ data: { session_id: 42, status: 'completed', foundFiles: [{ file_id: 1, name: 'model.glb' }] } })
+    const input = wrapper.get('#file-upload')
+    Object.defineProperty(input.element, 'files', { value: [new File(['model'], 'model.glb')], configurable: true })
+    await input.trigger('change')
+    await wrapper.get('[data-testid="upload-primary-action"]').trigger('click')
+    await flushPromises()
+    expect(mocked.fileService.uploadFile).toHaveBeenCalledTimes(1)
+    const token = mocked.fileService.uploadFile.mock.calls[0][1].submit_token
+    expect(mocked.api.post).toHaveBeenCalledWith('/sessions/file/recover', { submit_token: token }, expect.any(Object))
+    expect(mocked.workflowStore.setSessionId).toHaveBeenCalledWith(42)
+    expect(mocked.router.push).toHaveBeenCalled()
+    wrapper.unmount()
+  })
+  it('recovers a direct upload after reload without the original File object', async () => {
+    sessionStorage.setItem('single_upload_state:undefined', JSON.stringify({ submit_token: 'saved-upload', fingerprint: 'saved' }))
+    mocked.api.post.mockResolvedValue({ data: { session_id: 42, status: 'completed', foundFiles: [{ file_id: 1, name: 'model.glb' }] } })
+    const wrapper = mountUpload()
+    await flushPromises()
+    expect(mocked.fileService.uploadFile).not.toHaveBeenCalled()
+    expect(mocked.workflowStore.setSessionId).toHaveBeenCalledWith(42)
+    expect(mocked.router.push).toHaveBeenCalled()
+    expect(sessionStorage.getItem('single_upload_state:undefined')).toBeNull()
+    wrapper.unmount()
+  })
+
+  it('keeps the same direct-upload identity when the server has not accepted it yet', async () => {
+    const wrapper = mountUpload()
+    await flushPromises()
+    mocked.fileService.uploadFile.mockRejectedValueOnce(new Error('Lost connection')).mockResolvedValueOnce({ data: { session_id: 42, foundFiles: [] } })
+    mocked.api.post.mockRejectedValue({ status: 404, error: { message: 'Select the original file to retry.' } })
+    const input = wrapper.get('#file-upload')
+    Object.defineProperty(input.element, 'files', { value: [new File(['model'], 'model.glb')], configurable: true })
+    await input.trigger('change')
+    await wrapper.get('[data-testid="upload-primary-action"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Select the original file to retry.')
+    const originalToken = mocked.fileService.uploadFile.mock.calls[0][1].submit_token
+    await wrapper.get('[data-testid="upload-primary-action"]').trigger('click')
+    await flushPromises()
+    expect(mocked.fileService.uploadFile.mock.calls[1][1].submit_token).toBe(originalToken)
+    wrapper.unmount()
+  })
+
+  it('allows an explicit new upload after an interrupted direct upload', async () => {
+    sessionStorage.setItem('single_upload_state:undefined', JSON.stringify({ submit_token: 'interrupted-upload' }))
+    mocked.api.post.mockResolvedValue({ data: { session_id: 42, status: 'failed' } })
+    const wrapper = mountUpload()
+    await flushPromises()
+    expect(wrapper.text()).toContain('Review the saved session')
+    const restart = wrapper.findAll('button').find(button => button.text() === 'Start a new upload')
+    await restart.trigger('click')
+    expect(sessionStorage.getItem('single_upload_state:undefined')).toBeNull()
+    expect(mocked.fileService.uploadFile).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
 })

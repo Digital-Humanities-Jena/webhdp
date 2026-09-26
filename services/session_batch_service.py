@@ -1,4 +1,6 @@
 import os
+from services.pipeline_execution_lock import serialize_project_mutation
+
 from typing import Any, Callable, Dict, List
 
 from database.models import Session as DBSession
@@ -31,6 +33,7 @@ def _coerce_target_ids(values: List[Any]) -> List[int]:
     return normalized
 
 
+@serialize_project_mutation
 def execute_session_batch_operation(
     *,
     session: DBSession,

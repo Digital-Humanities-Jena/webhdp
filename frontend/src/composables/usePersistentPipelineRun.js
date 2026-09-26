@@ -1,5 +1,6 @@
 import { computed, onBeforeUnmount, ref } from 'vue'
 import pipelineService from '@/services/pipeline.service'
+import { isPermanentProgressError, progressRetryDelay } from '@/utils/progressMonitoring'
 
 export function usePersistentPipelineRun(userId) {
   const run = ref(null)
@@ -11,6 +12,7 @@ export function usePersistentPipelineRun(userId) {
   let pollTimer
   let disposed = false
   let refreshing = false
+  let failures = 0
   const storageKey = () => `pipeline-run:${userId()}`
   const active = computed(() => Boolean(pending.value && !['completed', 'failed', 'cancelled'].includes(run.value?.status)))
   const elapsed = computed(() => {
@@ -22,7 +24,7 @@ export function usePersistentPipelineRun(userId) {
   }
   function schedule() {
     clearTimeout(pollTimer)
-    if (active.value && !disposed && !trackingUnavailable.value) pollTimer = setTimeout(refresh, 3000)
+    if (active.value && !disposed && !trackingUnavailable.value) pollTimer = setTimeout(refresh, Math.max(3000, progressRetryDelay(failures)))
   }
   async function refresh() {
     if (!pending.value || refreshing || disposed) return
@@ -33,12 +35,13 @@ export function usePersistentPipelineRun(userId) {
       if (disposed || pending.value?.runId !== runId) return
       run.value = response.data?.run || response.data
       error.value = ''
+      failures = 0
       trackingUnavailable.value = false
       if (run.value?.status === 'failed') error.value = run.value.error || 'The run failed. Review its step results before starting a new run.'
     } catch (err) {
       if (disposed || pending.value?.runId !== runId) return
-      const status = err?.response?.status || err?.status
-      trackingUnavailable.value = [403, 404, 410].includes(status) || ['FORBIDDEN', 'NOT_FOUND', 'RESOURCE_NOT_FOUND', 'SECURITY_ERROR'].includes(err?.error?.code)
+      failures += 1
+      trackingUnavailable.value = isPermanentProgressError(err)
       error.value = err?.error?.message || err?.message || 'Status is temporarily unavailable. Processing may still be running; reconnect to this run.'
     } finally {
       refreshing = false

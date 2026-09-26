@@ -32,6 +32,22 @@ Guided submission saves an immutable request and operation ID in browser session
 
 Previews are tied to the selected format, template, provider, sample row, source, parser options, and mappings. Changing an input clears the old result; late responses cannot overwrite the current preview. Validator outages display an unverified result. The Constructor's persistent-run monitor stops polling inaccessible or deleted runs and permits explicit dismissal without cancelling processing.
 
+## Changes after generation
+
+Readiness compares the captured validation policy with the current deployment requirements. If requirements change, the existing metadata panel shows **Revalidation required** and offers **Revalidate metadata**. Upload, publication, and downloads cannot bypass that check, including records whose files were already uploaded. A required EDM validator must supply a passing remote report.
+
+Disabling a format retires its attachment from the intended file set. A local-only attachment becomes `disabled`; an attachment that may already exist on the draft becomes `removal_pending`. The existing upload action syncs this removal after checking the current draft. Interrupted removals can be retried safely. Publication waits until all intended file changes are synced. Discarding and recreating a draft preserves disabled formats; enabling the format again restores it as an upload candidate. These are text statuses in the existing `.hdpc` mapping table and require no new columns.
+
+All native record mutations share the session processing lock, including batch actions and direct lifecycle helpers. Publication checks current validation and pending-file state inside that lock, rather than relying on eligibility recorded when a task was queued.
+
+## Interrupted operations
+
+Native execution holds the session lock throughout processing. Run inspection reconciles a persisted running state only after the lock is free; a live worker is never failed merely because rendering takes a long time. Interrupted runs retain artifacts and drafts, finish their incomplete step statuses, and ask the user to review results and HPC activity before another run. They are not automatically replayed. Late acknowledgement and worker-loss redelivery allow the queue to recover a terminated task without repeating a terminal run. Dispatch ownership is private recovery metadata and is excluded from run responses. Unknown task-monitor availability alone does not prove interruption.
+
+Direct file uploads have a user-scoped submission token bound to the file content and workspace settings. The session and its identity are committed together; successful response data can be recovered without transferring or scanning the file again. Invalid files are rejected before creating a session. The upload view retains the request across lost responses and reloads. An interrupted upload keeps its saved session available for review; starting over is an explicit action.
+
+Upload, guided submission, and Constructor monitors distinguish temporary outages from inaccessible resources. Temporary failures use bounded backoff; permanent failures stop monitoring and show an existing review or return action. Leaving a view stops its local monitoring without cancelling remote work. Batch notifications distinguish completed, failed, and skipped items and link to record actions.
+
 ## Verification
 
 Regression coverage includes independent format failure, cached retries, tampering, interrupted writes, missing validator checks, non-ASCII identifiers, duplicate basenames, template edits, sparse draft responses, and authorization. A separate integration test runs all five real generators and validators against a clean local database. Browser checks exercise recovery in Chromium and Firefox at narrow and desktop widths. `scripts/check_lod_mapping_api.py` is an optional manual smoke script using `WEBHDP_TEST_EMAIL`, `WEBHDP_TEST_PASSWORD`, and `WEBHDP_TEST_API_URL`; automated tests do not depend on a running deployment.

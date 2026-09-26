@@ -36,7 +36,7 @@ for (const width of [375, 1280]) {
     await expect(page.getByRole('button', { name: 'Retry incomplete formats' })).toHaveCount(0)
     expect(attempts).toBe(1)
     expect(detailReads).toBe(2)
-    await expect(page.getByText('1 file(s) still need uploading.', { exact: false })).toBeVisible()
+    await expect(page.getByText('1 file change(s) still need syncing, including any disabled exports.', { exact: false })).toBeVisible()
     await expect(page.getByRole('link', { name: 'Open record actions' })).toBeVisible()
     await expect(page.getByRole('heading', { name: 'Last Pipeline Run' })).toBeVisible()
     await expect(page.getByText('Run error: Earlier generation failed')).toBeVisible()

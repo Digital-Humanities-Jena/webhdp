@@ -10,7 +10,7 @@ export default {
     })
 
     // DO NOT set Content-Type - axios handles it automatically for FormData
-    return api.post('/sessions/file', formData)
+    return api.post('/sessions/file', formData, { suppressGlobalError: true })
   },
 
   scanDirectory(directoryPath) {

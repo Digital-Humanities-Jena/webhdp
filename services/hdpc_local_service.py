@@ -1,4 +1,6 @@
 import hashlib
+from services.pipeline_execution_lock import serialize_project_mutation
+
 import json
 import mimetypes
 import os
@@ -588,7 +590,7 @@ def _read_record_file_maps(
     files_by_record: dict[int, list[dict[str, Any]]] = {}
     order_field = "map_id" if "map_id" in rfm_columns else "file_id"
     rows = cursor.execute(
-        f"SELECT {', '.join(select_columns)} FROM record_files_map ORDER BY record_id ASC, {order_field} ASC"
+        f"SELECT {', '.join(select_columns)} FROM record_files_map WHERE upload_status != 'disabled' ORDER BY record_id ASC, {order_field} ASC"
     ).fetchall()
     for row in rows:
         payload = dict(row)
@@ -778,7 +780,7 @@ def _is_recordable_source_row(row: dict[str, Any]) -> bool:
 
 def _upload_requires_retry(upload_status: Any) -> bool:
     normalized = str(upload_status or "").strip().lower()
-    return normalized in {"pending", "pending_pipeline_upload"} or "error" in normalized
+    return normalized in {"pending", "pending_pipeline_upload", "removal_pending"} or "error" in normalized
 
 
 def _version_sort_key(value: Any) -> tuple[int, ...]:
@@ -1910,6 +1912,7 @@ def read_hdpc_record_zenodo_status(hdpc_path: str, record_id: int) -> dict[str, 
     return context.get("zenodo_status") if context else None
 
 
+@serialize_project_mutation
 def remove_local_source_files(
     hdpc_path: str,
     *,
@@ -2075,6 +2078,7 @@ def get_hdpc_file_id_map(hdpc_path: str) -> dict[str, str]:
         conn.close()
 
 
+@serialize_project_mutation
 def create_local_record_with_metadata(
     hdpc_path: str,
     *,
@@ -2172,6 +2176,7 @@ def create_local_record_with_metadata(
         conn.close()
 
 
+@serialize_project_mutation
 def add_local_source_files(
     hdpc_path: str,
     *,
@@ -2220,7 +2225,7 @@ def add_local_source_files(
                         (current_hash, os.path.getsize(normalized_path), file_id),
                     )
                     cursor.execute(
-                        "UPDATE record_files_map SET upload_status = 'pending', upload_timestamp = NULL WHERE file_id = ?",
+                        "UPDATE record_files_map SET upload_status = 'pending', upload_timestamp = NULL WHERE file_id = ? AND upload_status NOT IN ('disabled', 'removal_pending')",
                         (file_id,),
                     )
             else:
@@ -2284,7 +2289,7 @@ def add_local_source_files(
                         file_purpose = excluded.file_purpose,
                         upload_status = CASE
                             WHEN record_files_map.upload_status = 'validation_pending_uploaded' THEN 'uploaded'
-                            WHEN record_files_map.upload_status = 'validation_pending' THEN 'pending'
+                            WHEN record_files_map.upload_status IN ('validation_pending', 'disabled', 'removal_pending') THEN 'pending'
                             ELSE record_files_map.upload_status END
                     """,
                     (
