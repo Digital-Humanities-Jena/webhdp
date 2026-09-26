@@ -4,13 +4,13 @@
       <div class="mb-8">
         <h1 class="text-3xl font-bold text-gray-900">Upload Files</h1>
         <p class="mt-2 max-w-3xl text-gray-600">
-          Step 1 of 7: Choose how this submission should start. You can upload files directly, or begin an MSF-driven batch workflow that scans a ZIP, local folder, or HPC directory.
+          Upload one self-contained file, or use a batch for datasets and models with separate textures.
         </p>
       </div>
 
       <StepIndicator
         :current-step="1"
-        current-label="Choose the source path and satisfy the entry checks"
+        current-label="Choose your files"
         :current-hint="uploadStepHint"
       />
 
@@ -40,7 +40,9 @@
         </div>
       </div>
 
-      <div class="bg-white shadow rounded-lg p-6 mb-6">
+      <div class="bg-white shadow rounded-lg p-4 sm:p-6 mb-6">
+        <fieldset :disabled="uploading || validatingMsf" class="min-w-0">
+          <legend class="sr-only">Upload source and workspace</legend>
         <div class="mb-6">
           <h2 class="text-lg font-semibold text-gray-900">Choose workflow path</h2>
           <p class="mt-1 text-sm text-gray-600">
@@ -52,6 +54,7 @@
           <button
             @click="selectUploadPath('file')"
             data-testid="upload-path-manual"
+            :aria-pressed="uploadMode === 'file'"
             :class="[
               'rounded-2xl border px-5 py-5 text-left transition-all',
               uploadMode === 'file'
@@ -65,10 +68,10 @@
                   Direct file upload
                 </p>
                 <p class="mt-1 text-sm" :class="uploadMode === 'file' ? 'text-indigo-900' : 'text-gray-600'">
-                  Best for a single-record manual submission where you already know which file should start the session.
+                  One model or image. Add its metadata in the next steps.
                 </p>
                 <p class="mt-3 text-xs uppercase tracking-wide" :class="uploadMode === 'file' ? 'text-indigo-700' : 'text-gray-500'">
-                  Input: individual files
+                  Input: one file
                 </p>
               </div>
               <span class="rounded-full px-2.5 py-1 text-xs font-semibold"
@@ -80,6 +83,7 @@
           <button
             @click="selectUploadPath('directory')"
             data-testid="upload-path-batch"
+            :aria-pressed="uploadMode === 'directory'"
             :class="[
               'rounded-2xl border px-5 py-5 text-left transition-all',
               uploadMode === 'directory'
@@ -93,7 +97,7 @@
                   MSF-driven batch workflow
                 </p>
                 <p class="mt-1 text-sm" :class="uploadMode === 'directory' ? 'text-indigo-900' : 'text-gray-600'">
-                  Best for larger datasets. Validate an MSF against a ZIP, local folder, or HPC directory, then continue with guided repair and batch processing.
+                  Multiple models or files with textures. Include a metadata spreadsheet (MSF) to describe each model.
                 </p>
                 <p class="mt-3 text-xs uppercase tracking-wide" :class="uploadMode === 'directory' ? 'text-indigo-700' : 'text-gray-500'">
                   Input: ZIP + MSF or mounted folder + MSF
@@ -107,7 +111,7 @@
           </button>
         </div>
 
-        <div class="mb-6 rounded-xl border border-gray-200 bg-gray-50 px-4 py-4">
+        <div v-if="uploadMode === 'directory'" class="mb-6 rounded-xl border border-gray-200 bg-gray-50 px-4 py-4">
           <div class="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <p class="text-sm font-semibold text-gray-900">{{ uploadPathSummary.title }}</p>
@@ -128,7 +132,11 @@
           </div>
         </div>
 
-        <div class="mb-6 rounded-xl border border-gray-200 bg-white p-5">
+        <details class="mb-6 rounded-xl border border-gray-200 bg-white p-4">
+          <summary class="cursor-pointer text-sm font-semibold text-gray-900">
+            Workspace and destination · {{ workspaceType === 'institution' ? 'Institution' : 'Personal' }} · {{ defaultZenodoEnvironment === 'production' ? 'Production' : 'Sandbox' }}
+          </summary>
+          <div class="mt-4">
           <div class="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <h3 class="text-base font-semibold text-gray-900">Workspace</h3>
@@ -139,6 +147,7 @@
                 type="button"
                 class="px-3 py-1.5 text-xs font-medium rounded-md transition-colors"
                 :class="workspaceType === 'personal' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-600 hover:text-gray-900'"
+                :aria-pressed="workspaceType === 'personal'"
                 @click="workspaceType = 'personal'"
               >
                 Personal
@@ -148,6 +157,7 @@
                 :disabled="!institutionWorkspaceOptions.length"
                 class="px-3 py-1.5 text-xs font-medium rounded-md transition-colors disabled:opacity-50"
                 :class="workspaceType === 'institution' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-600 hover:text-gray-900'"
+                :aria-pressed="workspaceType === 'institution'"
                 @click="workspaceType = 'institution'"
               >
                 Institution
@@ -158,7 +168,7 @@
           <div class="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div v-if="workspaceType === 'institution'">
               <label class="block text-sm font-medium text-gray-700 mb-1">Institution workspace</label>
-              <select v-model="selectedInstitutionId" class="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm">
+              <select aria-label="Institution workspace" v-model="selectedInstitutionId" class="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm">
                 <option v-for="institution in institutionWorkspaceOptions" :key="institution.id" :value="institution.id">
                   {{ institution.name }} ({{ institution.role }})
                 </option>
@@ -169,21 +179,21 @@
             </div>
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-1">Default Zenodo environment</label>
-              <select v-model="defaultZenodoEnvironment" class="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm">
+              <select aria-label="Default Zenodo environment" v-model="defaultZenodoEnvironment" class="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm">
                 <option value="sandbox">Sandbox</option>
                 <option value="production">Production</option>
               </select>
             </div>
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-1">Sharing scope</label>
-              <select v-model="sharingScope" :disabled="workspaceType !== 'institution'" class="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm disabled:bg-gray-100">
+              <select aria-label="Sharing scope" v-model="sharingScope" :disabled="workspaceType !== 'institution'" class="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm disabled:bg-gray-100">
                 <option value="private">Private</option>
                 <option value="institution">Institution shared</option>
               </select>
             </div>
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-1">Publishing credential source</label>
-              <select v-model="credentialPreference" :disabled="workspaceType !== 'institution'" class="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm disabled:bg-gray-100">
+              <select aria-label="Publishing credential source" v-model="credentialPreference" :disabled="workspaceType !== 'institution'" class="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm disabled:bg-gray-100">
                 <option value="user">Personal credentials</option>
                 <option value="institution">Institution credentials</option>
               </select>
@@ -201,16 +211,18 @@
             />
             Append the institution's default Zenodo communities to this session by default
           </label>
-        </div>
+          </div>
+        </details>
 
         <!-- File Upload Mode -->
         <div v-if="uploadMode === 'file'">
           <div
+            data-testid="upload-direct-dropzone"
             @drop.prevent="handleDrop"
             @dragover.prevent="isDragging = true"
             @dragleave.prevent="isDragging = false"
             :class="[
-              'border-2 border-dashed rounded-lg p-12 text-center transition-colors',
+              'border-2 border-dashed rounded-lg p-6 sm:p-10 text-center transition-colors focus-within:ring-2 focus-within:ring-indigo-500',
               isDragging ? 'border-indigo-500 bg-indigo-50' : 'border-gray-300'
             ]"
           >
@@ -229,12 +241,13 @@
                 <input
                   id="file-upload"
                   type="file"
-                  class="hidden"
+                  class="sr-only"
+                  aria-describedby="direct-file-help"
                   @change="handleFileSelect"
                 />
               </div>
 
-              <p class="text-xs text-gray-500">
+              <p id="direct-file-help" class="text-sm text-gray-500">
                 Upload a model (GLB, glTF, OBJ, STL, FBX, PLY) or an image. For models with separate materials or textures, use a ZIP batch to keep the files together.
               </p>
             </div>
@@ -245,14 +258,14 @@
             <h3 class="text-lg font-medium text-gray-900 mb-4">Selected File</h3>
             <ul class="divide-y divide-gray-200">
               <li v-for="(file, index) in selectedFiles" :key="index" class="py-3 flex justify-between items-center">
-                <div class="flex items-center">
-                  <svg class="h-5 w-5 text-gray-400 mr-3" fill="currentColor" viewBox="0 0 20 20">
+                <div class="flex min-w-0 items-center">
+                  <svg class="h-5 w-5 shrink-0 text-gray-400 mr-3" fill="currentColor" viewBox="0 0 20 20">
                     <path fill-rule="evenodd" d="M8 4a3 3 0 00-3 3v4a5 5 0 0010 0V7a1 1 0 112 0v4a7 7 0 11-14 0V7a5 5 0 0110 0v4a3 3 0 11-6 0V7a1 1 0 012 0v4a1 1 0 102 0V7a3 3 0 00-3-3z" clip-rule="evenodd" />
                   </svg>
-                  <span class="text-sm text-gray-900">{{ file.name }}</span>
-                  <span class="ml-2 text-xs text-gray-500">({{ formatFileSize(file.size) }})</span>
+                  <span class="min-w-0 break-all text-sm text-gray-900">{{ file.name }}</span>
+                  <span class="ml-2 shrink-0 whitespace-nowrap text-xs text-gray-500">({{ formatFileSize(file.size) }})</span>
                 </div>
-                <button @click="removeFile(index)" class="text-red-600 hover:text-red-800">
+                <button @click="removeFile(index)" :aria-label="`Remove ${file.name}`" class="shrink-0 p-2 text-red-600 hover:text-red-800">
                   <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
                     <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
                   </svg>
@@ -321,7 +334,7 @@
                 @dragover.prevent="isZipDragging = true"
                 @dragleave.prevent="isZipDragging = false"
                 :class="[
-                  'border-2 border-dashed rounded-lg p-6 text-center transition-colors cursor-pointer',
+                  'border-2 border-dashed rounded-lg p-6 text-center transition-colors cursor-pointer focus-within:ring-2 focus-within:ring-indigo-500',
                   isZipDragging ? 'border-indigo-500 bg-indigo-50' : 'border-gray-300 hover:border-gray-400'
                 ]"
                 @click="$refs.zipFileInput.click()"
@@ -329,8 +342,10 @@
                 <input
                   ref="zipFileInput"
                   data-testid="upload-zip-input"
+                  aria-label="Model files ZIP"
                   type="file"
-                  class="hidden"
+                  class="sr-only"
+                  @click.stop
                   accept=".zip"
                   @change="handleZipFileSelect"
                 />
@@ -354,6 +369,7 @@
                     <p class="text-xs text-gray-500">{{ formatFileSize(zipFile.size) }}</p>
                   </div>
                   <button
+                    aria-label="Remove ZIP file"
                     @click.stop="removeZipFile"
                     class="text-red-500 hover:text-red-700"
                     title="Remove file"
@@ -694,7 +710,7 @@
                 @dragover.prevent="isMsfDragging = true"
                 @dragleave.prevent="isMsfDragging = false"
                 :class="[
-                  'border-2 border-dashed rounded-lg p-6 text-center transition-colors cursor-pointer',
+                  'border-2 border-dashed rounded-lg p-6 text-center transition-colors cursor-pointer focus-within:ring-2 focus-within:ring-indigo-500',
                   isMsfDragging ? 'border-indigo-500 bg-indigo-50' : 'border-gray-300 hover:border-gray-400'
                 ]"
                 @click="$refs.msfFileInput.click()"
@@ -702,8 +718,10 @@
                 <input
                   ref="msfFileInput"
                   data-testid="upload-msf-input"
+                  aria-label="Metadata source file"
                   type="file"
-                  class="hidden"
+                  class="sr-only"
+                  @click.stop
                   accept=".xlsx,.xls,.csv"
                   @change="handleMsfFileSelect"
                 />
@@ -727,6 +745,7 @@
                     <p class="text-xs text-gray-500">{{ formatFileSize(msfFile.size) }}</p>
                   </div>
                   <button
+                    aria-label="Remove metadata file"
                     @click.stop="removeMsfFile"
                     class="text-red-500 hover:text-red-700"
                     title="Remove file"
@@ -929,8 +948,10 @@
           </div>
         </div>
 
+        </fieldset>
+
         <!-- Error Message -->
-        <div v-if="error" data-testid="upload-error" class="mt-4 bg-red-50 border border-red-400 text-red-700 px-4 py-3 rounded">
+        <div v-if="error" data-testid="upload-error" role="alert" class="mt-4 bg-red-50 border border-red-400 text-red-700 px-4 py-3 rounded">
           <p>{{ error }}</p>
           <button v-if="hasFailures"
                   @click="handleResume"
@@ -940,118 +961,19 @@
         </div>
 
         <!-- Success Message -->
-        <div v-if="success" class="mt-4 bg-green-50 border border-green-400 text-green-700 px-4 py-3 rounded">
+        <div v-if="success" role="status" class="mt-4 bg-green-50 border border-green-400 text-green-700 px-4 py-3 rounded">
           {{ success }}
         </div>
 
-        <!-- Upload Progress Indicator (for directory mode) -->
-        <div v-if="uploading && uploadMode === 'directory'" class="mt-6 bg-gray-50 rounded-lg p-6">
-          <h4 class="text-sm font-medium text-gray-900 mb-4">Upload Progress</h4>
-
-          <div class="space-y-3">
-            <!-- Step 1 -->
-            <div class="flex items-center">
-              <div :class="[
-                'flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center',
-                uploadStage >= 1 ? 'bg-green-500' : 'bg-gray-300'
-              ]">
-                <svg v-if="uploadStage > 1" class="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 20 20">
-                  <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
-                </svg>
-                <svg v-else-if="uploadStage === 1" class="w-5 h-5 text-white animate-spin" fill="none" viewBox="0 0 24 24">
-                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                <span v-else class="text-white text-xs font-bold">1</span>
-              </div>
-              <span :class="['ml-3 text-sm', uploadStage >= 1 ? 'text-gray-900' : 'text-gray-500']">
-                {{ storageStatus?.mode === 'pure_cloud' ? 'Streaming ZIP to Cloud' : (storageStatus?.mode === 'local' ? 'Initializing Local Directory Scan' : 'Uploading & extracting ZIP file') }}
-              </span>
-            </div>
-
-            <!-- Step 2 -->
-            <div class="flex items-center">
-              <div :class="[
-                'flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center',
-                uploadStage >= 2 ? 'bg-green-500' : 'bg-gray-300'
-              ]">
-                <svg v-if="uploadStage > 2" class="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 20 20">
-                  <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
-                </svg>
-                <svg v-else-if="uploadStage === 2" class="w-5 h-5 text-white animate-spin" fill="none" viewBox="0 0 24 24">
-                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                <span v-else class="text-white text-xs font-bold">2</span>
-              </div>
-              <span :class="['ml-3 text-sm', uploadStage >= 2 ? 'text-gray-900' : 'text-gray-500']" v-if="storageStatus?.mode !== 'local'">
-                {{ storageStatus?.mode === 'pure_cloud' ? 'Processing Remote ZIP' : 'Processing files & creating session' }}
-              </span>
-              <span :class="['ml-3 text-sm', uploadStage >= 2 ? 'text-gray-900' : 'text-gray-500']" v-else>
-                Indexing {{ localScanLabel.toLowerCase() }} files & matching MSF
-              </span>
-            </div>
-
-            <!-- Step 3 -->
-            <div class="flex items-center">
-              <div :class="[
-                'flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center',
-                uploadStage >= 3 ? 'bg-green-500' : 'bg-gray-300'
-              ]">
-                <svg v-if="uploadStage > 3" class="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 20 20">
-                  <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
-                </svg>
-                <svg v-else-if="uploadStage === 3" class="w-5 h-5 text-white animate-spin" fill="none" viewBox="0 0 24 24">
-                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                <span v-else class="text-white text-xs font-bold">3</span>
-              </div>
-              <div class="ml-3">
-                <span :class="['text-sm', uploadStage >= 3 ? 'text-gray-900' : 'text-gray-500']">
-                  {{ storageStatus?.mode === 'pure_cloud' ? 'Finalizing Session' : (storageStatus?.mode === 'local' ? 'Mirroring to Local Output Storage' : `Uploading to ${formatStorageType(storageStatus?.type) || 'cloud storage'}`) }}
-                </span>
-                <p v-if="uploadStage === 3 && storageStatus?.mode !== 'pure_cloud' && storageStatus?.mode !== 'local'" class="text-xs text-gray-500">
-                  This may take a while for large files...
-                </p>
-                <p v-if="uploadStage === 3 && storageStatus?.mode === 'local'" class="text-xs text-indigo-500">
-                  {{ attachedFilesystemMirrorMessage }}
-                </p>
-                <!-- Progress Bar -->
-                <div v-if="uploadStage === 3" class="w-full bg-gray-200 rounded-full h-2.5 mt-2 min-w-[200px]">
-                   <div class="bg-indigo-600 h-2.5 rounded-full transition-all duration-300" :style="{ width: progressPercent + '%' }"></div>
-                </div>
-                <div v-if="uploadStage === 3" class="flex justify-between text-xs text-gray-500 mt-1">
-                   <span>{{ uploadStatusMessage || 'Processing files...' }}</span>
-                   <span>{{ progressPercent }}%</span>
-                </div>
-                <div v-if="uploadStage >= 2 && workflowStore.sessionId" class="mt-3">
-                  <router-link
-                    :to="`/uploads/${workflowStore.sessionId}`"
-                    class="text-xs font-medium text-indigo-600 hover:text-indigo-800"
-                  >
-                    Open persistent upload monitor
-                  </router-link>
-                </div>
-              </div>
-            </div>
-
-            <!-- Step 4: Complete -->
-            <div class="flex items-center">
-              <div :class="[
-                'flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center',
-                uploadStage >= 4 ? 'bg-green-500' : 'bg-gray-300'
-              ]">
-                <svg v-if="uploadStage >= 4" class="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 20 20">
-                  <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
-                </svg>
-                <span v-else class="text-white text-xs font-bold">4</span>
-              </div>
-              <span :class="['ml-3 text-sm', uploadStage >= 4 ? 'text-gray-900 font-medium' : 'text-gray-500']">
-                Complete!
-              </span>
-            </div>
-          </div>
+        <div v-if="uploading" class="mt-6 rounded-lg border border-indigo-100 bg-indigo-50 p-4" aria-busy="true">
+          <ProgressBar :percentage="visibleUploadPercent" :label="uploadProgressLabel" />
+          <p class="mt-3 text-sm text-gray-600" role="status">{{ uploadStatusMessage || 'Keep this page open while your files are transferred and checked.' }}</p>
+          <p v-if="uploadMonitorUnavailable" role="status" class="mt-3 text-sm text-amber-800">
+            Progress updates are temporarily unavailable. Your upload may still be running. Reconnecting automatically…
+          </p>
+          <router-link v-if="uploadMode === 'directory' && workflowStore.sessionId" :to="`/uploads/${workflowStore.sessionId}`" class="mt-3 inline-block text-sm font-medium text-indigo-700 underline">
+            Open upload monitor
+          </router-link>
         </div>
 
         <div class="mt-6 rounded-2xl border border-gray-200 bg-gray-50 p-5">
@@ -1059,7 +981,7 @@
             <div class="min-w-0 flex-1">
               <p class="text-sm font-semibold text-gray-900">Ready to continue?</p>
               <p class="mt-1 text-sm text-gray-600">
-                Complete the checks below. The primary action stays available only when the required inputs for the selected path are present.
+                Check your selection before continuing.
               </p>
               <ul class="mt-4 space-y-3">
                 <li
@@ -1079,7 +1001,7 @@
                   </div>
                 </li>
               </ul>
-              <p v-if="uploadBlockingMessage" class="mt-4 text-sm text-amber-700">
+              <p v-if="uploadBlockingMessage" id="upload-blocking-message" class="mt-4 text-sm text-amber-700">
                 {{ uploadBlockingMessage }}
               </p>
             </div>
@@ -1089,6 +1011,7 @@
                 @click="handleUpload"
                 :disabled="!canUpload || uploading"
                 data-testid="upload-primary-action"
+                :aria-describedby="uploadBlockingMessage ? 'upload-blocking-message' : undefined"
                 class="w-full px-6 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 {{ localContinueLabel }}
@@ -1115,6 +1038,7 @@ import msfService from '@/services/msf.service'
 import submissionService from '@/services/submission.service'
 import hpcLinkService from '@/services/hpcLink.service'
 import RecordResolutionReview from '@/components/workflow/RecordResolutionReview.vue'
+import ProgressBar from '@/components/ui/ProgressBar.vue'
 import StepIndicator from '@/components/workflow/StepIndicator.vue'
 import { useToast } from '@/composables/useToast'
 
@@ -1564,6 +1488,7 @@ const formatStorageMode = (mode) => {
 }
 
 const selectUploadPath = (mode) => {
+  if (uploading.value || validatingMsf.value) return
   uploadMode.value = mode
   error.value = ''
   success.value = ''
@@ -2019,19 +1944,34 @@ const canUpload = computed(() => {
   }
 })
 
+const selectDirectFiles = (files) => {
+  if (uploading.value) return
+  if (files.length > 1) {
+    error.value = 'Direct upload accepts one file. Choose a single file, or use a ZIP batch with an MSF for multiple files and separate textures.'
+    return
+  }
+  if (!files.length) return
+  if (files[0].size === 0) {
+    error.value = 'This file is empty. Choose a file that contains a model or image.'
+    return
+  }
+  selectedFiles.value = [files[0]]
+  error.value = ''
+  success.value = ''
+}
+
 const handleFileSelect = (event) => {
-  const files = Array.from(event.target.files)
-  selectedFiles.value = files.length ? [files[0]] : []
+  selectDirectFiles(Array.from(event.target.files || []))
+  event.target.value = ''
 }
 
 const handleDrop = (event) => {
   isDragging.value = false
-  const files = Array.from(event.dataTransfer.files)
-  selectedFiles.value = files.length ? [files[0]] : []
+  selectDirectFiles(Array.from(event.dataTransfer.files || []))
 }
 
 const removeFile = (index) => {
-  selectedFiles.value.splice(index, 1)
+  if (!uploading.value) selectedFiles.value.splice(index, 1)
 }
 
 const formatFileSize = (bytes) => {
@@ -2051,6 +1991,11 @@ const handleZipFileSelect = (event) => {
 }
 
 const handleZipDrop = (event) => {
+  if (uploading.value || validatingMsf.value) return
+  if (event.dataTransfer.files.length > 1) {
+    error.value = 'Choose one file for this field. No files were changed.'
+    return
+  }
   isZipDragging.value = false
   const file = event.dataTransfer.files[0]
   if (file) {
@@ -2059,6 +2004,7 @@ const handleZipDrop = (event) => {
 }
 
 const setZipFile = (file) => {
+  if (uploading.value || validatingMsf.value) return
   if (!file.name.toLowerCase().endsWith('.zip')) {
     error.value = 'Invalid file type. Please select a ZIP file.'
     return
@@ -2087,6 +2033,11 @@ const handleMsfFileSelect = async (event) => {
 }
 
 const handleMsfDrop = async (event) => {
+  if (uploading.value || validatingMsf.value) return
+  if (event.dataTransfer.files.length > 1) {
+    error.value = 'Choose one file for this field. No files were changed.'
+    return
+  }
   isMsfDragging.value = false
   const file = event.dataTransfer.files[0]
   if (file) {
@@ -2095,6 +2046,7 @@ const handleMsfDrop = async (event) => {
 }
 
 const setMsfFile = async (file) => {
+  if (uploading.value || validatingMsf.value) return
   const ext = file.name.split('.').pop().toLowerCase()
   if (!['xlsx', 'xls', 'csv'].includes(ext)) {
     error.value = 'Invalid file type. Please select an Excel (.xlsx) or CSV file.'
@@ -2167,13 +2119,24 @@ const validateMsf = async () => {
     }
   } catch (err) {
     console.error('MSF validation error:', err)
-    error.value = err.response?.data?.error || err.message || 'Failed to validate MSF file.'
+    error.value = err?.response?.data?.error?.message || err?.error?.message || err.message || 'Failed to validate MSF file.'
   } finally {
     validatingMsf.value = false
   }
 }
 
-const progressPercent = ref(0)
+const progressPercent = ref(null)
+const uploadMonitorUnavailable = ref(false)
+const visibleUploadPercent = computed(() => {
+  if (uploadMode.value === 'file' || uploadStage.value === 2) return null
+  return progressPercent.value
+})
+const uploadProgressLabel = computed(() => {
+  if (uploadMode.value === 'file') return 'Uploading and checking your file…'
+  if (uploadStage.value === 4) return 'Upload complete'
+  if (uploadStage.value <= 1) return storageStatus.value?.mode === 'local' ? 'Starting directory scan…' : 'Transferring your files…'
+  return 'Preparing files for review…'
+})
 const hasFailures = ref(false)
 const uploadStatusMessage = ref('')
 
@@ -2293,13 +2256,14 @@ const pollProgress = async (sessionId, taskId = null) => {
 
     while (true) {
         try {
-          const progressRes = await api.get(`/sessions/${sessionId}/progress`)
+          const progressRes = await api.get(`/sessions/${sessionId}/progress`, { suppressGlobalError: true })
           const uploadProgress = progressRes.data?.upload_progress || {}
-          const percent = uploadProgress.percent ?? progressRes.data?.percent ?? 0
+          const percent = uploadProgress.percent ?? progressRes.data?.percent ?? null
           const failed = uploadProgress.failed_count ?? progressRes.data?.failed ?? 0
           const currentStage = uploadProgress.current_stage || progressRes.data?.current_stage
 
           progressPercent.value = percent
+          uploadMonitorUnavailable.value = false
           uploadStatusMessage.value = uploadProgress.status_message || 'Processing files...'
 
           if (currentStage === 'failed') {
@@ -2319,6 +2283,7 @@ const pollProgress = async (sessionId, taskId = null) => {
               }
           }
         } catch (e) {
+          uploadMonitorUnavailable.value = true
           console.warn("Progress poll failed", e)
         }
         await new Promise(r => setTimeout(r, 1000))
@@ -2478,11 +2443,13 @@ onMounted(async () => {
 })
 
 const handleUpload = async () => {
+  if (uploading.value || !canUpload.value) return
+  uploadMonitorUnavailable.value = false
   uploading.value = true
   error.value = ''
   success.value = ''
   uploadStage.value = 0
-  progressPercent.value = 0
+  progressPercent.value = null
   uploadStatusMessage.value = ''
   hasFailures.value = false
 
@@ -2515,10 +2482,7 @@ const handleUpload = async () => {
       workflowStore.setUploadedFiles(response.data.foundFiles || [])
       success.value = 'Files uploaded successfully!'
 
-      // Auto-proceed for simple files
-      setTimeout(() => {
-        continueAfterUpload()
-      }, 1500)
+      continueAfterUpload()
 
     } else {
        // Directory/ZIP Mode
@@ -2593,7 +2557,7 @@ const handleUpload = async () => {
          : null
        if (activeHpcAllocation?.allocation_id) {
          uploadStatusMessage.value = 'Uploading ZIP to cloud storage and staging it on the HPC...'
-         progressPercent.value = 0
+         progressPercent.value = null
          const streamResponse = await api.uploadFileStream(
            zipFile.value,
            (percent) => { progressPercent.value = percent },
@@ -2637,7 +2601,7 @@ const handleUpload = async () => {
                // Only show upload progress if we are actually uploading a ZIP
                // Local mode is instant init
                const p = Math.round((progressEvent.loaded * 100) / progressEvent.total)
-               if (p < 100) progressPercent.value = p
+               progressPercent.value = p < 100 ? p : null
             }
          }
        })
@@ -2652,6 +2616,7 @@ const handleUpload = async () => {
        workflowStore.setSessionId(session_id)
 
        // Step 2 & 3: Poll Progress
+       progressPercent.value = null
        uploadStage.value = 2 // Coordinator running
        await pollProgress(session_id, task_id)
 

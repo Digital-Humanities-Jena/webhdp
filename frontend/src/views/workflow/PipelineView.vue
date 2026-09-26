@@ -15,21 +15,25 @@
         </div>
 
         <div v-else-if="pipelineError" class="text-center py-12">
-          <Alert v-model="pipelineError" variant="error" :message="pipelineError" :dismissible="false" />
+          <Alert :model-value="Boolean(pipelineError)" variant="error" :message="pipelineError" :dismissible="false" />
+          <button type="button" @click="loadPipelines" class="mt-4 rounded-md bg-indigo-600 px-4 py-2 text-white hover:bg-indigo-700">Try again</button>
         </div>
 
         <div v-else>
           <h2 class="text-xl font-semibold text-gray-900 mb-6">Available Pipelines</h2>
 
           <div v-if="availablePipelines.length === 0" class="text-center text-gray-500 py-8">
-            <p>No pipelines are currently available.</p>
+            <p>No pipelines are currently available. Your file selection is saved.</p>
+            <p class="mt-2 text-sm">Ask an administrator to enable a pipeline, then check again.</p>
+            <button type="button" @click="loadPipelines" class="mt-4 rounded-md border border-gray-300 px-4 py-2 text-gray-700 hover:bg-gray-50">Check again</button>
           </div>
 
-          <div v-else class="space-y-4">
+          <fieldset v-else class="space-y-4" :disabled="submitting">
+            <legend class="sr-only">Available Pipelines</legend>
             <div
               v-for="pipeline in availablePipelines"
               :key="pipeline.identifier"
-              @click="selectedPipeline = pipeline.identifier"
+              @click="!submitting && (selectedPipeline = pipeline.identifier)"
               :class="[
                 'border-2 rounded-lg p-5 cursor-pointer transition-all',
                 selectedPipeline === pipeline.identifier
@@ -40,63 +44,35 @@
               <div class="flex items-start">
                 <input
                   type="radio"
+                  name="processing-pipeline"
                   :id="pipeline.identifier"
                   :value="pipeline.identifier"
                   v-model="selectedPipeline"
                   class="mt-1.5 h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500"
                 />
-                <div class="ml-4 flex-1">
-                  <div class="flex items-center justify-between">
+                <div class="ml-4 min-w-0 flex-1">
+                  <div class="flex flex-wrap items-center justify-between gap-2">
                     <label :for="pipeline.identifier" class="text-lg font-bold text-gray-900 cursor-pointer">{{ pipeline.name }}</label>
-                    <div class="ml-4 flex flex-wrap justify-end gap-2 text-[11px]">
-                      <span class="rounded-full border border-gray-200 bg-white px-2.5 py-1 font-medium text-gray-700">
-                        v{{ pipeline.version || 'n/a' }}
-                      </span>
-                      <span class="rounded-full border border-gray-200 bg-white px-2.5 py-1 font-medium text-gray-700">
-                        {{ pipeline.modality || 'generic' }}
-                      </span>
-                      <span class="rounded-full border border-gray-200 bg-white px-2.5 py-1 font-medium text-gray-700">
-                        {{ pipeline.processingMode || 'root' }}
-                      </span>
-                    </div>
                   </div>
                   <p class="mt-1 text-sm text-gray-600 leading-relaxed">{{ pipeline.description }}</p>
 
-                  <div class="mt-3 flex flex-wrap gap-2">
-                    <span
-                      class="inline-flex items-center rounded border border-gray-200 bg-white px-2 py-0.5 text-[10px] font-medium uppercase tracking-tighter text-gray-700"
-                    >
-                      {{ pipeline.status || 'active' }}
-                    </span>
-                    <span
-                      v-if="Array.isArray(pipeline.tags) && pipeline.tags.length"
-                      class="inline-flex items-center rounded border border-gray-200 bg-white px-2 py-0.5 text-[10px] font-medium text-gray-700"
-                    >
-                      {{ pipeline.tags.join(', ') }}
-                    </span>
-                  </div>
-
-                  <div v-if="pipeline.config?.steps?.length" class="mt-4 flex flex-wrap gap-2">
-                    <template v-for="step in pipeline.config.steps" :key="step.id">
-                      <span
-                        v-if="step.enabled !== false"
-                        class="inline-flex items-center rounded border border-indigo-200 bg-white px-2 py-0.5 text-[10px] font-medium uppercase tracking-tighter text-indigo-700"
-                      >
-                        <svg class="mr-1 h-2 w-2 text-indigo-400" fill="currentColor" viewBox="0 0 8 8">
-                          <circle cx="4" cy="4" r="3" />
-                        </svg>
-                        {{ step.name }}
-                      </span>
-                    </template>
-                  </div>
+                  <details class="mt-3 text-sm text-gray-600" @click.stop>
+                    <summary class="cursor-pointer font-medium text-indigo-700">Pipeline details</summary>
+                    <p class="mt-2">Version {{ pipeline.version || 'not specified' }} · {{ pipeline.modality || 'generic' }}</p>
+                    <ol v-if="pipeline.config?.steps?.length" class="mt-2 list-decimal space-y-1 pl-5">
+                      <li v-for="step in pipeline.config.steps.filter(step => step.enabled !== false)" :key="step.id">{{ step.name }}</li>
+                    </ol>
+                  </details>
                 </div>
               </div>
             </div>
-          </div>
+          </fieldset>
 
-          <div class="mt-8 flex justify-between">
+          <p v-if="saveError" role="alert" class="mt-4 text-sm text-red-700">{{ saveError }}</p>
+          <div class="mt-8 flex flex-col-reverse gap-3 sm:flex-row sm:justify-between">
             <button
               @click="handleBack"
+              :disabled="submitting"
               class="px-6 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 transition-colors"
             >
               ← Back
@@ -107,7 +83,7 @@
               data-testid="pipeline-continue"
               class="px-8 py-2 bg-indigo-600 text-white rounded-md font-medium hover:bg-indigo-700 disabled:opacity-50 transition-colors shadow-sm"
             >
-              {{ submitting ? 'Submitting...' : 'Continue to Summary →' }}
+              {{ submitting ? 'Saving...' : 'Continue to Summary →' }}
             </button>
           </div>
         </div>
@@ -137,8 +113,9 @@ const submitting = ref(false)
 const availablePipelines = ref([])
 const loadingPipelines = ref(true)
 const pipelineError = ref('')
+const saveError = ref('')
 
-onMounted(async () => {
+const loadPipelines = async () => {
   loadingPipelines.value = true
   pipelineError.value = ''
   try {
@@ -169,19 +146,24 @@ onMounted(async () => {
     availablePipelines.value = response.data?.pipelines || []
 
     if (availablePipelines.value.length > 0) {
-      selectedPipeline.value = workflowStore.selectedPipeline?.identifier || availablePipelines.value[0].identifier
+      const savedIdentifier = selectedPipeline.value || workflowStore.selectedPipeline?.identifier
+      selectedPipeline.value = availablePipelines.value.some(pipeline => pipeline.identifier === savedIdentifier)
+        ? savedIdentifier : availablePipelines.value[0].identifier
+    } else {
+      selectedPipeline.value = null
     }
     if (workflowStore.sessionId) {
       await persistWorkflowState(workflowStore, 'pipeline')
     }
   } catch (err) {
     console.error('Failed to load pipelines:', err)
-    pipelineError.value = 'Failed to load available pipelines. Please try refreshing the page.'
-    toast.error('Failed to load pipelines')
+    pipelineError.value = 'Could not load pipelines. Check your connection and try again. Your files are still saved.'
   } finally {
     loadingPipelines.value = false
   }
-})
+}
+
+onMounted(loadPipelines)
 
 const handleBack = () => {
   workflowStore.prevStep()
@@ -192,7 +174,8 @@ const handleBack = () => {
 }
 
 const handleSubmit = async () => {
-  if (!selectedPipeline.value) return
+  if (!selectedPipeline.value || submitting.value) return
+  saveError.value = ''
 
   submitting.value = true
 
@@ -201,14 +184,13 @@ const handleSubmit = async () => {
     const chosenPipeline = availablePipelines.value.find((p) => p.identifier === selectedPipeline.value)
     workflowStore.setPipeline(chosenPipeline)
 
-    // Advance to the final step
-    workflowStore.nextStep()
     await persistWorkflowState(workflowStore, 'submit', { selectedPipeline: chosenPipeline })
+    workflowStore.nextStep()
     router.push('/workflow/submit')
 
   } catch (err) {
     console.error('Submission failed:', err)
-    toast.error('An error occurred during submission.')
+    saveError.value = 'Could not save your pipeline choice. Try continuing again; processing has not started.'
     submitting.value = false
   }
 }

@@ -306,9 +306,12 @@ describe('SubmitView record-resolution plan', () => {
 
     await flushPromises()
 
-    expect(wrapper.text()).toContain('Locked to the session default because the batch record plan was analyzed against that environment.')
-    const environmentToggle = wrapper.findAll('button').find((button) => button.attributes('disabled') !== undefined)
-    expect(environmentToggle).toBeTruthy()
+    expect(wrapper.text()).toContain('This batch uses the destination chosen at upload')
+    const environments = wrapper.findAll('input[name="zenodo-environment"]')
+    expect(environments).toHaveLength(2)
+    expect(environments[0].element.checked).toBe(false)
+    expect(environments[1].element.checked).toBe(true)
+    expect(environments[0].element.closest('fieldset').disabled).toBe(true)
 
     const submitButton = wrapper.findAll('button').find((button) => button.text().includes('Confirm & Process'))
     await submitButton.trigger('click')

@@ -432,7 +432,13 @@ const routes = [
 
 const router = createRouter({
   history: createWebHistory(),
-  routes
+  routes,
+  scrollBehavior(to, from, savedPosition) {
+    if (savedPosition) return savedPosition
+    if (to.hash) return { el: to.hash, top: 16 }
+    if (to.path === from.path) return false
+    return { top: 0, left: 0 }
+  }
 })
 
 // Navigation guard

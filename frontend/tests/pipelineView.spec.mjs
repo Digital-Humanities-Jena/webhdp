@@ -146,4 +146,34 @@ describe('PipelineView', () => {
     )
     expect(mocked.router.push).toHaveBeenCalledWith('/workflow/submit')
   })
+  it('recovers from a failed pipeline request without refreshing or losing the session', async () => {
+    mocked.workflowStore.sessionId = 42
+    mocked.workflowStore.selectedFiles = [{ file_id: 1 }]
+    mocked.pipelineService.listPipelines.mockRejectedValueOnce(new Error('Offline')).mockResolvedValue({ data: { pipelines: [{ identifier: 'render', name: 'Render' }] } })
+    const wrapper = mount(PipelineView, { global: { stubs: { StepIndicator: true, LoadingSpinner: true, Alert: true } } })
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === 'Try again').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('input[type="radio"]').element.checked).toBe(true)
+    expect(mocked.pipelineService.listPipelines).toHaveBeenCalledTimes(2)
+    expect(mocked.router.replace).not.toHaveBeenCalled()
+  })
+
+  it('keeps the user on pipeline selection when saving fails and allows retry', async () => {
+    mocked.workflowStore.sessionId = 42
+    mocked.workflowStore.selectedFiles = [{ file_id: 1 }]
+    mocked.pipelineService.listPipelines.mockResolvedValue({ data: { pipelines: [{ identifier: 'render', name: 'Render' }] } })
+    const wrapper = mount(PipelineView, { global: { stubs: { StepIndicator: true, LoadingSpinner: true } } })
+    await flushPromises()
+    mocked.workflowState.persistWorkflowState.mockRejectedValueOnce(new Error('Offline'))
+    await wrapper.get('[data-testid="pipeline-continue"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[role="alert"]').text()).toContain('processing has not started')
+    expect(mocked.workflowStore.nextStep).not.toHaveBeenCalled()
+    expect(mocked.router.push).not.toHaveBeenCalled()
+    await wrapper.get('[data-testid="pipeline-continue"]').trigger('click')
+    await flushPromises()
+    expect(mocked.router.push).toHaveBeenCalledWith('/workflow/submit')
+  })
+
 })

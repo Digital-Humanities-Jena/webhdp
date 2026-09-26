@@ -20,6 +20,7 @@
       <button
         v-if="dismissible"
         @click="$emit('update:modelValue', false)"
+        aria-label="Dismiss alert"
         class="ml-3 flex-shrink-0"
       >
         <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">

@@ -1,6 +1,7 @@
 <template>
   <div class="min-h-screen bg-gray-50">
-    <nav class="sticky top-0 z-40 border-b border-gray-200 bg-white/95 backdrop-blur">
+    <a href="#main-content" class="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:rounded-md focus:bg-white focus:p-3 focus:text-indigo-700">Skip to content</a>
+    <nav aria-label="Main navigation" class="sticky top-0 z-40 border-b border-gray-200 bg-white/95 backdrop-blur">
       <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div class="flex min-h-[64px] flex-wrap items-center justify-between gap-3 py-3">
           <div class="flex items-center gap-3 min-w-0">
@@ -65,6 +66,7 @@
             >
               <a
                 :href="href"
+                :aria-current="isActive || isRouteActive(item.to) ? 'page' : undefined"
                 @click="navigate"
                 :class="[
                   'whitespace-nowrap rounded-md border px-3 py-1.5 text-xs font-medium transition-colors',
@@ -81,7 +83,7 @@
       </div>
     </nav>
 
-    <main>
+    <main id="main-content" tabindex="-1">
       <router-view />
     </main>
 

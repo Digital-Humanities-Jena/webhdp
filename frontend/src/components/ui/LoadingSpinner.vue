@@ -1,13 +1,14 @@
 <template>
-  <div class="flex justify-center items-center" :class="containerClass">
+  <div class="flex justify-center items-center" :class="containerClass" role="status">
     <div
+      aria-hidden="true"
       :class="[
-        'animate-spin rounded-full border-b-2',
+        'motion-safe:animate-spin rounded-full border-b-2',
         sizeClasses[size],
         colorClass
       ]"
     ></div>
-    <span v-if="text" class="ml-3 text-gray-600">{{ text }}</span>
+    <span :class="text ? 'ml-3 text-gray-600' : 'sr-only'">{{ text || 'Loading…' }}</span>
   </div>
 </template>
 
@@ -41,5 +42,6 @@ const sizeClasses = {
   xl: 'h-16 w-16'
 }
 
-const colorClass = computed(() => `border-${props.color}-600`)
+const colors = { indigo: 'border-indigo-600', blue: 'border-blue-600', green: 'border-green-600', red: 'border-red-600', gray: 'border-gray-600' }
+const colorClass = computed(() => colors[props.color] || colors.indigo)
 </script>

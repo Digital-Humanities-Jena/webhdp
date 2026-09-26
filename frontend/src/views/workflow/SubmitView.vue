@@ -24,13 +24,13 @@
                   </div>
                   <div class="flex justify-between">
                     <dt class="text-gray-600">Record mode:</dt>
-                    <dd class="font-medium text-gray-900 truncate ml-4">
+                    <dd class="font-medium text-gray-900 min-w-0 break-words text-right ml-4">
                       {{ submissionPlan.title }}
                     </dd>
                   </div>
                   <div class="flex justify-between">
                     <dt class="text-gray-600">Submission Title:</dt>
-                    <dd class="font-medium text-gray-900 truncate ml-4">
+                    <dd class="font-medium text-gray-900 min-w-0 break-words text-right ml-4">
                       {{ workflowStore.submissionMetadata.title || 'Untitled Submission' }}
                     </dd>
                   </div>
@@ -82,7 +82,7 @@
                     {{ recordResolutionState.policy_preset || 'balanced' }}
                   </span>
                 </div>
-                <div class="mt-3 grid grid-cols-2 gap-3 text-sm md:grid-cols-5">
+                <div class="mt-3 grid grid-cols-2 gap-3 text-sm">
                   <div class="rounded-md border border-white/80 bg-white p-3">
                     <p class="text-xs uppercase tracking-wide text-slate-500">Version</p>
                     <p class="mt-1 font-semibold text-slate-900">{{ batchResolutionSummary?.create_version || 0 }}</p>
@@ -126,45 +126,33 @@
                 <dl class="mt-3 space-y-2 text-sm">
                   <div class="flex justify-between">
                     <dt class="text-gray-600">Workspace:</dt>
-                    <dd class="font-medium text-gray-900 truncate ml-4">{{ workspaceSummaryLabel }}</dd>
+                    <dd class="font-medium text-gray-900 min-w-0 break-words text-right ml-4">{{ workspaceSummaryLabel }}</dd>
                   </div>
                   <div class="flex justify-between">
                     <dt class="text-gray-600">Credential source:</dt>
-                    <dd class="font-medium text-gray-900 truncate ml-4">{{ credentialSourceLabel }}</dd>
+                    <dd class="font-medium text-gray-900 min-w-0 break-words text-right ml-4">{{ credentialSourceLabel }}</dd>
                   </div>
                   <div class="flex justify-between">
                     <dt class="text-gray-600">Session default environment:</dt>
-                    <dd class="font-medium text-gray-900 truncate ml-4">{{ defaultEnvironmentLabel }}</dd>
+                    <dd class="font-medium text-gray-900 min-w-0 break-words text-right ml-4">{{ defaultEnvironmentLabel }}</dd>
                   </div>
                 </dl>
               </div>
 
-              <!-- Zenodo Environment Selection -->
-              <div class="p-4 bg-blue-50 rounded-lg border border-blue-200">
-                <div class="flex items-center justify-between">
-                  <div>
-                    <h3 class="text-sm font-medium text-gray-900">Environment</h3>
-                    <p class="text-xs text-gray-500 mt-0.5">
-                      {{ isBatchExecutionEnvironmentLocked
-                        ? 'Locked to the session default because the batch record plan was analyzed against that environment.'
-                        : 'Where to upload' }}
-                    </p>
-                  </div>
-                  <div class="flex items-center">
-                    <span class="mr-2 text-xs font-medium" :class="!effectiveExecutionEnvironmentIsSandbox ? 'text-gray-900' : 'text-gray-400'">Prod</span>
-                    <button
-                      type="button"
-                      class="relative inline-flex h-5 w-10 border-2 border-transparent rounded-full transition-colors ease-in-out duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
-                      :class="effectiveExecutionEnvironmentIsSandbox ? 'bg-indigo-600' : 'bg-gray-200'"
-                      :disabled="isBatchExecutionEnvironmentLocked"
-                      @click="isBatchExecutionEnvironmentLocked ? null : (isSandbox = !isSandbox)"
-                    >
-                      <span aria-hidden="true" :class="[effectiveExecutionEnvironmentIsSandbox ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow transform ring-0 transition ease-in-out duration-200']"></span>
-                    </button>
-                    <span class="ml-2 text-xs font-medium" :class="effectiveExecutionEnvironmentIsSandbox ? 'text-gray-900' : 'text-gray-400'">Sandbox</span>
-                  </div>
+              <fieldset class="p-4 bg-blue-50 rounded-lg border border-blue-200" :disabled="isBatchExecutionEnvironmentLocked || submitting">
+                <legend class="px-1 text-sm font-semibold text-gray-900">Zenodo destination</legend>
+                <div class="grid gap-3 sm:grid-cols-2">
+                  <label class="flex cursor-pointer items-start gap-2 rounded-md border border-blue-200 bg-white p-3 text-sm">
+                    <input type="radio" name="zenodo-environment" class="mt-1 text-indigo-600" :checked="effectiveExecutionEnvironmentIsSandbox" @change="isSandbox = true" />
+                    <span><span class="block font-medium text-gray-900">Sandbox</span><span class="text-xs text-gray-600">Test repository</span></span>
+                  </label>
+                  <label class="flex cursor-pointer items-start gap-2 rounded-md border border-blue-200 bg-white p-3 text-sm">
+                    <input type="radio" name="zenodo-environment" class="mt-1 text-indigo-600" :checked="!effectiveExecutionEnvironmentIsSandbox" @change="isSandbox = false" />
+                    <span><span class="block font-medium text-gray-900">Production</span><span class="text-xs text-gray-600">Zenodo repository</span></span>
+                  </label>
                 </div>
-              </div>
+                <p v-if="isBatchExecutionEnvironmentLocked" class="mt-3 text-sm text-gray-600">This batch uses the destination chosen at upload, where its existing records were checked.</p>
+              </fieldset>
 
               <div
                 v-if="hpcComponentKeys.length > 0"
@@ -189,9 +177,7 @@
                     {{ hpcPreflightState }}
                   </span>
                 </div>
-                <div v-if="hpcPreflightState === 'checking'" class="mt-3 h-2 rounded-full bg-slate-200">
-                  <div class="h-2 rounded-full bg-indigo-600 transition-all" :style="{ width: `${hpcPreflightPercent}%` }"></div>
-                </div>
+                <ProgressBar v-if="hpcPreflightState === 'checking'" class="mt-3" :label="componentPreflightTitle" :show-label="false" />
               </div>
 
               <div v-if="!isUsdzDisabled" class="p-4 bg-rose-50 rounded-lg border border-rose-200">
@@ -208,6 +194,9 @@
                       type="button"
                       class="relative inline-flex h-5 w-10 border-2 border-transparent rounded-full cursor-pointer transition-colors ease-in-out duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-rose-500"
                       :class="abortOnCriticalError ? 'bg-rose-600' : 'bg-gray-200'"
+                      role="switch"
+                      aria-label="Stop processing if USDZ conversion fails"
+                      :aria-checked="abortOnCriticalError"
                       @click="abortOnCriticalError = !abortOnCriticalError"
                     >
                       <span aria-hidden="true" :class="[abortOnCriticalError ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow transform ring-0 transition ease-in-out duration-200']"></span>
@@ -270,7 +259,7 @@
             </div>
           </div>
 
-          <div class="mt-8 flex justify-between">
+          <div class="mt-8 flex flex-col-reverse gap-3 sm:flex-row sm:justify-between">
             <button
               @click="handleBack"
               class="px-6 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 transition-colors"
@@ -279,11 +268,11 @@
             </button>
             <button
               @click="handleSubmit"
-              :disabled="submitting || Boolean(batchResolutionBlockedReason)"
+              :disabled="loadingPipeline || submitting || Boolean(batchResolutionBlockedReason)"
               data-testid="submit-confirm"
               class="px-6 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:opacity-50 transition-colors shadow-sm"
             >
-              {{ submitting ? 'Submitting...' : 'Confirm & Process →' }}
+              {{ loadingPipeline ? 'Loading summary…' : submitting ? 'Submitting...' : 'Confirm & Process →' }}
             </button>
           </div>
         </div>
@@ -291,14 +280,19 @@
         <div v-if="processing" class="text-center py-12">
           <div class="mb-8">
             <LoadingSpinner size="lg" text="Processing submission..." />
-            <p class="mt-4 text-sm text-indigo-600 font-medium animate-pulse">{{ statusMessage }}</p>
+            <p role="status" class="mt-4 text-sm text-indigo-700 font-medium">{{ statusMessage }}</p>
           </div>
+
+          <div v-if="monitorUnavailable" role="status" class="max-w-md mx-auto mb-6 rounded-lg border border-amber-200 bg-amber-50 p-4 text-left text-sm text-amber-900">
+            Progress updates are temporarily unavailable. Processing may still be running. Reconnecting automatically; you do not need to submit again.
+          </div>
+          <ProgressBar class="max-w-md mx-auto mb-6" :percentage="processingProgress?.percent" label="Processing progress" />
 
           <div v-if="processingProgress" class="max-w-md mx-auto mb-6 text-left bg-indigo-50 border border-indigo-100 rounded-lg p-4">
             <dl class="space-y-2 text-xs">
               <div class="flex justify-between items-start">
                 <dt class="text-indigo-700 font-medium">Current File</dt>
-                <dd class="text-gray-900 font-medium ml-4 truncate">{{ processingFileName || 'Waiting...' }}</dd>
+                <dd class="text-gray-900 font-medium ml-4 min-w-0 break-all">{{ processingFileName || 'Waiting...' }}</dd>
               </div>
               <div v-if="processingCounter" class="flex justify-between">
                 <dt class="text-indigo-700 font-medium">Progress</dt>
@@ -464,7 +458,7 @@
           </div>
         </div>
 
-        <div v-else-if="error" class="text-center py-8">
+        <div v-else-if="error" role="alert" class="text-center py-8">
           <div class="flex justify-center">
             <div class="bg-red-100 rounded-full p-3 mb-4">
               <svg class="h-12 w-12 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -482,7 +476,7 @@
             </ul>
           </div>
 
-          <div class="flex justify-center space-x-4">
+          <div class="flex flex-col-reverse gap-3 sm:flex-row sm:justify-center">
             <button
               @click="handleBack"
               class="px-6 py-2 border border-gray-300 text-gray-700 rounded-md font-medium hover:bg-gray-50 transition-colors"
@@ -514,6 +508,7 @@ import pipelineService from '@/services/pipeline.service'
 import submissionService from '@/services/submission.service'
 import hpcLinkService from '@/services/hpcLink.service'
 import StepIndicator from '@/components/workflow/StepIndicator.vue'
+import ProgressBar from '@/components/ui/ProgressBar.vue'
 import LoadingSpinner from '@/components/ui/LoadingSpinner.vue'
 import { persistWorkflowState, restoreWorkflowContext, shouldRestoreWorkflowContext } from '@/utils/workflowState'
 import {
@@ -554,7 +549,7 @@ const recordResolutionState = ref(null)
 const recordResolutionLoading = ref(false)
 const hpcPreflightState = ref('idle')
 const hpcPreflightMessage = ref('HDP Component runtimes will be checked before processing starts.')
-const hpcPreflightPercent = ref(0)
+const monitorUnavailable = ref(false)
 const hpcAllocation = ref(null)
 const componentRuntimeStatus = ref({})
 
@@ -1260,6 +1255,7 @@ const pollSubmissionProgress = async () => {
   try {
     const response = await submissionService.getSubmissionProgress(submissionId.value)
     const payload = response.data || {}
+    monitorUnavailable.value = false
 
     if (payload.progress) {
       applyProgressUpdate(payload.progress)
@@ -1280,6 +1276,7 @@ const pollSubmissionProgress = async () => {
       handleFailedSubmissionPayload(payload)
     }
   } catch (pollErr) {
+    monitorUnavailable.value = true
     console.warn('Submission progress poll failed:', pollErr)
   }
 }
@@ -1289,6 +1286,7 @@ const pollNativeRunProgress = async () => {
 
   try {
     const response = await pipelineService.getPipelineRun(pipelineRunId.value)
+    monitorUnavailable.value = false
     const runPayload = response.data?.run || {}
     const resultPayload = runPayload.result || {}
 
@@ -1326,6 +1324,7 @@ const pollNativeRunProgress = async () => {
       })
     }
   } catch (pollErr) {
+    monitorUnavailable.value = true
     console.warn('Native pipeline run poll failed:', pollErr)
   }
 }
@@ -1614,7 +1613,6 @@ const waitForHpcAllocation = async (allocationId) => {
     }
 
     attempt += 1
-    hpcPreflightPercent.value = Math.min(65, 15 + attempt * 5)
     hpcPreflightMessage.value = status === 'queued'
       ? 'Waiting for an HPC allocation slot...'
       : 'Allocating HPC resources...'
@@ -1631,7 +1629,6 @@ const ensureHpcAllocationAndPreflight = async (sessionId) => {
   }
 
   hpcPreflightState.value = 'checking'
-  hpcPreflightPercent.value = 10
   hpcPreflightMessage.value = 'Checking HDP Component runtime availability...'
 
   const statusResponse = await hpcLinkService.getStatus({ purpose: 'workflow', session_id: sessionId })
@@ -1648,7 +1645,6 @@ const ensureHpcAllocationAndPreflight = async (sessionId) => {
   const localReady = selectedRuntime.length === components.length && selectedRuntime.every((entry) => entry.status === 'local_allowed' || entry.status === 'disabled')
   if (localReady) {
     hpcPreflightState.value = 'ready'
-    hpcPreflightPercent.value = 100
     hpcPreflightMessage.value = `Local workstation execution is ready for ${components.join(', ')}.`
     return
   }
@@ -1657,7 +1653,6 @@ const ensureHpcAllocationAndPreflight = async (sessionId) => {
     || selectedRuntime.some((entry) => entry.active_hpc_allocation)
   if (activeHpcRuntime) {
     hpcPreflightState.value = 'ready'
-    hpcPreflightPercent.value = 100
     hpcPreflightMessage.value = `An active HPC-Link allocation is available for ${components.join(', ')}.`
     return
   }
@@ -1665,7 +1660,6 @@ const ensureHpcAllocationAndPreflight = async (sessionId) => {
   const allocationRequired = selectedRuntime.length === 0 || selectedRuntime.some((entry) => entry.allocation_required || entry.status === 'hpc_required')
   if (!allocationRequired) {
     hpcPreflightState.value = 'ready'
-    hpcPreflightPercent.value = 100
     hpcPreflightMessage.value = 'Compute-backed HDP Component runtime is ready.'
     return
   }
@@ -1679,7 +1673,6 @@ const ensureHpcAllocationAndPreflight = async (sessionId) => {
   }
 
   hpcPreflightMessage.value = 'Requesting reusable HPC allocation...'
-  hpcPreflightPercent.value = 20
   const allocationResponse = await hpcLinkService.requestAllocation({
     purpose: 'workflow',
     session_id: sessionId
@@ -1696,7 +1689,6 @@ const ensureHpcAllocationAndPreflight = async (sessionId) => {
     : await waitForHpcAllocation(allocationId)
 
   hpcPreflightMessage.value = 'Validating HDP Component runtimes on the allocated node...'
-  hpcPreflightPercent.value = 75
   const preflightResponse = await hpcLinkService.preflightAllocation(activeAllocation.allocation_id, components)
   const preflight = preflightResponse.data?.preflight || {}
   hpcAllocation.value = preflightResponse.data?.allocation || activeAllocation
@@ -1705,11 +1697,11 @@ const ensureHpcAllocationAndPreflight = async (sessionId) => {
   }
 
   hpcPreflightState.value = 'ready'
-  hpcPreflightPercent.value = 100
   hpcPreflightMessage.value = `HPC-Link is ready for ${components.join(', ')}.`
 }
 
 const handleSubmit = async () => {
+  if (loadingPipeline.value || submitting.value) return
   submitting.value = true
   processing.value = true
   success.value = false
@@ -1724,7 +1716,6 @@ const handleSubmit = async () => {
   recordFailures.value = []
   submissionResult.value = null
   hpcPreflightState.value = 'idle'
-  hpcPreflightPercent.value = 0
   hpcPreflightMessage.value = 'HDP Component runtimes will be checked before processing starts.'
   componentRuntimeStatus.value = {}
   statusMessage.value = 'Preparing files for processing...'
