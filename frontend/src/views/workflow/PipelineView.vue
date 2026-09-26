@@ -59,6 +59,13 @@
                   <details class="mt-3 text-sm text-gray-600" @click.stop>
                     <summary class="cursor-pointer font-medium text-indigo-700">Pipeline details</summary>
                     <p class="mt-2">Version {{ pipeline.version || 'not specified' }} · {{ pipeline.modality || 'generic' }}</p>
+                    <p v-if="pipeline.identifier === 'model_georeferencing'" class="mt-2">
+                      Use a batch with one upright, textured GLB and one 8-bit reference GeoTIFF per bundle.
+                      The reference must cover the site and use a projected coordinate system in metres.
+                      Give each pair the same filename stem (for example, church.glb and church.tif),
+                      list each GLB in the metadata spreadsheet, and review the bundles in Files.
+                      Check the alignment overlay before reusing the result; image matching does not establish survey accuracy.
+                    </p>
                     <ol v-if="pipeline.config?.steps?.length" class="mt-2 list-decimal space-y-1 pl-5">
                       <li v-for="step in pipeline.config.steps.filter(step => step.enabled !== false)" :key="step.id">{{ step.name }}</li>
                     </ol>
@@ -103,6 +110,7 @@ import StepIndicator from '@/components/workflow/StepIndicator.vue'
 import LoadingSpinner from '@/components/ui/LoadingSpinner.vue'
 import Alert from '@/components/ui/Alert.vue'
 import { persistWorkflowState, restoreWorkflowContext, shouldRestoreWorkflowContext } from '@/utils/workflowState'
+import { georeferencingInputError } from '@/utils/georeferencingInputs'
 
 const route = useRoute()
 const router = useRouter()
@@ -116,6 +124,7 @@ const loadingPipelines = ref(true)
 const pipelineError = ref('')
 const saveError = ref('')
 const inputCompatibilityError = computed(() => {
+  if (selectedPipeline.value === 'model_georeferencing') return georeferencingInputError(workflowStore.selectedFiles)
   if (selectedPipeline.value !== 'mesh_optimization') return ''
   const unsupported = workflowStore.selectedFiles.some(file => {
     const name = file.filename || file.name || file.relative_path || file.absolute_path || ''

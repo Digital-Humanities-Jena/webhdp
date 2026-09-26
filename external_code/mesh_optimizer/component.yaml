@@ -1,10 +1,10 @@
 metadata:
   name: mesh_optimizer
   label: Mesh Optimizer
-  description: Optimize static GLB models on an HPC GPU, preserving originals and producing a textured GLB derivative.
+  description: Optimize static GLB models in an HPC allocation, preserving originals and producing a textured GLB derivative.
   tags: [3d, optimization, hpc, glb]
   category: 3D Processing
-  version: "1.0.0"
+  version: "1.0.1"
   status: alpha
   component_schema: "0.1.0-alpha.1"
 sources:
@@ -36,7 +36,7 @@ parameter_groups:
         type: integer
         default: 1024
         options: [256, 512, 1024, 2048, 4096]
-        description: Maximum texture size per baked map.
+        description: Maximum dimension of embedded textures. Smaller textures keep their original size and aspect ratio.
 execution:
   timeout: 7200
   profiles:

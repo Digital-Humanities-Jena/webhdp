@@ -51,3 +51,7 @@ Root fixtures and `test_data/workflow_fixtures/` media-like files are synthetic 
 ## Mesh Optimizer
 
 The optional HPC component integrates [3DOM-FBK/mesh-optimizer](https://github.com/3DOM-FBK/mesh-optimizer), pinned at revision `a1e76f43b9257be5288ad18c52b640c6a3f4829a`, whose repository carries the GNU GPL version 3. See `external_code/mesh_optimizer/UPSTREAM_LICENSE`. Its external runtime includes Blender and other upstream dependencies under their respective licenses; the runtime image is installed separately and is not bundled in WebHDP.
+
+## 3DGeoRef
+
+The optional georeferencing component uses the orthographic renderer from [3DOM-FBK/3DGeoRef](https://github.com/3DOM-FBK/3DGeoRef), pinned at revision `e50e4562b43c0b105d77e417d01fedb5139529a6`, under the BSD-2-Clause license. See `external_code/georeferencer/UPSTREAM_LICENSE`. The separately installed runtime includes Blender, PyTorch, Kornia and the outdoor LoFTR checkpoint under their respective licenses. Runtime images and model weights are not bundled in this source repository.

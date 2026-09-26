@@ -517,6 +517,11 @@ def _generic_singularity_component(component_key: str, request: dict[str, Any]) 
             "APPTAINERENV_WEBHDP_COMPONENT_KEY": component_key,
         }
     )
+    # --cleanenv otherwise drops the scheduler's device selection on multi-GPU
+    # nodes. Preserve even an empty selection; never widen access to all GPUs.
+    if 'CUDA_VISIBLE_DEVICES' in os.environ:
+        for prefix in ('SINGULARITYENV_', 'APPTAINERENV_'):
+            env[prefix + 'CUDA_VISIBLE_DEVICES'] = os.environ['CUDA_VISIBLE_DEVICES']
     started = time.time()
     try:
         proc = subprocess.run(

@@ -15,6 +15,7 @@ BindingType = Literal[
     "literal",
     "pipeline_source_file",
     "pipeline_source_files",
+    "record_source_files",
     "pipeline_source_directory",
     "record_metadata_field",
     "secret_ref",

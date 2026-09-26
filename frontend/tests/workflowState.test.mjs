@@ -117,6 +117,24 @@ describe('workflowState helpers', () => {
     })
   })
 
+  it('restores original bundles without reselecting generated artifacts', async () => {
+    const store = createWorkflowStoreDouble()
+    const reference = { file_id: 2, filename: 'site.tif', file_type: 'source', children: [] }
+    const model = { file_id: 1, filename: 'site.glb', file_type: 'primary_source', children: [reference] }
+    mocked.fileService.getWorkflowState.mockResolvedValue({ data: {
+      state: { selected_file_keys: ['1', '3'] },
+    } })
+    mocked.fileService.getNodes.mockResolvedValue({ data: { nodes: [
+      model,
+      { file_id: 3, filename: 'site_georeferenced.glb', file_type: 'generated' },
+      { file_id: 4, filename: 'alignment_overlay.png', file_type: 'generated' },
+    ] } })
+    await restoreWorkflowContext(store, 42)
+    expect(store.uploadedFiles).toEqual([model])
+    expect(store.selectedFiles).toEqual([model])
+    expect(store.uploadedFiles[0].children).toEqual([reference])
+  })
+
   it('decides when workflow restoration is required', () => {
     const store = createWorkflowStoreDouble({
       sessionId: 42,

@@ -28,6 +28,8 @@ from constants import (
     METADATA_ONLY_PIPELINE_ID,
     MESH_OPTIMIZATION_PIPELINE_ID,
     MESH_OPTIMIZATION_PIPELINE_DEFINITION,
+    GEOREFERENCING_PIPELINE_ID,
+    GEOREFERENCING_PIPELINE_DEFINITION,
     OPTIONAL_3D_PIPELINE_DEFINITIONS,
     PIPELINE_DEFINITION,
     PREDEFINED_PIPELINE_ID,
@@ -121,7 +123,7 @@ CONSTRUCTOR_WIDGET_BY_TYPE = {
 CONSTRUCTOR_SUPPORTED_SOURCE_KINDS_BY_TYPE = {
     "file_path": ["pipeline_source_file", "artifact_file"],
     "dir_path": ["pipeline_source_directory", "artifact_directory"],
-    "file_list": ["pipeline_source_files", "artifact_file", "artifact_directory"],
+    "file_list": ["pipeline_source_files", "record_source_files", "artifact_file", "artifact_directory"],
     "json": ["artifact_json_value"],
     "boolean": ["literal", "artifact_json_value", "record_metadata_field"],
     "integer": ["literal", "artifact_json_value", "record_metadata_field"],
@@ -527,7 +529,7 @@ class NativePipelineSystemService:
         if status:
             query = query.filter_by(status=status)
         if os.environ.get("WEBHDP_CORE_ONLY", "false").lower() == "true":
-            query = query.filter(PipelineDefinition.identifier.in_(["render", METADATA_ONLY_PIPELINE_ID, MESH_OPTIMIZATION_PIPELINE_ID]))
+            query = query.filter(PipelineDefinition.identifier.in_(["render", METADATA_ONLY_PIPELINE_ID, MESH_OPTIMIZATION_PIPELINE_ID, GEOREFERENCING_PIPELINE_ID]))
         definitions = query.order_by(PipelineDefinition.identifier.asc()).all()
         return [self._serialize_pipeline_summary(definition) for definition in definitions]
 
@@ -535,7 +537,7 @@ class NativePipelineSystemService:
         self.ensure_seeded()
         requested_identifier = str(identifier or "").strip()
         canonical_identifier = self.resolve_pipeline_identifier(requested_identifier)
-        if os.environ.get("WEBHDP_CORE_ONLY", "false").lower() == "true" and canonical_identifier not in {"render", METADATA_ONLY_PIPELINE_ID, MESH_OPTIMIZATION_PIPELINE_ID}:
+        if os.environ.get("WEBHDP_CORE_ONLY", "false").lower() == "true" and canonical_identifier not in {"render", METADATA_ONLY_PIPELINE_ID, MESH_OPTIMIZATION_PIPELINE_ID, GEOREFERENCING_PIPELINE_ID}:
             raise ValidationError("This optional pipeline is disabled in the core workflow profile")
         definition = PipelineDefinition.query.filter_by(identifier=canonical_identifier, is_active=True).first()
         if definition is None:
@@ -1275,7 +1277,8 @@ class NativePipelineSystemService:
                 mirror_legacy_config=False,
             )
         installable_pipelines = {**OPTIONAL_3D_PIPELINE_DEFINITIONS,
-                                MESH_OPTIMIZATION_PIPELINE_ID: MESH_OPTIMIZATION_PIPELINE_DEFINITION}
+                                MESH_OPTIMIZATION_PIPELINE_ID: MESH_OPTIMIZATION_PIPELINE_DEFINITION,
+                                GEOREFERENCING_PIPELINE_ID: GEOREFERENCING_PIPELINE_DEFINITION}
         for identifier, definition in installable_pipelines.items():
             try:
                 effective_config = self._load_effective_seed_config(identifier, definition)
@@ -1832,6 +1835,10 @@ class NativePipelineSystemService:
                 continue
             field_name = str(field.get("name") or "").strip()
             field_type = str(field.get("type") or "").strip().lower()
+            # artifact_file is a supported source for file_list inputs. Keep
+            # the consumer contract consistent when one upstream file is bound.
+            if field_type == "file_list" and isinstance(output.get(field_name), str):
+                output[field_name] = [output[field_name]] if output[field_name].strip() else []
             if not field_name or field_name in output:
                 continue
             mutex_fields = {
@@ -3098,7 +3105,7 @@ class NativePipelineSystemService:
     def _binding_type_is_compatible(self, binding_type: str, target_type: str) -> bool:
         if binding_type == "pipeline_source_file":
             return target_type == "file_path"
-        if binding_type == "pipeline_source_files":
+        if binding_type in {"pipeline_source_files", "record_source_files"}:
             return target_type == "file_list"
         if binding_type == "pipeline_source_directory":
             return target_type == "dir_path"
@@ -3190,6 +3197,8 @@ class NativePipelineSystemService:
                         continue
                     target_type = str(target_definition.get("type") or "").strip().lower()
                     binding_type = str(binding.get("type") or "").strip()
+                    if binding_type == "record_source_files" and step.get("scope", "record") != "record":
+                        errors.append(f"Step '{step['id']}' must use record scope to bind files from an individual record's bundle")
                     if not self._binding_type_is_compatible(binding_type, target_type):
                         errors.append(
                             f"Step '{step['id']}' binding '{target}' of type '{binding_type}' is incompatible with component field type '{target_type}'"
@@ -3905,7 +3914,7 @@ class NativePipelineSystemService:
                 component_key,
                 result,
             )
-            if result.get("success") and component_key in {"mesh_optimizer", "fast_renderer"}:
+            if result.get("success") and component_key in {"mesh_optimizer", "georeferencer", "fast_renderer"}:
                 self._register_record_files(execution_context, record_context["record_id"],
                                             materialized_paths, component_key, component_key)
                 record_context["generated_files"].extend(
@@ -4014,6 +4023,16 @@ class NativePipelineSystemService:
             return binding.get("value")
         if binding_type == "pipeline_source_file":
             return record_context.get("file_path")
+        if binding_type == "record_source_files":
+            from services.hdpc_local_service import read_hdpc_record_inputs
+            hdpc_path = execution_context.get("hdpc_path")
+            record_id = record_context.get("record_id")
+            if not hdpc_path or not record_id:
+                return []
+            # Only this record's original bundle; never another record's images
+            # or generated artifacts from an earlier execution.
+            return sorted({item["absolute_path"] for item in read_hdpc_record_inputs(hdpc_path, int(record_id))
+                           if item.get("absolute_path") and os.path.isfile(item["absolute_path"])})
         if binding_type == "pipeline_source_files":
             bucket_source_files = execution_context.get("bucket_source_files")
             if bucket_source_files:

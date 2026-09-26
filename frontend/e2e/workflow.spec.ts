@@ -45,9 +45,10 @@ test.describe('Workflow browser happy paths', () => {
     await page.route(apiV1('/sessions/file'), async (route) => {
       await fulfillJson(route, {
         error: {
+          code: 'VALIDATION_ERROR',
           message: 'Upload failed for test',
         },
-      }, 500)
+      }, 400)
     })
 
     await loginThroughUi(page)

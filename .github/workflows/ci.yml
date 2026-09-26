@@ -44,6 +44,19 @@ jobs:
       - name: Production dependency audit
         run: npm audit --omit=dev --audit-level=moderate
 
+  georeferencer-contract:
+    name: Georeferencing Geometry and Contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Check coordinate transforms and failure boundaries
+        run: >-
+          uv run --no-project --python 3.11 --with pytest --with numpy
+          --with opencv-python-headless --with rasterio --with pyproj
+          python -m pytest external_code/georeferencer/test_component.py
+          --confcutdir=external_code/georeferencer
+
   hpc-link:
     name: HPC Link Tests
     runs-on: ubuntu-latest

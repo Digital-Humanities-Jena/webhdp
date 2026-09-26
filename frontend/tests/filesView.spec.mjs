@@ -79,6 +79,24 @@ describe('FilesView', () => {
     expect(workflowStore.selectedFiles).toHaveLength(2)
   })
 
+  it('excludes prior outputs from review and clears stale output selections', async () => {
+    const workflowStore = useWorkflowStore()
+    workflowStore.setSessionId(15)
+    const model = { file_id: 101, name: 'site.glb', file_type: 'primary_source', children: [
+      { file_id: 102, name: 'site.tif', file_type: 'source', children: [] },
+    ] }
+    const output = { file_id: 103, name: 'site_georeferenced.glb', file_type: 'generated', children: [] }
+    workflowStore.setUploadedFiles([model, output])
+    workflowStore.setSelectedFiles([output])
+    const wrapper = mount(FilesView, { global: { stubs: { StepIndicator: true, ValidationModal: true } } })
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('site_georeferenced.glb')
+    expect(workflowStore.selectedFiles).toHaveLength(0)
+    await wrapper.findAll('button').find(button => button.text() === 'Select all scanned bundles').trigger('click')
+    expect(workflowStore.selectedFiles.map(file => file.file_id)).toEqual([101])
+    expect(workflowStore.selectedFiles[0].children[0].name).toBe('site.tif')
+  })
+
   it('shows Cloud Storage download availability and opens provider URLs', async () => {
     const originalLocation = window.location
     const assign = vi.fn()

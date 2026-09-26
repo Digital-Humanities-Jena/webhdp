@@ -18,8 +18,8 @@ This directory has been prepared as a source repository for both GitHub and Code
    - `docs/README.md`, `docs/guides/docker_quickstart.md`, and `docs/guides/planned_future_updates.md`
    - `version.json`, `pyproject.toml`, frontend package versions, and Docker image tags
 6. Confirm the public release boundary:
-   - Stable first-release pipelines are `render` and `metadata_only`.
-   - Component-driven pipeline composition, HPC-linked execution, and Draco/HPC deployment are experimental or planned unless separately validated.
+   - Core publication pipelines are `render` and `metadata_only`. The separately installed `mesh_optimization` and `model_georeferencing` pipelines have validated HPC workflows; see their component validation reports for supported inputs and limitations.
+   - Other optional components and deployment profiles require their own acceptance checks before being enabled.
    - Do not deploy, sync, or run release preparation on HPC as part of repository publishing.
 7. Run:
    - `make compose-check`

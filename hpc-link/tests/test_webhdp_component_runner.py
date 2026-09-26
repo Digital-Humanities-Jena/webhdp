@@ -128,6 +128,7 @@ def test_gpu_container_maps_nested_inputs_and_rejects_stale_response(tmp_path, m
     monkeypatch.setenv('WEBHDP_COMPONENT_REQUEST', str(request_path))
     monkeypatch.setenv('WEBHDP_COMPONENT_RESPONSE', str(response_path))
     monkeypatch.setenv('SINGULARITY_BIN', '/usr/bin/singularity')
+    monkeypatch.setenv('CUDA_VISIBLE_DEVICES', '2')
     request = {'profile': {'image': '/image.sif', 'entrypoint': ['python3', '/runner.py'], 'resources': {'gpu_count': 1}},
                'inputs': {'input_file': '/local/second/model.glb'},
                'staged_files': [{'local_path': '/local/second/model.glb', 'remote_path': str(nested)}],
@@ -135,6 +136,8 @@ def test_gpu_container_maps_nested_inputs_and_rejects_stale_response(tmp_path, m
     with patch.object(runner.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, '', '')) as process:
         result = runner._generic_singularity_component('mesh_optimizer', request)
     assert '--nv' in process.call_args.args[0]
+    assert process.call_args.kwargs['env']['SINGULARITYENV_CUDA_VISIBLE_DEVICES'] == '2'
+    assert process.call_args.kwargs['env']['APPTAINERENV_CUDA_VISIBLE_DEVICES'] == '2'
     assert not result['success']
     staged_request = json.loads((tmp_path / 'request.container.json').read_text())
     assert staged_request['inputs']['input_file'] == '/inputs/second/model.glb'

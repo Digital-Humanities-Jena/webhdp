@@ -957,6 +957,7 @@ function getBindingTypeOptions(field) {
   const labels = {
     pipeline_source_file: 'Pipeline Source File',
     pipeline_source_files: 'Pipeline Source Files',
+    record_source_files: 'Original Files in This Record’s Bundle',
     pipeline_source_directory: 'Pipeline Source Directory',
     artifact_file: 'Earlier Step File Output',
     artifact_directory: 'Earlier Step Directory Output',

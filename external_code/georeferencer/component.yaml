@@ -1,0 +1,62 @@
+metadata:
+  name: georeferencer
+  label: 3DGeoRef
+  description: Align a static GLB to a supplied orthophoto on an HPC GPU. Reject uncertain matches and preserve the original model.
+  tags: [3d, georeferencing, hpc, glb]
+  category: 3D Processing
+  version: "1.0.0"
+  status: alpha
+  component_schema: "0.1.0-alpha.1"
+sources:
+  git: https://github.com/3DOM-FBK/3DGeoRef
+distribution:
+  tier: external_installable
+  bundled_with_webhdp: false
+  installation_scope: [hpc_sif]
+inputs:
+  - {name: input_file, label: Static GLB model, type: file_path, required: true}
+  - name: reference_files
+    label: Reference orthophoto
+    description: One RGB or grayscale GeoTIFF in a projected CRS measured in metres, covering the model. In a batch, include one reference per model bundle.
+    type: file_list
+    required: true
+outputs:
+  - {name: georeferenced_model, label: Georeferenced GLB, type: file_path}
+  - {name: georeferencing_report, label: Coordinates and alignment quality, type: file_path}
+  - {name: alignment_preview, label: Alignment overlay, type: file_path}
+parameter_groups: []
+execution:
+  timeout: 3600
+  profiles:
+    - id: hpc_singularity
+      adapter: hpc_link
+      handler: generic_singularity_component
+      runtime: singularity
+      image: ""
+      entrypoint: [python3, /opt/webhdp/georeferencer/runner.py]
+      resources: {gpu_count: 1, cpus: 8, memory_mb: 32768}
+compatibility:
+  playground: {enabled: true}
+install:
+  strategies:
+    - {id: hpc_sif, runtime: singularity, profile: hpc_singularity}
+hpc:
+  install: {runtime: singularity, sif_required: true}
+ui:
+  playground:
+    fields:
+      input_file:
+        widget: model_input
+        accept_extensions: [.glb]
+        help_text: Use a static, self-contained, upright GLB of a site visible in the reference image.
+      reference_files:
+        widget: file_list_picker
+        accept_extensions: [.tif, .tiff]
+        help_text: Supply exactly one GeoTIFF. No imagery is sent to external geolocation services.
+    result:
+      artifact_views:
+        - {id: aligned-model, label: Georeferenced model, widget: file_download, extensions: [.glb]}
+        - {id: coordinates, label: Coordinates and quality, widget: file_download, extensions: [.json]}
+        - {id: alignment, label: Check alignment, widget: image_gallery, extensions: [.png]}
+      show_result_json: false
+      show_logs: true

@@ -288,6 +288,7 @@ import StepIndicator from '@/components/workflow/StepIndicator.vue'
 import ValidationModal from '@/components/workflow/ValidationModal.vue'
 import {
   getNodeResumeKey,
+  isWorkflowSourceNode,
   persistWorkflowState,
   restoreWorkflowContext,
   shouldRestoreWorkflowContext,
@@ -319,6 +320,7 @@ const hasExcludedSegment = (value) => {
 
 const isExcludedNode = (node) => {
   if (!node) return false
+  if (!isWorkflowSourceNode(node)) return true
   const candidates = [
     node.name,
     node.filename,

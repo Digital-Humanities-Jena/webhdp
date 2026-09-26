@@ -575,6 +575,29 @@ MESH_OPTIMIZATION_PIPELINE_DEFINITION = {
     ],
 }
 
+GEOREFERENCING_PIPELINE_ID = "model_georeferencing"
+GEOREFERENCING_PIPELINE_DEFINITION = {
+    "identifier": GEOREFERENCING_PIPELINE_ID,
+    "name": "3D Georeferencing & Preview",
+    "description": "Align each static GLB to one reference GeoTIFF in its upload bundle on an HPC GPU, then render previews. Download the coordinate report and review the alignment overlay. Absolute elevation is not assigned; originals are preserved.",
+    "status": "active", "modality": "3D Model", "processingMode": "root", "version": "1.0.0",
+    "tags": ["3d", "hpc", "georeferencing", "preview"],
+    "steps": [
+        {"id": "georeferencer", "component_ref": "georeferencer", "name": "Align model to reference",
+         "description": "Match the model footprint against a supplied orthophoto and check alignment quality.",
+         "execution_profile_ref": "hpc_singularity", "scope": "record", "enabled": True,
+         "input_bindings": [{"kind": "input", "target": "input_file", "type": "pipeline_source_file"},
+                            {"kind": "input", "target": "reference_files", "type": "record_source_files"}],
+         "parameters": {}},
+        {"id": "fast_renderer", "component_ref": "fast_renderer", "name": "Preview aligned model",
+         "description": "Render the aligned GLB using the active HPC allocation.",
+         "execution_profile_ref": "builtin_default", "scope": "record", "enabled": True,
+         "input_bindings": [{"kind": "input", "target": "input_files", "type": "artifact_file",
+                             "source_step": "georeferencer", "source_output": "georeferenced_model"}],
+         "parameters": {"preset": "medium", "angle-iteration": 5}},
+    ],
+}
+
 OPTIONAL_3D_PIPELINE_DEFINITIONS = {
     THREE_D_PREPUBLICATION_ANALYSIS_PIPELINE_ID: THREE_D_PREPUBLICATION_ANALYSIS_PIPELINE_DEFINITION,
     THREE_D_PUBLICATION_DERIVATIVES_PIPELINE_ID: THREE_D_PUBLICATION_DERIVATIVES_PIPELINE_DEFINITION,

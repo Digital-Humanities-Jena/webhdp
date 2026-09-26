@@ -271,7 +271,7 @@
                   <div class="text-right text-xs text-slate-500">
                     <p>{{ recordFileStatusLabel(file.upload_status || file.status || 'pending') }}</p>
                     <p v-if="file.pipeline_source || file.step_source">{{ file.pipeline_source || 'unknown' }} / {{ file.step_source || 'unknown' }}</p>
-                    <button v-if="file.absolute_path && ['mesh_optimizer', 'fast_renderer'].includes(file.pipeline_source)"
+                    <button v-if="file.absolute_path && ['mesh_optimizer', 'georeferencer', 'fast_renderer'].includes(file.pipeline_source)"
                       type="button" :disabled="!!downloadingFile" class="mt-2 text-indigo-700 underline disabled:opacity-50"
                       @click="downloadGeneratedFile(file)">{{ downloadingFile === file.absolute_path ? 'Downloading…' : 'Download file' }}</button>
                   </div>

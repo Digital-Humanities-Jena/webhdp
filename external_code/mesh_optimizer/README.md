@@ -10,9 +10,13 @@ After processing, open the session's record details and use **Download file** in
 
 Use a self-contained GLB 2.0 with embedded textures. Animated models, skins, external dependencies and malformed containers are rejected before processing. Other formats should first be exported as static GLB.
 
-The standard workflow preserves existing UVs and creates bake UVs for material groups without coordinates (`--skip_remesh` upstream), decimates geometry, bakes textures and exports a Draco-compressed GLB. The selected detail level targets 25,000 / 100,000 / 200,000 faces per material group, subject to upstream's geometric error limit. Small inputs may grow because textures are rebaked. The report records input/output size, mesh count, and embedded image count. Remeshing and PartUV reconstruction are not exposed in the standard component controls.
+The standard workflow preserves UV sets, vertex colors, authored normals, and imported material graphs (`--skip_remesh` upstream). Blender reduces geometry and resizes embedded images to the requested maximum dimension without upscaling or changing their aspect ratio, then exports a Draco-compressed GLB with tangents. Retaining materials avoids baking failures for metallic/alpha textures and prevents overlapping UVs, unlit materials, and emission from changing appearance. The intermediate geometry stays in memory because OBJ cannot represent all these attributes.
 
-Texture bake failures, missing outputs, incomplete GLB containers and loss of all embedded textures fail the component. A failed optimizer cannot silently fall back to rendering the original. Retries and identically named records receive separate output directories.
+The detail levels target 25,000 / 100,000 / 200,000 faces per material group. If the upstream reduction exceeds the error limit when checking vertices against surfaces in both directions, the preceding geometry is retained. This is a vertex-to-surface safeguard, not a mathematical guarantee over every point of both surfaces. The report records retained/reduced groups and file statistics. Small inputs may grow because of export overhead. Remeshing and PartUV reconstruction are not exposed.
+
+Missing outputs, invalid buffer/accessor boundaries, invalid scene references, unsupported extensions, degenerate meshes and missing textures fail the component. A failed optimizer cannot silently fall back to rendering the original. Retries and identically named records receive separate output directories. The preflight is deliberately bounded; use the Khronos glTF Validator for a complete format-conformance check.
+
+Component `1.0.1` contains these robustness changes. It needs a **new immutable SIF**; do not replace an installed `1.0.0` image in place. See [validation](validation/README.md) for the repeatable validation procedure and tested cases.
 
 ## Build and install
 
@@ -20,7 +24,7 @@ Build on a Linux HPC compute node with Singularity or Apptainer, Python 3.11+, G
 
 1. Obtain the upstream runtime from `docker://3domfbk/mesh-optimizer:30122025` using `singularity pull`. Record and independently verify its SHA-256 before building. The tested runtime SIF has SHA-256 `885329ddb0a2648e774e40c624a5d066cc2ec2e506f32886a707c2fd6790fd6e`. SIF metadata can make independently converted images have different checksums.
 2. Obtain `model_objaverse.ckpt` from the upstream repository's documented checkpoint location. The builder requires SHA-256 `463efc8a3afd3913142aa025e0125c00f16ef452b8de6a132ebe32bbe7877ee4`.
-3. Run `python3 build_sif.py --base-image /path/runtime.sif --base-sha256 TRUSTED_SHA256 --checkpoint /path/model_objaverse.ckpt --scratch /scratch --output /path/webhdp-mesh-optimizer-1.0.0.sif`. This uses an unprivileged sandbox conversion; it does not require root or fakeroot.
+3. Run `python3 build_sif.py --base-image /path/runtime.sif --base-sha256 TRUSTED_SHA256 --checkpoint /path/model_objaverse.ckpt --scratch /scratch --output /path/webhdp-mesh-optimizer-1.0.1.sif`. This uses an unprivileged sandbox conversion; it does not require root or fakeroot.
 4. In **HDP Components**, install `component.yaml` with the absolute remote SIF path and the resulting checksum. Installation pins the artifact. Do not overwrite an installed version; build and register a new version for changes.
 5. Restart WebHDP's backend and worker after initial installation to seed the ready pipeline. It is offered only once the component has a verified SIF checksum. Select **Mesh Optimization & Preview**, then submit the selected GLB files with an active HPC allocation.
 

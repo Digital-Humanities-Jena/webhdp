@@ -104,7 +104,10 @@ async function seedReview(page: Page) {
       selectedPipeline: { identifier: 'render', name: 'Render thumbnails' }, isBatchMode: false,
     }))
   })
-  const pipeline = { identifier: 'render', name: 'Render thumbnails', description: 'Create previews and linked metadata for your model.', version: '1.0', config: { steps: [{ id: 'fast_renderer', name: 'Render thumbnails', enabled: true }] } }
+  const pipeline = { identifier: 'render', name: 'Render thumbnails', description: 'Create previews and linked metadata for your model.', version: '1.0', config: { steps: [
+    { id: 'fast_renderer', name: 'Render thumbnails', enabled: true },
+    { id: 'zenodo_upload', component_ref: 'zenodo_upload', name: 'Upload to Zenodo', enabled: true },
+  ] } }
   await page.route(apiV2('/pipelines'), route => fulfillJson(route, { data: { pipelines: [pipeline] } }))
   await page.route(apiV2('/pipelines/render'), route => fulfillJson(route, { data: { pipeline } }))
   await page.route(apiV1('/sessions/99'), route => fulfillJson(route, { data: { session: {

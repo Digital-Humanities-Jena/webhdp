@@ -97,6 +97,12 @@ export const getNodeResumeKey = (node) => {
   return String(node.file_id || node.absolute_path || node.path || node.relative_path || node.name || '').trim()
 }
 
+export const isWorkflowSourceNode = (node) => node?.file_type !== 'generated'
+
+export const filterWorkflowSourceNodes = (nodes = []) => nodes
+  .filter(isWorkflowSourceNode)
+  .map(node => ({ ...node, children: filterWorkflowSourceNodes(node.children || []) }))
+
 export const recordFileStatusLabel = (status) => ({
   validation_pending: 'Validation required',
   validation_pending_uploaded: 'Uploaded; revalidation required',
@@ -241,7 +247,7 @@ export const restoreWorkflowContext = async (
   const [stateResponse, nodesResponse] = await Promise.all(requests)
   const statePayload = stateResponse?.data || {}
   const workflowState = statePayload.state || {}
-  const nodes = nodesResponse?.data?.nodes || []
+  const nodes = filterWorkflowSourceNodes(nodesResponse?.data?.nodes || [])
 
   workflowStore.setSessionId(parsedSessionId)
   workflowStore.setBatchMode(workflowState.is_batch_mode === true)

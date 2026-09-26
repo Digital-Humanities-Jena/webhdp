@@ -39,6 +39,13 @@ The HPC-Link renderer path supports authenticated service accounts, allocation
 preflight, dependency staging, and downloads restricted to allocation outputs.
 Each deployment must validate its scheduler, GPU driver, and Blender runtime.
 
+Verified installations can additionally enable **Mesh Optimization & Preview**
+and **3D Georeferencing & Preview**. The latter pairs each static GLB with a
+reference GeoTIFF, produces coordinate and alignment reports, and renders the
+placed model. See the [3DGeoRef component guide](external_code/georeferencer/README.md)
+for input preparation, installation and accuracy limits. Automatic external
+geolocation services are not enabled by this integration.
+
 Models whose dependencies span directories include a `<model>.sources.zip` in
 their Zenodo draft. Extract that archive to restore the original paths before
 opening the model locally. It preserves parent-directory references and files

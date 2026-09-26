@@ -1,0 +1,90 @@
+{
+  "repository": "KhronosGroup/glTF-Sample-Assets",
+  "commit": "c6a6bd13ab2b3c685c7903d03561b8a9392f38b8",
+  "models": [
+    {
+      "name": "Box",
+      "url": "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/c6a6bd13ab2b3c685c7903d03561b8a9392f38b8/Models/Box/glTF-Binary/Box.glb",
+      "sha256": "ed52f7192b8311d700ac0ce80644e3852cd01537e4d62241b9acba023da3d54e",
+      "bytes": 1664
+    },
+    {
+      "name": "BoxInterleaved",
+      "url": "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/c6a6bd13ab2b3c685c7903d03561b8a9392f38b8/Models/BoxInterleaved/glTF-Binary/BoxInterleaved.glb",
+      "sha256": "b2ae631f118f1d13f829cdf9d9dc0fe7cb582de20b8c51d17f81f77a1cbf290c",
+      "bytes": 1632
+    },
+    {
+      "name": "BoxVertexColors",
+      "url": "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/c6a6bd13ab2b3c685c7903d03561b8a9392f38b8/Models/BoxVertexColors/glTF-Binary/BoxVertexColors.glb",
+      "sha256": "9c48227f33b0ba2fbcf23b98ebf60d1c8ae0c6e6c5281e0aa3cc58affee10382",
+      "bytes": 1924
+    },
+    {
+      "name": "BoxTexturedNonPowerOfTwo",
+      "url": "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/c6a6bd13ab2b3c685c7903d03561b8a9392f38b8/Models/BoxTexturedNonPowerOfTwo/glTF-Binary/BoxTexturedNonPowerOfTwo.glb",
+      "sha256": "624621d7885bb418ac64e99c994b45634a32c87caeefae67b06c5c0531c57115",
+      "bytes": 4696
+    },
+    {
+      "name": "Avocado",
+      "url": "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/c6a6bd13ab2b3c685c7903d03561b8a9392f38b8/Models/Avocado/glTF-Binary/Avocado.glb",
+      "sha256": "ccc9c3ce56423720b09399c2351537207cd5a65f859f9e6e2f30922762f3abd4",
+      "bytes": 8110040
+    },
+    {
+      "name": "DamagedHelmet",
+      "url": "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/c6a6bd13ab2b3c685c7903d03561b8a9392f38b8/Models/DamagedHelmet/glTF-Binary/DamagedHelmet.glb",
+      "sha256": "a1e3b04de97b11de564ce6e53b95f02954a297f0008183ac63a4f5974f6b32d8",
+      "bytes": 3773916
+    },
+    {
+      "name": "MultiUVTest",
+      "url": "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/c6a6bd13ab2b3c685c7903d03561b8a9392f38b8/Models/MultiUVTest/glTF-Binary/MultiUVTest.glb",
+      "sha256": "f5352cced402b595ab7f1e4971852fbf33cef8d22351e45caafb072e31d5008a",
+      "bytes": 43004
+    },
+    {
+      "name": "AlphaBlendModeTest",
+      "url": "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/c6a6bd13ab2b3c685c7903d03561b8a9392f38b8/Models/AlphaBlendModeTest/glTF-Binary/AlphaBlendModeTest.glb",
+      "sha256": "37c3577d143071b42dd46e9d942b157837eb25c6340112171d7faecaa987b14e",
+      "bytes": 2978812
+    },
+    {
+      "name": "NegativeScaleTest",
+      "url": "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/c6a6bd13ab2b3c685c7903d03561b8a9392f38b8/Models/NegativeScaleTest/glTF-Binary/NegativeScaleTest.glb",
+      "sha256": "ea8c41fd0630f03adcf7a5c06bf86d7b850fa510b6f07cc51eb1fccc205a50f2",
+      "bytes": 62568
+    },
+    {
+      "name": "NormalTangentMirrorTest",
+      "url": "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/c6a6bd13ab2b3c685c7903d03561b8a9392f38b8/Models/NormalTangentMirrorTest/glTF-Binary/NormalTangentMirrorTest.glb",
+      "sha256": "31ce5f3c873fc55531a17ccacf001e3d1d482a508695aa826fa79cc196e0ce78",
+      "bytes": 1567084
+    },
+    {
+      "name": "UnlitTest",
+      "url": "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/c6a6bd13ab2b3c685c7903d03561b8a9392f38b8/Models/UnlitTest/glTF-Binary/UnlitTest.glb",
+      "sha256": "e07b68c6fd9fbf73d372c610a681b89d6b013bdd1a506e46a411df82210a2481",
+      "bytes": 3992
+    },
+    {
+      "name": "EmissiveStrengthTest",
+      "url": "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/c6a6bd13ab2b3c685c7903d03561b8a9392f38b8/Models/EmissiveStrengthTest/glTF-Binary/EmissiveStrengthTest.glb",
+      "sha256": "074898ec4c3636230faffe0cacac7403c3f6135db61f943da28ffaa88ca2a39f",
+      "bytes": 10668
+    },
+    {
+      "name": "TextureTransformMultiTest",
+      "url": "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/c6a6bd13ab2b3c685c7903d03561b8a9392f38b8/Models/TextureTransformMultiTest/glTF-Binary/TextureTransformMultiTest.glb",
+      "sha256": "569aedb53822d5721e7e06af5983348683d4b2ffb1d469338ad4f02bf6a74911",
+      "bytes": 388264
+    },
+    {
+      "name": "BoxAnimated",
+      "url": "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/c6a6bd13ab2b3c685c7903d03561b8a9392f38b8/Models/BoxAnimated/glTF-Binary/BoxAnimated.glb",
+      "sha256": "ad0d18d9a21df0d7c2bd3890e60ce69d60d39a55d9b82bacea7e77ac9e583839",
+      "bytes": 11944
+    }
+  ]
+}
