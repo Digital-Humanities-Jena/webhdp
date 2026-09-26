@@ -31,6 +31,7 @@ from exceptions import SecurityError, ValidationError
 from routes.access_helpers import get_current_user_from_jwt, get_session_with_permission
 from security import resolve_child_path, safe_extract_zip, sanitize_upload_filename
 from services.audit_service import list_audit_events, record_audit_event
+from services.directory_upload_recovery import directory_upload_request
 from services.notification_service import notify_admins
 from services.institution_service import InstitutionService
 from services.hdpc_import_service import import_hdpc_for_user
@@ -926,6 +927,8 @@ def _get_upload_submission_context(user_id: int, submit_token: str) -> dict | No
         return None
 
     _, session_row = token_row
+    from services.directory_upload_recovery import reconcile_preparing_upload
+    reconcile_preparing_upload(user_id, submit_token, session_row.id)
     task_meta = (
         UserMetadata.query.filter_by(session_id=session_row.id, field_name=UPLOAD_TASK_ID_FIELD)
         .order_by(UserMetadata.created_at.desc())
@@ -934,6 +937,8 @@ def _get_upload_submission_context(user_id: int, submit_token: str) -> dict | No
     task_id = (task_meta.field_value or "").strip() if task_meta and task_meta.field_value else None
     if task_id == "":
         task_id = None
+    progress_meta = UserMetadata.query.filter_by(session_id=session_row.id, field_name=UPLOAD_PROGRESS_FIELD).first()
+    progress = _parse_json(progress_meta.field_value, {}) if progress_meta else {}
 
     return {
         "submit_token": submit_token,
@@ -941,6 +946,7 @@ def _get_upload_submission_context(user_id: int, submit_token: str) -> dict | No
         "task_id": task_id,
         "session_status": normalize_session_state(session_row.status),
         "legacy_session_status": session_row.status,
+        "dispatch_cancelled": bool(progress.get('dispatch_cancelled')),
         "created_at": session_row.created_at.isoformat() if session_row.created_at else None,
         "updated_at": session_row.updated_at.isoformat() if session_row.updated_at else None,
     }
@@ -1206,6 +1212,7 @@ def _normalize_upload_progress_payload(session_row: DBSession, metadata_fields: 
 
     return {
         "current_stage": current_stage,
+        "dispatch_cancelled": bool(progress.get('dispatch_cancelled')),
         "status_message": status_message,
         "current_file_name": progress.get("current_file_name"),
         "current_index": int(progress.get("current_index", processed_count) or 0),
@@ -1279,6 +1286,7 @@ def _build_upload_recovery_payload(context: dict, include_task_state: bool = Fal
         "task_id": context.get("task_id"),
         "session_status": context.get("session_status"),
         "legacy_session_status": context.get("legacy_session_status"),
+        "dispatch_cancelled": bool(context.get('dispatch_cancelled')),
         "created_at": context.get("created_at"),
         "updated_at": context.get("updated_at"),
         "reused": True,
@@ -2432,6 +2440,7 @@ def list_local_msf():
 
 @session_bp.route("/directory", methods=["POST"])
 @jwt_required()
+@directory_upload_request
 def start_session_directory():
     """
     Start a session by uploading a ZIP file containing model files with MSF (Metadata Source File).
@@ -2985,14 +2994,7 @@ def start_session_directory():
 
         # Start Coordinator Task
         from tasks import start_upload_coordinator
-        task = start_upload_coordinator.delay(
-            session_id=db_session_id,
-            zip_path=original_zip_path,
-            msf_path=msf_path,
-            storage_mode=storage_mode,
-            msf_parse_options=msf_parse_options,
-            input_directory_path=input_directory_path  # Pass the resolved directory path
-        )
+        task_id = str(uuid.uuid4())
 
         metadata_persisted = True
         try:
@@ -3009,7 +3011,7 @@ def start_session_directory():
             if submit_token:
                 _upsert_session_metadata(db_session_id, UPLOAD_SUBMIT_TOKEN_FIELD, submit_token)
             _upsert_session_metadata(db_session_id, UPLOAD_STORAGE_MODE_FIELD, str(storage_mode))
-            _upsert_session_metadata(db_session_id, UPLOAD_TASK_ID_FIELD, task.id)
+            _upsert_session_metadata(db_session_id, UPLOAD_TASK_ID_FIELD, task_id)
             _upsert_session_metadata(db_session_id, UPLOAD_PROGRESS_FIELD, json.dumps(queued_progress))
             db.session.commit()
         except Exception as meta_exc:
@@ -3021,11 +3023,27 @@ def start_session_directory():
                 meta_exc,
                 exc_info=True,
             )
+            raise
+
+        try:
+            start_upload_coordinator.apply_async(kwargs={
+                'session_id': db_session_id, 'zip_path': original_zip_path,
+                'msf_path': msf_path, 'storage_mode': storage_mode,
+                'msf_parse_options': msf_parse_options, 'input_directory_path': input_directory_path,
+            }, task_id=task_id)
+            from services.directory_upload_recovery import mark_upload_dispatched
+            mark_upload_dispatched(db_session_id)
+        except Exception:
+            from services.directory_upload_recovery import cancel_unstarted_upload
+            cancel_unstarted_upload(db_session_id)
+            return APIResponse.accepted(data={
+                'task_id': task_id, 'session_id': db_session_id, 'submit_token': submit_token,
+            }, message='Check this upload’s status before retrying')
 
         return APIResponse.accepted(
             message="Upload processing started in background.",
             data={
-                "task_id": task.id,
+                "task_id": task_id,
                 "session_id": db_session_id,
                 "submit_token": submit_token,
                 "reused": False,
@@ -3077,15 +3095,14 @@ def get_task_status(task_id):
             'status': 'Pending...'
         }
     elif task.state != 'FAILURE':
+        info = task.info if isinstance(task.info, dict) else {}
         response = {
             'state': task.state,
-            'progress': task.info.get('progress', 0) if task.info else 0,
-            'status': task.info.get('status', '') if task.info else '',
-            'error': task.info.get('error', '') if task.info else None,
-            'result': task.info.get('result', '') if 'result' in task.info else None
+            'progress': info.get('progress', 0),
+            'status': info.get('status', ''),
+            'error': info.get('error'),
+            'result': info.get('result'),
         }
-        if 'result' in task.info:
-            response['result'] = task.info['result']
     else:
         # something went wrong in the background job
         response = {
@@ -4799,7 +4816,7 @@ def record_lod_recovery(session_id, local_record_id):
     """Inspect or retry local metadata generation without remote side effects."""
     from pathlib import Path
     from contextlib import nullcontext
-    from services.lod_artifact_service import generate_artifacts, suspend_previous_artifacts, FILENAMES, complete_format_states, record_lod_readiness, policy_error
+    from services.lod_artifact_service import generate_artifacts, suspend_previous_artifacts, FILENAMES, load_record_manifest, record_lod_readiness, policy_error, record_context_changed, current_record_context
     from services.lod_reliability import digest
     from flask import send_file
     import io
@@ -4812,14 +4829,16 @@ def record_lod_recovery(session_id, local_record_id):
     if not session.hdpc_path:
         return APIResponse.validation_error('The session project is unavailable')
     root = Path(session.hdpc_path).resolve().parent / 'outputs' / f'record-{local_record_id}'
-    paths = list(root.glob('*/lod-generation.json'))
-    if not paths:
-        return APIResponse.success(data={'formats': {}, 'available': False})
-    if len(paths) != 1 or not paths[0].resolve().is_relative_to(root.resolve()):
-        return APIResponse.validation_error('Ambiguous metadata recovery state')
     with session_pipeline_lock(session.hdpc_path) if request.method == 'POST' else nullcontext():
-        with paths[0].open(encoding='utf-8') as stream:
-            manifest = complete_format_states(json.load(stream))
+        try:
+            manifest_path, manifest = load_record_manifest(session.hdpc_path, local_record_id)
+        except (OSError, ValueError, KeyError, TypeError, AttributeError):
+            return APIResponse.validation_error('The saved metadata report is unreadable. Start a new pipeline run to regenerate metadata.')
+        if not manifest:
+            if request.method == 'POST' or request.args.get('format'):
+                return APIResponse.validation_error('The saved metadata report is missing. Start a new pipeline run to regenerate metadata.')
+            return APIResponse.success(data={'formats': {}, 'available': False, 'readiness': record_lod_readiness(session.hdpc_path, local_record_id)})
+        record_changed = record_context_changed(manifest, session.hdpc_path, local_record_id)
         requested_format = request.args.get('format')
         if request.method == 'GET' and requested_format:
             status = (manifest.get('formats') or {}).get(requested_format) or {}
@@ -4827,7 +4846,9 @@ def record_lod_recovery(session_id, local_record_id):
                 return APIResponse.validation_error('Only validated metadata exports can be downloaded')
             if policy_error(manifest, requested_format, status):
                 return APIResponse.validation_error('Validation requirements changed. Revalidate metadata before downloading.')
-            artifact = paths[0].parent / FILENAMES[requested_format]
+            if record_changed:
+                return APIResponse.validation_error('The Zenodo draft changed. Regenerate metadata before downloading.')
+            artifact = manifest_path.parent / FILENAMES[requested_format]
             if not artifact.resolve().is_relative_to(root.resolve()):
                 return APIResponse.validation_error('The metadata export is outside this record')
             try:
@@ -4848,14 +4869,22 @@ def record_lod_recovery(session_id, local_record_id):
                 result = add_local_source_files(session.hdpc_path, absolute_file_paths=[path], record_id_to_associate=local_record_id, pipeline_name='lod_generation', step_name='metadata_generator', validation_reports={path: validation})
                 if not result.get('success') or result.get('errors_count'):
                     raise ValueError('Could not register the validated artifact')
-            _, manifest = generate_artifacts(str(paths[0].parent), manifest['request'], register, hdpc_path=session.hdpc_path, record_id=local_record_id)
+            try:
+                specification = {**manifest['request'], 'record': current_record_context(session.hdpc_path, local_record_id) if record_changed else manifest['request']['record']}
+                _, manifest = generate_artifacts(str(manifest_path.parent), specification, register, hdpc_path=session.hdpc_path, record_id=local_record_id)
+            except ValueError as exc:
+                return APIResponse.validation_error(str(exc))
+            record_changed = False
     for standard, status in manifest['formats'].items():
         if status.get('status') == 'generated' and standard in FILENAMES:
+            if record_changed:
+                status.update(success=False, status='regeneration_required', error='The Zenodo draft changed. Regenerate metadata to update its record links.')
+                continue
             issue = policy_error(manifest, standard, status)
             if issue:
                 status.update(success=False, status='revalidation_required', error=issue)
                 continue
-            artifact = paths[0].parent / FILENAMES[standard]
+            artifact = manifest_path.parent / FILENAMES[standard]
             try:
                 intact = artifact.resolve().is_relative_to(root.resolve()) and digest(artifact.read_bytes()) == status.get('sha256')
             except OSError:

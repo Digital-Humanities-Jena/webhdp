@@ -12,6 +12,57 @@ from services.lod_reliability import FORMATS, assert_public_document, atomic_wri
 FILENAMES = dict(edm='edm.xml', iiif='iiif.json', mets='mets.xml', cidoc_crm='cidoc-crm.xml', jsonld='metadata.jsonld')
 
 
+def current_record_context(hdpc_path, record_id):
+    from services.hdpc_schema_service import connect_hdpc
+    from services.edm_service import EdmService
+    with connect_hdpc(hdpc_path) as conn:
+        row = conn.execute('SELECT zenodo_record_id, record_metadata_json, is_sandbox, zenodo_doi FROM zenodo_records WHERE record_id = ?', (int(record_id),)).fetchone()
+    if not row or not row[0]:
+        raise ValueError('Create a Zenodo draft before regenerating metadata.')
+    payload = json.loads(row[1] or '{}')
+    service = EdmService()
+    # Construct the public origin from the saved environment; never reuse an
+    # authenticated draft link in public metadata.
+    public = {'id': row[0], 'links': {'html': 'https://sandbox.zenodo.org' if row[2] else 'https://zenodo.org'}}
+    reserved = (payload.get('metadata') or {}).get('prereserve_doi') or {}
+    return {'id': str(row[0]), 'doi': payload.get('doi') or reserved.get('doi') or row[3] or None,
+            'links': {'html': service.get_record_html_url(public)},
+            'metadata': {'prereserve_doi': reserved},
+            'files': [{'key': item.get('key') or item.get('filename'), 'size': item.get('size', 0)}
+                      for item in service._normalize_zenodo_files(payload)]}
+
+
+def record_context_changed(manifest, hdpc_path, record_id):
+    def identity(record):
+        from services.edm_service import EdmService
+        return (str(record.get('id') or ''), record.get('doi') or (record.get('metadata') or {}).get('prereserve_doi', {}).get('doi') or '',
+                EdmService().get_record_html_url(record))
+    try:
+        return identity(manifest['request']['record']) != identity(current_record_context(hdpc_path, record_id))
+    except (ValueError, KeyError, TypeError, AttributeError):
+        return True
+
+
+def load_record_manifest(hdpc_path, record_id):
+    """Read private recovery state even if the output directory was lost."""
+    from services.hdpc_schema_service import connect_hdpc, table_exists
+    root = Path(hdpc_path).resolve().parent / 'outputs' / f'record-{int(record_id)}'
+    with connect_hdpc(hdpc_path) as conn:
+        row = conn.execute("SELECT payload_json FROM zenodo_record_snapshots WHERE record_id = ? AND snapshot_stage = 'lod_generation' ORDER BY snapshot_id DESC LIMIT 1", (int(record_id),)).fetchone() if table_exists(conn.cursor(), 'zenodo_record_snapshots') else None
+    if row:
+        saved = json.loads(row[0])
+        path = root / saved['directory'] / 'lod-generation.json'
+        if not path.resolve().is_relative_to(root) or path.parent == root:
+            raise ValueError('The metadata report is outside this record')
+        return path, complete_format_states(saved['manifest'])
+    paths = list(root.glob('*/lod-generation.json'))
+    if not paths:
+        return None, None
+    if len(paths) != 1 or not paths[0].resolve().is_relative_to(root):
+        raise ValueError('Ambiguous metadata report')
+    return paths[0], complete_format_states(json.loads(paths[0].read_text(encoding='utf-8')))
+
+
 def validation_policy():
     keys = ('LOCAL_EDM_VALIDATOR_REQUIRED', 'ENABLE_LOCAL_EDM_VALIDATION', 'ENABLE_METIS_VALIDATION',
             'LOCAL_EDM_VALIDATOR_URL', 'METIS_SANDBOX_URL', 'ENABLE_XSD_VALIDATION')
@@ -49,7 +100,13 @@ def reconcile_disabled_formats(hdpc_path, record_id, options):
 
 def complete_format_states(manifest):
     """Unattempted formats remain visible and retryable after an interruption."""
+    if not isinstance(manifest, dict) or not isinstance(manifest.get('request'), dict):
+        raise ValueError('Invalid metadata report')
+    if not isinstance(manifest['request'].get('record'), dict) or not isinstance(manifest['request'].get('options', {}), dict):
+        raise ValueError('Invalid metadata generation settings')
     formats = manifest.setdefault('formats', {})
+    if not isinstance(formats, dict) or any(not isinstance(status, dict) for status in formats.values()):
+        raise ValueError('Invalid metadata format report')
     for standard in FORMATS:
         if standard not in formats:
             enabled = (manifest.get('request', {}).get('options') or {}).get(f'generate_{standard}', True)
@@ -61,33 +118,41 @@ def record_lod_readiness(hdpc_path, record_id):
     """Current artifact readiness, independent of historical pipeline results."""
     from services.hdpc_schema_service import connect_hdpc
     root = Path(hdpc_path).resolve().parent / 'outputs' / f'record-{int(record_id)}'
-    paths = list(root.glob('*/lod-generation.json'))
     blocked_formats = []
     revalidation_required = False
-    if paths:
-        try:
-            if len(paths) != 1 or not paths[0].resolve().is_relative_to(root):
-                raise ValueError('Ambiguous metadata report')
-            manifest = complete_format_states(json.loads(paths[0].read_text(encoding='utf-8')))
+    record_changed = False
+    manifest = None
+    recovery_message = None
+    try:
+        path, manifest = load_record_manifest(hdpc_path, record_id)
+        if manifest:
+            record_changed = record_context_changed(manifest, hdpc_path, record_id)
             for standard, status in manifest['formats'].items():
                 if status.get('status') == 'skipped_disabled':
                     continue
                 intact = False
                 if standard in FILENAMES and status.get('success') and (status.get('validation') or {}).get('valid') is True:
-                    artifact = paths[0].parent / FILENAMES[standard]
+                    artifact = path.parent / FILENAMES[standard]
                     intact = artifact.resolve().is_relative_to(root) and artifact.is_file() and digest(artifact.read_bytes()) == status.get('sha256')
                 policy_issue = policy_error(manifest, standard, status)
                 revalidation_required = revalidation_required or bool(policy_issue)
-                if policy_issue or (not intact and manifest.get('request', {}).get('lod_policy', 'required') == 'required'):
+                if record_changed or policy_issue or (not intact and manifest.get('request', {}).get('lod_policy', 'required') == 'required'):
                     blocked_formats.append(standard)
-        except (OSError, ValueError, TypeError, AttributeError):
-            blocked_formats.append('metadata report')
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        blocked_formats.append('metadata report')
+        recovery_message = 'The saved metadata report is unreadable. Start a new pipeline run to regenerate metadata.'
     with connect_hdpc(hdpc_path) as conn:
-        rows = conn.execute('SELECT upload_status FROM record_files_map WHERE record_id = ?', (int(record_id),)).fetchall()
+        rows = conn.execute('SELECT rfm.upload_status, sf.pipeline_source FROM record_files_map rfm LEFT JOIN source_files sf ON sf.file_id = rfm.file_id WHERE rfm.record_id = ?', (int(record_id),)).fetchall()
+    if not manifest and any(row[1] == 'lod_generation' and row[0] != 'disabled' for row in rows):
+        blocked_formats.append('metadata report')
+        recovery_message = recovery_message or 'The saved metadata report is missing. Start a new pipeline run to regenerate metadata.'
+    if record_changed:
+        recovery_message = 'The Zenodo draft changed. Regenerate metadata to update its record links before continuing.'
     blocked_files = sum(str(row[0]).startswith('validation_pending') for row in rows)
     pending_files = sum(row[0] not in ('uploaded', 'disabled') and not str(row[0]).startswith('validation_pending') for row in rows)
     ready = not blocked_formats and not blocked_files
-    return {'available': bool(paths), 'ready': ready, 'blocked_formats': blocked_formats,
+    return {'available': bool(manifest), 'ready': ready, 'blocked_formats': list(dict.fromkeys(blocked_formats)),
+            'record_changed': record_changed, 'recovery_message': recovery_message,
             'revalidation_required': revalidation_required, 'blocked_file_count': blocked_files, 'pending_upload_count': pending_files,
             'state': 'blocked' if not ready else 'upload_required' if pending_files else 'uploaded'}
 
@@ -97,17 +162,30 @@ def generate_artifacts(output_dir, specification, register, progress=None, *, hd
     current_policy = validation_policy()
     if hdpc_path is not None and record_id is not None:
         reconcile_disabled_formats(hdpc_path, record_id, specification['options'])
+    def save_manifest(manifest):
+        if hdpc_path is not None and record_id is not None:
+            from services.hdpc_schema_service import connect_hdpc
+            root = Path(hdpc_path).resolve().parent / 'outputs' / f'record-{int(record_id)}'
+            directory = Path(output_dir).resolve().relative_to(root)
+            if not directory.parts:
+                raise ValueError('Metadata outputs need a directory within this record')
+            with connect_hdpc(hdpc_path) as conn:
+                conn.execute("DELETE FROM zenodo_record_snapshots WHERE record_id = ? AND snapshot_stage = 'lod_generation'", (int(record_id),))
+                conn.execute("INSERT INTO zenodo_record_snapshots (record_id, snapshot_stage, payload_json) VALUES (?, 'lod_generation', ?)",
+                             (int(record_id), json.dumps({'directory': str(directory), 'manifest': manifest}, default=str)))
+        atomic_write(manifest_path, json.dumps(manifest, indent=2, default=str))
     fingerprint = digest(json.dumps({'request': specification, 'validation_policy': current_policy}, sort_keys=True, default=str))
     try:
         with open(manifest_path, encoding='utf-8') as stream:
-            previous = json.load(stream)
+            previous = complete_format_states(json.load(stream))
     except (OSError, ValueError):
         previous = {}
-    previous_formats = dict(previous.get('previous_formats') or {}) if previous.get('fingerprint') == fingerprint else {}
+    cached = previous.get('previous_formats')
+    previous_formats = {key: value for key, value in cached.items() if isinstance(value, dict)} if isinstance(cached, dict) and previous.get('fingerprint') == fingerprint else {}
     previous_formats.update({key: value for key, value in (previous.get('formats') or {}).items() if value.get('success')})
     manifest = complete_format_states({'version': 1, 'fingerprint': fingerprint, 'request': specification, 'validation_policy': current_policy, 'formats': {},
                                       'previous_formats': previous_formats if previous.get('fingerprint') == fingerprint else {}})
-    atomic_write(manifest_path, json.dumps(manifest, indent=2, default=str))
+    save_manifest(manifest)
     outputs = {}
     options = specification['options']
     with pinned_templates(specification.get('templates')):
@@ -132,7 +210,7 @@ def generate_artifacts(output_dir, specification, register, progress=None, *, hd
                             register(path, old['validation'])
                             status.update(old, reused=True)
                             outputs[standard] = path
-                            atomic_write(manifest_path, json.dumps(manifest, indent=2, default=str))
+                            save_manifest(manifest)
                             continue
                     metadata = specification['metadata'][standard]
                     kwargs = dict(main_file_key=specification['main_file_key'], additional_files=specification['additional_files'])
@@ -171,9 +249,9 @@ def generate_artifacts(output_dir, specification, register, progress=None, *, hd
                     outputs[standard] = path
                 except Exception as exc:
                     status.update(status='failed', error=str(exc))
-            atomic_write(manifest_path, json.dumps(manifest, indent=2, default=str))
+            save_manifest(manifest)
     # Final snapshot includes every requested format.
-    atomic_write(manifest_path, json.dumps(manifest, indent=2, default=str))
+    save_manifest(manifest)
     if progress:
         try:
             progress(None, len(FORMATS), len(FORMATS))

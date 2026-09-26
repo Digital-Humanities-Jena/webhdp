@@ -178,14 +178,14 @@
             </li>
           </ul>
           <p v-else-if="!lodError && !lodBusy" class="mt-3 text-sm text-slate-500">No metadata generation report is available yet.</p>
-          <p v-if="lodReport?.readiness?.state === 'blocked'" role="status" class="mt-3 text-sm text-amber-800">{{ lodReport.readiness.revalidation_required ? 'Validation requirements changed. Revalidate metadata before continuing.' : 'Metadata needs attention before this record can be uploaded.' }}</p>
+          <p v-if="lodReport?.readiness?.state === 'blocked'" role="status" class="mt-3 text-sm text-amber-800">{{ lodReport.readiness.recovery_message || (lodReport.readiness.revalidation_required ? 'Validation requirements changed. Revalidate metadata before continuing.' : 'Metadata needs attention before this record can be uploaded.') }}</p>
           <p v-else-if="lodReport?.readiness?.state === 'upload_required'" role="status" class="mt-3 text-sm text-slate-700">Required metadata checks passed. {{ lodReport.readiness.pending_upload_count }} file change(s) still need syncing, including any disabled exports.
             <router-link :to="`/sessions/${route.params.sessionId}/records`" class="text-indigo-700 underline">Open record actions</router-link>
           </p>
           <p v-else-if="lodReport?.readiness?.state === 'uploaded'" role="status" class="mt-3 text-sm text-emerald-700">Required metadata checks passed and the local file set is marked uploaded.</p>
           <div class="mt-3 flex flex-wrap gap-3">
             <button type="button" :disabled="lodBusy" class="text-sm text-indigo-700 underline disabled:opacity-50" @click="loadLod(false)">Refresh report</button>
-            <button v-if="lodReport?.available && (lodReport.readiness?.state === 'blocked' || !Object.keys(lodReport.formats || {}).length || Object.values(lodReport.formats).some(item => !item.success))" type="button" :disabled="lodBusy" class="text-sm text-indigo-700 underline disabled:opacity-50" @click="loadLod(true)">{{ lodReport.readiness?.revalidation_required ? 'Revalidate metadata' : 'Retry incomplete formats' }}</button>
+            <button v-if="lodReport?.available && (lodReport.readiness?.state === 'blocked' || !Object.keys(lodReport.formats || {}).length || Object.values(lodReport.formats).some(item => !item.success))" type="button" :disabled="lodBusy" class="text-sm text-indigo-700 underline disabled:opacity-50" @click="loadLod(true)">{{ lodReport.readiness?.record_changed ? 'Regenerate metadata' : lodReport.readiness?.revalidation_required ? 'Revalidate metadata' : 'Retry incomplete formats' }}</button>
             <button v-if="lodReport?.available" type="button" class="text-sm text-indigo-700 underline" @click="downloadLodReport">Download report</button>
           </div>
         </section>

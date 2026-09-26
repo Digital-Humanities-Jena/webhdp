@@ -11,6 +11,7 @@ from collections import defaultdict
 from celery_app import celery
 from flask import current_app
 from services.pipeline_execution_lock import PipelineAlreadyRunning
+from services.directory_upload_recovery import guard_upload_coordinator
 
 from constants import (
     UPLOAD_PROGRESS_FIELD,
@@ -261,6 +262,7 @@ def finalize_session_upload(self, results, session_id):
         return {"status": "failed", "error": str(e)}
 
 @celery.task(bind=True)
+@guard_upload_coordinator
 def start_upload_coordinator(self, session_id, zip_path, msf_path, storage_mode, msf_parse_options=None, input_directory_path=None):
     """
     Coordinator task to initialize a session, scan files, and register upload metadata.

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from services.pipeline_run_recovery import guard_native_run, reconcile_run, process_owner
+from services.pipeline_run_recovery import guard_native_run, guard_run_reservation, reconcile_run, process_owner
 
 import copy
 import hashlib
@@ -991,6 +991,7 @@ class NativePipelineSystemService:
         return _hash_payload(comparable)
 
     @serialize_registry("native-registry")
+    @guard_run_reservation
     def create_pending_run(
         self,
         identifier: str,

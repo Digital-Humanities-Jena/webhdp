@@ -30,6 +30,10 @@ def _enqueue_submission_pipeline_task(*args):
     import json
     run_id = args[-1]
     row = PipelineRun.query.filter_by(public_id=run_id).one()
+    payload = json.loads(row.request_json)
+    payload['_dispatch'].update(task_id=run_id)
+    row.request_json = json.dumps(payload)
+    db.session.commit()
     task = execute_submission_pipeline_task.apply_async(args=args, task_id=run_id)
     db.session.refresh(row)
     payload = json.loads(row.request_json)
@@ -221,12 +225,13 @@ def execute_pipeline_v2(identifier):
                 pending_run["run_id"],
             )
         except Exception:
-            from database.models import PipelineRun, PipelineRunStatus
-            row = PipelineRun.query.filter_by(public_id=pending_run["run_id"]).one()
-            row.status = PipelineRunStatus.FAILED
-            row.error_message = "Could not enqueue this run. Retry with a new run after the worker connection is restored."
-            db.session.commit()
-            raise
+            from services.pipeline_run_recovery import resolve_dispatch_failure
+            # Broker acceptance and its acknowledgement are separate events.
+            # Reconnect if a worker already started; otherwise cancel the saved
+            # run under its execution lock so a late delivery cannot run it.
+            resolve_dispatch_failure(pending_run["run_id"])
+            return APIResponse.accepted(data={"run_id": pending_run["run_id"]},
+                                        message="Check this run's status before retrying")
         return APIResponse.accepted(
             data={
                 "run_id": pending_run["run_id"],

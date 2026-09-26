@@ -13,6 +13,23 @@ async function shell(page: Page) {
 }
 
 for (const width of [375, 1280]) {
+  test(`cancelled batch upload offers review and explicit restart at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 1000 })
+    await shell(page)
+    await page.evaluate(() => sessionStorage.setItem('directory_upload_state:1', JSON.stringify({ submit_token: 'cancelled-batch' })))
+    await page.route(apiV1('/sessions/directory/recover'), route => fulfillJson(route, { data: {
+      session_id: 42, session_status: 'failed', dispatch_cancelled: true,
+    } }))
+    await page.goto('/workflow/upload')
+    await expect(page.getByTestId('upload-error')).toContainText('cancelled before processing')
+    await expect(page.getByRole('link', { name: 'Review upload', exact: true })).toHaveAttribute('href', '/uploads/42')
+    await expect(page.getByRole('button', { name: 'Resume / Retry Failed Files' })).toHaveCount(0)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+    await page.getByRole('button', { name: 'Start a new upload', exact: true }).click()
+    await expect(page.getByTestId('upload-error')).toHaveCount(0)
+    expect(await page.evaluate(() => sessionStorage.getItem('directory_upload_state:1'))).toBeNull()
+  })
+
   test(`lost single-file acknowledgement recovers once at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1000 })
     await shell(page)

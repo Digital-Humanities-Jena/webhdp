@@ -12,7 +12,6 @@ from database.database import db
 from database.models import Session, UserMetadata
 from exceptions import ValidationError
 from security import SecurityValidator, sanitize_upload_filename
-from services.pipeline_run_recovery import owner_alive, process_owner
 from services.registry_lock import OperationConflict, registry_lock
 
 IDENTITY_FIELD = 'single_upload_identity'
@@ -32,8 +31,20 @@ def recover_single_upload(user_id, token):
     result = json.loads(fields[RESULT_FIELD]) if fields.get(RESULT_FIELD) else None
     if result:
         return {**result, 'reused': True, 'status': 'completed', 'fingerprint': identity['fingerprint']}
-    failed = row.status == 'failed' or owner_alive(identity.get('owner')) is False
-    return {'session_id': row.id, 'status': 'failed' if failed else 'processing',
+    # A web process can survive a terminated request, or be replaced on another
+    # host. The request lock, not its process identity, proves work is in flight.
+    try:
+        with registry_lock(f'single-upload:{user_id}:{token}'):
+            db.session.refresh(row)
+            saved = UserMetadata.query.filter_by(session_id=row.id, field_name=RESULT_FIELD).first()
+            if saved:
+                return {**json.loads(saved.field_value), 'reused': True, 'status': 'completed', 'fingerprint': identity['fingerprint']}
+            row.status = 'failed'
+            db.session.commit()
+            status = 'failed'
+    except OperationConflict:
+        status = 'processing'
+    return {'session_id': row.id, 'status': status,
             'fingerprint': identity['fingerprint'], 'reused': True}
 
 
@@ -79,7 +90,7 @@ def single_upload_request(allowed_extensions):
                     if previous.pop('fingerprint') != fingerprint:
                         raise OperationConflict('This upload request was already used for different content or settings.')
                     return APIResponse.success(data=previous)
-                g.single_upload_identity = {'token': token, 'fingerprint': fingerprint, 'owner': process_owner()}
+                g.single_upload_identity = {'token': token, 'fingerprint': fingerprint}
                 try:
                     response = make_response(function(*args, **kwargs))
                     payload = response.get_json(silent=True) or {}

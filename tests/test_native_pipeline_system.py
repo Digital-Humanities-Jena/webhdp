@@ -1,4 +1,5 @@
 import os
+import json
 import shutil
 import sqlite3
 import tempfile
@@ -623,6 +624,74 @@ class NativePipelineSystemTestCase(unittest.TestCase):
             _, _, session = self._prepare_generic_pipeline_session("unknown_dispatch")
             queued = self.native_service.create_pending_run("render", session_id=session.id, initiated_by_user_id=self.user_id, request_payload={})
             self.assertEqual(self.native_service.get_pipeline_run(queued["run_id"])["status"], "pending")
+
+    def test_queued_run_reserves_session_against_synchronous_execution(self):
+        from services.pipeline_execution_lock import PipelineAlreadyRunning
+        from services.submission_pipeline_service import execute_submission_pipeline
+        with self.app.app_context():
+            _, _, session = self._prepare_generic_pipeline_session('reserved_session')
+            queued = self.native_service.create_pending_run('render', session_id=session.id, initiated_by_user_id=self.user_id, request_payload={})
+            with patch.object(self.native_service, '_run_native_pipeline') as execute:
+                with self.assertRaises(PipelineAlreadyRunning):
+                    self.native_service.execute_registered_submission('render', {'db_session_id': session.id})
+                with self.assertRaises(PipelineAlreadyRunning):
+                    execute_submission_pipeline('render', [], session.id)
+                execute.assert_not_called()
+            self.assertEqual(self.native_service.get_pipeline_run(queued['run_id'])['status'], 'pending')
+
+    def test_duplicate_request_reconnects_while_worker_holds_the_session_lock(self):
+        from uuid import uuid4
+        from test_workflow_transition_reliability import locked_by_other_process
+        with self.app.app_context():
+            _, _, session = self._prepare_generic_pipeline_session('active_retry')
+            payload = {'request_id': str(uuid4())}
+            queued = self.native_service.create_pending_run('render', session_id=session.id, initiated_by_user_id=self.user_id, request_payload=payload)
+            with locked_by_other_process(session.hdpc_path):
+                reused = self.native_service.create_pending_run('render', session_id=session.id, initiated_by_user_id=self.user_id, request_payload=payload)
+                self.assertTrue(reused['reused'])
+                self.assertEqual(reused['run_id'], queued['run_id'])
+
+    def test_uncertain_dispatch_cancels_unstarted_run_and_ignores_late_delivery(self):
+        from services.pipeline_run_recovery import resolve_dispatch_failure
+        from routes.pipeline_v2_routes import _enqueue_submission_pipeline_task
+        import sys
+        from types import SimpleNamespace
+        with self.app.app_context():
+            _, _, session = self._prepare_generic_pipeline_session('uncertain_dispatch')
+            queued = self.native_service.create_pending_run('render', session_id=session.id, initiated_by_user_id=self.user_id, request_payload={})
+            def accepted_but_response_lost(**kwargs):
+                row = PipelineRun.query.filter_by(public_id=queued['run_id']).one()
+                self.assertEqual(json.loads(row.request_json)['_dispatch']['task_id'], kwargs['task_id'])
+                raise ConnectionError('response lost')
+            task = SimpleNamespace(apply_async=accepted_but_response_lost)
+            with patch.dict(sys.modules, {'tasks': SimpleNamespace(execute_submission_pipeline_task=task)}):
+                with self.assertRaises(ConnectionError):
+                    _enqueue_submission_pipeline_task(None, 'render', [], session.id, True, False, [], [], queued['run_id'])
+            resolve_dispatch_failure(queued['run_id'])
+            with patch.object(self.native_service, '_run_native_pipeline') as execute:
+                result = self.native_service.execute_registered_submission('render', {'db_session_id': session.id}, existing_run_public_id=queued['run_id'])
+                self.assertFalse(result['success'])
+                execute.assert_not_called()
+
+    def test_dispatch_error_preserves_running_worker_and_completed_result(self):
+        from services.pipeline_run_recovery import resolve_dispatch_failure
+        from database.models import PipelineRunStatus
+        from test_workflow_transition_reliability import locked_by_other_process
+        with self.app.app_context():
+            _, _, session = self._prepare_generic_pipeline_session('accepted_dispatch')
+            queued = self.native_service.create_pending_run('render', session_id=session.id, initiated_by_user_id=self.user_id, request_payload={})
+            run = PipelineRun.query.filter_by(public_id=queued['run_id']).one()
+            run.status = PipelineRunStatus.RUNNING
+            db.session.commit()
+            with locked_by_other_process(session.hdpc_path):
+                resolve_dispatch_failure(run.public_id)
+                self.assertEqual(run.status, PipelineRunStatus.RUNNING)
+            run.status = PipelineRunStatus.COMPLETED
+            run.result_json = json.dumps({'success': True, 'saved': 'result'})
+            db.session.commit()
+            resolve_dispatch_failure(run.public_id)
+            self.assertEqual(run.status, PipelineRunStatus.COMPLETED)
+            self.assertEqual(json.loads(run.result_json)['saved'], 'result')
 
     def test_preflight_token_binds_definition_user_and_file_selection(self):
         from services.registry_lock import OperationConflict

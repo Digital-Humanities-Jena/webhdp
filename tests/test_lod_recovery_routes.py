@@ -28,7 +28,8 @@ def recovery(tmp_path, monkeypatch):
     monkeypatch.setattr('routes.access_helpers.get_session_with_permission', permission)
     output = tmp_path / 'outputs' / 'record-1' / 'model'
     with app.app_context():
-        generate_artifacts(str(output), specification(), Mock())
+        from services.lod_artifact_service import current_record_context
+        generate_artifacts(str(output), {**specification(), 'record': current_record_context(hdpc, 1)}, Mock())
         token = create_access_token(identity='1')
     return app, permission, {'Authorization': f'Bearer {token}'}, hdpc
 
@@ -90,3 +91,78 @@ def test_legacy_interrupted_report_exposes_unattempted_formats(recovery):
     assert len(response.json['data']['formats']) == 5
     assert all(value['status'] == 'pending' for value in response.json['data']['formats'].values())
     assert response.json['data']['readiness']['state'] == 'blocked'
+
+
+def test_recreated_draft_invalidates_exports_and_retry_updates_public_identity(recovery):
+    from services.hdpc_schema_service import connect_hdpc
+    app, _, headers, hdpc = recovery
+    client = app.test_client()
+    app.edm_service.validate_edm_document.return_value = {'valid': True}
+    assert client.post('/sessions/42/records/1/lod', headers=headers).status_code == 200
+    with connect_hdpc(hdpc) as conn:
+        conn.execute("UPDATE zenodo_records SET zenodo_record_id = '9102', record_metadata_json = ? WHERE record_id = 1",
+                     (json.dumps({'id': 9102, 'metadata': {'prereserve_doi': {'doi': '10.5072/zenodo.9102'}}}),))
+    report = client.get('/sessions/42/records/1/lod', headers=headers).json['data']
+    assert report['readiness']['record_changed']
+    assert not report['readiness']['ready']
+    assert report['formats']['jsonld']['status'] == 'regeneration_required'
+    assert client.get('/sessions/42/records/1/lod?format=jsonld', headers=headers).status_code == 400
+    report = client.post('/sessions/42/records/1/lod', headers=headers).json['data']
+    assert report['readiness']['ready']
+    output = client.get('/sessions/42/records/1/lod?format=jsonld', headers=headers)
+    assert output.status_code == 200
+    assert '9102' in output.text and '9001' not in output.text
+    assert app.iiif_service.generate_iiif_manifest_with_report.call_count == 2
+
+
+def test_lost_output_directory_can_be_rebuilt_from_project_recovery_state(recovery):
+    import shutil
+    from pathlib import Path
+    app, _, headers, hdpc = recovery
+    client = app.test_client()
+    app.edm_service.validate_edm_document.return_value = {'valid': True}
+    assert client.post('/sessions/42/records/1/lod', headers=headers).status_code == 200
+    output = Path(hdpc).parent / 'outputs/record-1/model'
+    (output / 'lod-generation.json').unlink()
+    assert client.get('/sessions/42/records/1/lod', headers=headers).json['data']['readiness']['ready']
+    shutil.rmtree(output)
+    report = client.get('/sessions/42/records/1/lod', headers=headers).json['data']
+    assert report['available'] and not report['readiness']['ready']
+    regenerated = client.post('/sessions/42/records/1/lod', headers=headers)
+    assert regenerated.status_code == 200
+    assert regenerated.json['data']['readiness']['ready']
+    assert (output / 'metadata.jsonld').is_file()
+
+
+@pytest.mark.parametrize('corrupt', ['{truncated', '[]', '{"request": {}, "formats": {"edm": null}}'])
+def test_corrupt_report_has_actionable_error_instead_of_server_error(recovery, corrupt):
+    from pathlib import Path
+    app, _, headers, hdpc = recovery
+    (Path(hdpc).parent / 'outputs/record-1/model/lod-generation.json').write_text(corrupt)
+    for method in (app.test_client().get, app.test_client().post):
+        result = method('/sessions/42/records/1/lod', headers=headers)
+        assert result.status_code == 400
+        assert 'new pipeline run' in result.text
+
+
+def test_project_backup_repairs_a_structurally_corrupt_output_report(recovery):
+    from pathlib import Path
+    app, _, headers, hdpc = recovery
+    client = app.test_client()
+    app.edm_service.validate_edm_document.return_value = {'valid': True}
+    assert client.post('/sessions/42/records/1/lod', headers=headers).status_code == 200
+    (Path(hdpc).parent / 'outputs/record-1/model/lod-generation.json').write_text('[]')
+    response = client.post('/sessions/42/records/1/lod', headers=headers)
+    assert response.status_code == 200
+    assert response.json['data']['readiness']['ready']
+
+
+def test_sparse_remote_response_does_not_forget_the_saved_doi(recovery):
+    from services.hdpc_schema_service import connect_hdpc
+    app, _, headers, hdpc = recovery
+    client = app.test_client()
+    app.edm_service.validate_edm_document.return_value = {'valid': True}
+    assert client.post('/sessions/42/records/1/lod', headers=headers).status_code == 200
+    with connect_hdpc(hdpc) as conn:
+        conn.execute('UPDATE zenodo_records SET record_metadata_json = ? WHERE record_id = 1', (json.dumps({'id': 9001}),))
+    assert client.get('/sessions/42/records/1/lod', headers=headers).json['data']['readiness']['ready']

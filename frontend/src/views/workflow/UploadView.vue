@@ -979,7 +979,7 @@ textures/albedo.jpg</pre>
         <div v-if="error" data-testid="upload-error" role="alert" class="mt-4 bg-red-50 border border-red-400 text-red-700 px-4 py-3 rounded">
           <p>{{ error }}</p>
           <router-link v-if="workflowStore.sessionId && !hasFailures" :to="`/uploads/${workflowStore.sessionId}`" class="mt-2 inline-block text-sm underline">Review upload</router-link>
-          <button v-if="singleUploadNeedsRestart" type="button" class="ml-4 text-sm underline" @click="startNewFileUpload">Start a new upload</button>
+          <button v-if="singleUploadNeedsRestart || directoryUploadNeedsRestart" type="button" class="ml-4 text-sm underline" @click="startNewFileUpload">Start a new upload</button>
           <button v-if="hasFailures"
                   @click="handleResume"
                   class="mt-2 text-sm font-bold underline hover:text-red-900 focus:outline-none">
@@ -1266,10 +1266,13 @@ const saveSingleUploadState = (state) => {
 }
 let singleUploadState = null
 const singleUploadNeedsRestart = ref(false)
+const directoryUploadNeedsRestart = ref(false)
 const startNewFileUpload = () => {
   singleUploadState = null
   singleUploadNeedsRestart.value = false
   saveSingleUploadState(null)
+  directoryUploadNeedsRestart.value = false
+  clearDirectoryUploadState()
   workflowStore.resetWorkflow()
   error.value = ''
 }
@@ -1311,32 +1314,28 @@ const recoverSingleUpload = async (token) => {
   }
 }
 
-const DIRECTORY_UPLOAD_STATE_KEY = 'directory_upload_state_v1'
+const DIRECTORY_UPLOAD_STATE_KEY = () => `directory_upload_state:${authStore.user?.id}`
+let directoryUploadState = null
 const DIRECTORY_PAGE_SIZE = 15
 const MSF_PAGE_SIZE = 10
 
 const readDirectoryUploadState = () => {
-  const raw = sessionStorage.getItem(DIRECTORY_UPLOAD_STATE_KEY)
-  if (!raw) return null
   try {
-    return JSON.parse(raw)
-  } catch (e) {
-    console.warn('Failed to parse saved directory upload state:', e)
-    sessionStorage.removeItem(DIRECTORY_UPLOAD_STATE_KEY)
-    return null
-  }
+    const raw = sessionStorage.getItem(DIRECTORY_UPLOAD_STATE_KEY())
+    return raw ? JSON.parse(raw) : directoryUploadState
+  } catch { return directoryUploadState }
 }
 
 const writeDirectoryUploadState = (state) => {
-  if (!state) {
-    sessionStorage.removeItem(DIRECTORY_UPLOAD_STATE_KEY)
-    return
-  }
-  sessionStorage.setItem(DIRECTORY_UPLOAD_STATE_KEY, JSON.stringify(state))
+  directoryUploadState = state
+  try {
+    if (state) sessionStorage.setItem(DIRECTORY_UPLOAD_STATE_KEY(), JSON.stringify(state))
+    else sessionStorage.removeItem(DIRECTORY_UPLOAD_STATE_KEY())
+  } catch { /* Retain the request identity while this page is open. */ }
 }
 
 const clearDirectoryUploadState = () => {
-  sessionStorage.removeItem(DIRECTORY_UPLOAD_STATE_KEY)
+  writeDirectoryUploadState(null)
 }
 
 const createSubmitToken = () => {
@@ -1351,8 +1350,13 @@ const buildDirectoryFingerprint = () => {
     mode: storageStatus.value?.mode || '',
     zip_name: zipFile.value?.name || '',
     zip_size: zipFile.value?.size || 0,
+    zip_modified: zipFile.value?.lastModified || 0,
     msf_name: msfFile.value?.name || '',
+    msf_size: msfFile.value?.size || 0,
+    msf_modified: msfFile.value?.lastModified || 0,
     msf_path: selectedMsfPath.value || '',
+    directory_path: directoryPath.value || '',
+    workspace: buildWorkspacePayload(),
     parse_options: buildMsfParseOptionsPayload()
   })
 }
@@ -2319,16 +2323,9 @@ const pollProgress = async (sessionId, taskId = null) => {
   let failures = 0
   while (!disposed) {
     try {
-      if (!coordinatorDone) {
-        const response = await api.get(`/sessions/tasks/${taskId}`, { suppressGlobalError: true, signal: uploadMonitor.signal })
-        if (disposed) throw Object.assign(new Error('Monitoring stopped'), { code: 'MONITOR_CANCELLED' })
-        const task = response.data || {}
-        if (['FAILURE', 'REVOKED'].includes(task.state) || task.status === 'failed') {
-          throw Object.assign(new Error(task.error || 'Upload processing stopped. Review the upload monitor before retrying.'), { terminal: true })
-        }
-        coordinatorDone = ['SUCCESS', 'coordinator_completed'].includes(task.state)
-      } else {
-        uploadStage.value = 3
+      // Saved session progress survives an absent or expired queue result.
+      {
+        if (coordinatorDone) uploadStage.value = 3
         const response = await api.get(`/sessions/${sessionId}/progress`, { suppressGlobalError: true, signal: uploadMonitor.signal })
         if (disposed) throw Object.assign(new Error('Monitoring stopped'), { code: 'MONITOR_CANCELLED' })
         const data = response.data || {}
@@ -2339,11 +2336,24 @@ const pollProgress = async (sessionId, taskId = null) => {
         progressPercent.value = percent
         uploadStatusMessage.value = progress.status_message || 'Processing files…'
         if (stage === 'failed' || (percent >= 100 && failed > 0)) {
+          if (progress.dispatch_cancelled) {
+            directoryUploadNeedsRestart.value = true
+            throw Object.assign(new Error(progress.status_message || 'This upload was cancelled before processing. Start a new upload.'), { terminal: true })
+          }
           hasFailures.value = true
           error.value = progress.status_message || `${failed} files failed to process.`
           return
         }
         if (percent >= 100) { uploadStage.value = 4; return }
+      }
+      if (!coordinatorDone) {
+        const response = await api.get(`/sessions/tasks/${taskId}`, { suppressGlobalError: true, signal: uploadMonitor.signal })
+        if (disposed) throw Object.assign(new Error('Monitoring stopped'), { code: 'MONITOR_CANCELLED' })
+        const task = response.data || {}
+        if (['FAILURE', 'REVOKED'].includes(task.state) || task.status === 'failed') {
+          throw Object.assign(new Error(task.error || 'Upload processing stopped. Review the upload monitor before retrying.'), { terminal: true })
+        }
+        coordinatorDone = ['SUCCESS', 'coordinator_completed'].includes(task.state)
       }
       uploadMonitorUnavailable.value = false
       failures = 0
@@ -2415,7 +2425,14 @@ const resumeSavedDirectoryUpload = async () => {
     }
 
     if (recovered.session_status === 'failed') {
-      clearDirectoryUploadState()
+      workflowStore.setSessionId(recovered.session_id)
+      workflowStore.setBatchMode(true)
+      uploadMode.value = 'directory'
+      directoryUploadNeedsRestart.value = Boolean(recovered.dispatch_cancelled)
+      hasFailures.value = !recovered.dispatch_cancelled
+      error.value = recovered.dispatch_cancelled
+        ? 'This upload was cancelled before processing. Review the saved session, then start a new upload.'
+        : 'This upload did not finish. Review or retry the failed files.'
       return
     }
 

@@ -585,7 +585,8 @@ def _copy_simple_record_table(
 ) -> None:
     if not _table_exists(source_cursor, table_name):
         return
-    rows = source_cursor.execute(f"SELECT {select_columns} FROM {table_name} ORDER BY 1 ASC").fetchall()
+    condition = " WHERE snapshot_stage != 'lod_generation'" if table_name == 'zenodo_record_snapshots' else ''
+    rows = source_cursor.execute(f"SELECT {select_columns} FROM {table_name}{condition} ORDER BY 1 ASC").fetchall()
     if not rows:
         return
     placeholders = ", ".join("?" for _ in range(len(rows[0])))

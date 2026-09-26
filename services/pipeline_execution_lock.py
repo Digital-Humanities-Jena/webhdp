@@ -18,8 +18,8 @@ class PipelineAlreadyRunning(AppException):
     error_code = "PIPELINE_ALREADY_RUNNING"
     user_message = "This session is already being processed. Wait for it to finish before retrying."
 
-    def __init__(self):
-        super().__init__(self.user_message)
+    def __init__(self, run_id=None):
+        super().__init__(self.user_message, details={'run_id': run_id} if run_id else None)
 
 
 @contextmanager
@@ -52,7 +52,7 @@ def serialize_project_mutation(function):
     @wraps(function)
     def guarded(*args, **kwargs):
         arguments = call_signature.bind(*args, **kwargs).arguments
-        path = arguments.get("hdpc_path") or arguments["session"].hdpc_path
+        path = arguments.get("hdpc_path") or getattr(arguments.get("session"), "hdpc_path", None)
         if not path:
             raise FileNotFoundError("Session .hdpc is not available")
         with session_pipeline_lock(path):
@@ -92,7 +92,10 @@ def guard_submission_execution(function):
             existing = PipelineRun.query.filter_by(public_id=run_id).first()
             if existing:
                 reconcile_run(existing)
+        from services.pipeline_run_recovery import require_available_session
+        require_available_session(session.id, run_id)
         with session_pipeline_lock(session.hdpc_path):
+            require_available_session(session.id, run_id)
             return execute_once()
 
     return guarded

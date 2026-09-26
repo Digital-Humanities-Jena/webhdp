@@ -42,7 +42,10 @@ def record(tmp_path):
         create_local_record_with_metadata(hdpc, file_id=101, metadata={'title': 'Object'}, access_token='test-token')
         http = _DummyZenodoHttp()
         create_api_draft(hdpc, 1, http=http)
+        from services.lod_artifact_service import current_record_context
+        initial_record = current_record_context(hdpc, 1)
         def generate(spec):
+            spec = {**spec, 'record': initial_record}
             suspend_previous_artifacts(hdpc, 1)
             return generate_artifacts(str(tmp_path / 'outputs/record-1/model'), spec,
                 lambda path, validation: add_local_source_files(hdpc, absolute_file_paths=[path],
@@ -79,6 +82,35 @@ def test_queued_publication_rechecks_new_pending_attachment(record, tmp_path, mo
                                             operation_type='publish_records', target_ids=[1])
     assert result['summary']['failed'] == 1
     assert not any(url.endswith('/actions/publish') for url, _ in http.post_calls)
+
+
+def test_missing_all_metadata_reports_blocks_already_uploaded_artifacts(record):
+    _, hdpc, http, generate = record
+    generate(specification())
+    assert upload_files_for_deposition(hdpc, 1, http=http)['success']
+    (Path(hdpc).parent / 'outputs/record-1/model/lod-generation.json').unlink()
+    with connect_hdpc(hdpc) as conn:
+        conn.execute("DELETE FROM zenodo_record_snapshots WHERE snapshot_stage = 'lod_generation'")
+    readiness = record_lod_readiness(hdpc, 1)
+    assert not readiness['ready']
+    assert 'missing' in readiness['recovery_message']
+    assert not upload_files_for_deposition(hdpc, 1, http=http)['success']
+
+
+def test_private_recovery_state_is_excluded_from_record_details_and_shared_exports(record):
+    from services.hdpc_local_service import read_hdpc_record_context
+    from services.hdpc_shared_export_service import create_sanitized_shared_export
+    _, hdpc, _, generate = record
+    generate(specification())
+    context = read_hdpc_record_context(hdpc, 1)
+    assert all(item['snapshot_stage'] != 'lod_generation' for item in context['traceability']['snapshots'])
+    assert context['zenodo_status']['summary']['latest_snapshot_stage'] != 'lod_generation'
+    exported = create_sanitized_shared_export(hdpc, source_session_id=1, source_institution_id=1, source_owner_user_id=1)
+    try:
+        with connect_hdpc(exported) as conn:
+            assert conn.execute("SELECT count(*) FROM zenodo_record_snapshots WHERE snapshot_stage = 'lod_generation'").fetchone()[0] == 0
+    finally:
+        Path(exported).unlink()
 
 
 def test_current_policy_blocks_already_uploaded_outputs_and_retry_restores_readiness(record):

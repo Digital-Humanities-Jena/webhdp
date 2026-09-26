@@ -11,6 +11,46 @@ async function shell(page: Page) {
   if (await notice.isVisible()) await notice.click()
 }
 for (const width of [375, 1280]) {
+  test(`changed draft has one regeneration action at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 1000 })
+    await shell(page)
+    await page.route(apiV1('/sessions/42/records/1'), route => fulfillJson(route, { data: {
+      session: { id: 42 }, record: { local_record_id: 1, record_title: 'Recreated draft', record_status: 'draft' }, health: {}, lineage: {}, files: [],
+    } }))
+    let regenerated = false
+    await page.route(apiV1('/sessions/42/records/1/lod'), route => {
+      if (route.request().method() === 'POST') regenerated = true
+      return fulfillJson(route, { data: { available: true, readiness: {
+        ready: regenerated, state: regenerated ? 'upload_required' : 'blocked', record_changed: !regenerated,
+        pending_upload_count: 1, recovery_message: regenerated ? null : 'The Zenodo draft changed. Regenerate metadata to update its record links before continuing.',
+      }, formats: { jsonld: { status: regenerated ? 'generated' : 'regeneration_required', success: regenerated } } } })
+    })
+    await page.goto('/sessions/42/records/1')
+    await expect(page.getByText('The Zenodo draft changed. Regenerate metadata to update its record links before continuing.', { exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Download JSONLD' })).toHaveCount(0)
+    await page.screenshot({ path: testInfo.outputPath('changed-draft.png'), fullPage: true })
+    await page.getByRole('button', { name: 'Regenerate metadata', exact: true }).click()
+    await expect(page.getByRole('button', { name: 'Download JSONLD' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Regenerate metadata', exact: true })).toHaveCount(0)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  })
+
+  test(`missing saved report explains recovery without an unusable retry at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 1000 })
+    await shell(page)
+    await page.route(apiV1('/sessions/42/records/1'), route => fulfillJson(route, { data: {
+      session: { id: 42 }, record: { local_record_id: 1, record_title: 'Missing report', record_status: 'draft' }, health: {}, lineage: {}, files: [],
+    } }))
+    await page.route(apiV1('/sessions/42/records/1/lod'), route => fulfillJson(route, { data: {
+      available: false, formats: {}, readiness: { ready: false, state: 'blocked', recovery_message: 'The saved metadata report is missing. Start a new pipeline run to regenerate metadata.' },
+    } }))
+    await page.goto('/sessions/42/records/1')
+    await expect(page.getByText('The saved metadata report is missing. Start a new pipeline run to regenerate metadata.', { exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Retry incomplete formats' })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Download report' })).toHaveCount(0)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  })
+
   test(`metadata recovery explains partial failure and retries at ${width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 1000 })
     await shell(page)

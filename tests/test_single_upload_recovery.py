@@ -91,3 +91,44 @@ def test_invalid_file_does_not_create_a_session(upload_app, invalid):
     assert send(client, headers[0], **invalid).status_code in (400, 413)
     assert Session.query.count() == 0
     scanned.assert_not_called()
+
+
+def test_interrupted_request_is_terminal_even_while_its_web_process_lives(upload_app):
+    client, headers, scanned = upload_app
+    scanned.side_effect = RuntimeError('request interrupted')
+    with pytest.raises(RuntimeError):
+        send(client, headers[0])
+    response = client.post('/api/v1/sessions/file/recover', headers=headers[0], json={'submit_token': 'upload-1'})
+    assert response.json['data']['status'] == 'failed'
+    assert send(client, headers[0]).json['data']['status'] == 'failed'
+    assert Session.query.count() == 1
+    scanned.assert_called_once()
+
+
+def test_live_upload_request_remains_processing_until_its_lock_releases(upload_app):
+    import subprocess
+    import sys
+    client, headers, scanned = upload_app
+    scanned.side_effect = RuntimeError('request interrupted')
+    with pytest.raises(RuntimeError):
+        send(client, headers[0])
+    script = '''
+from flask import Flask
+from database.database import db
+from services.registry_lock import registry_lock
+app = Flask(__name__)
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
+db.init_app(app)
+with app.app_context(), registry_lock('single-upload:1:upload-1'):
+    print('locked', flush=True)
+    input()
+'''
+    process = subprocess.Popen([sys.executable, '-c', script], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+    try:
+        assert process.stdout.readline().strip() == 'locked'
+        response = client.post('/api/v1/sessions/file/recover', headers=headers[0], json={'submit_token': 'upload-1'})
+        assert response.json['data']['status'] == 'processing'
+    finally:
+        process.communicate('\n', timeout=10)
+    response = client.post('/api/v1/sessions/file/recover', headers=headers[0], json={'submit_token': 'upload-1'})
+    assert response.json['data']['status'] == 'failed'

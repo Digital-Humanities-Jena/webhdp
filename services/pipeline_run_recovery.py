@@ -5,6 +5,7 @@ import socket
 import subprocess
 from datetime import datetime
 from functools import wraps
+from contextlib import nullcontext
 
 from database.database import db
 from database.models import PipelineRun, PipelineRunStatus, Session, StepRun
@@ -81,6 +82,56 @@ def reconcile_run(run):
         return
 
 
+def resolve_dispatch_failure(run_id):
+    """Cancel unstarted work without overwriting a worker's accepted result."""
+    db.session.rollback()
+    run = PipelineRun.query.filter_by(public_id=run_id).one()
+    session = db.session.get(Session, run.session_id)
+    lock = session_pipeline_lock(session.hdpc_path) if session and session.hdpc_path else nullcontext()
+    try:
+        with lock:
+            db.session.refresh(run)
+            if run.status != PipelineRunStatus.PENDING:
+                return
+            message = 'This run could not be queued reliably and was cancelled before processing. Retry with a new run.'
+            run.status = PipelineRunStatus.FAILED
+            run.error_message = message
+            run.completed_at = datetime.utcnow()
+            run.result_json = json.dumps({'success': False, 'status': 'failed', 'error': message})
+            db.session.commit()
+    except PipelineAlreadyRunning:
+        pass  # The running worker owns the final outcome.
+
+
+def require_available_session(session_id, run_id=None):
+    """Honor queued reservations as well as workers already holding a lock."""
+    active = PipelineRun.query.filter(PipelineRun.session_id == session_id,
+        PipelineRun.status.in_([PipelineRunStatus.PENDING, PipelineRunStatus.RUNNING]))
+    if run_id:
+        active = active.filter(PipelineRun.public_id != run_id)
+    for other in active.all():
+        reconcile_run(other)
+        if other.status in {PipelineRunStatus.PENDING, PipelineRunStatus.RUNNING}:
+            raise PipelineAlreadyRunning(other.public_id)
+
+
+def guard_run_reservation(function):
+    @wraps(function)
+    def guarded(self, identifier, *, session_id, **kwargs):
+        request_id = (kwargs.get('request_payload') or {}).get('request_id')
+        if request_id and PipelineRun.query.filter_by(public_id=request_id).first():
+            return function(self, identifier, session_id=session_id, **kwargs)
+        session = db.session.get(Session, session_id)
+        lock = session_pipeline_lock(session.hdpc_path) if session and session.hdpc_path else nullcontext()
+        if session:
+            for run in PipelineRun.query.filter(PipelineRun.session_id == session_id,
+                    PipelineRun.status.in_([PipelineRunStatus.PENDING, PipelineRunStatus.RUNNING])).all():
+                reconcile_run(run)
+        with lock:
+            return function(self, identifier, session_id=session_id, **kwargs)
+    return guarded
+
+
 def guard_native_run(function):
     @wraps(function)
     def guarded(self, identifier, execution_context, **kwargs):
@@ -92,6 +143,8 @@ def guard_native_run(function):
             run = PipelineRun.query.filter_by(public_id=run_id, session_id=session.id).first()
             if run:
                 reconcile_run(run)
+        require_available_session(session.id, run_id)
         with session_pipeline_lock(session.hdpc_path):
+            require_available_session(session.id, run_id)
             return function(self, identifier, execution_context, **kwargs)
     return guarded

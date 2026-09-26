@@ -501,6 +501,8 @@ def _create_session_dirs(
     db.session.add(db_session)
     from services.single_upload_recovery import persist_single_upload_identity
     persist_single_upload_identity(db_session)
+    from services.directory_upload_recovery import persist_directory_upload_identity
+    persist_directory_upload_identity(db_session)
     db.session.commit()
 
     # Store in Flask session

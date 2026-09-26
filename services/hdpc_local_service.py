@@ -1414,7 +1414,7 @@ def read_hdpc_record_context(hdpc_path: str, record_id: int) -> dict[str, Any] |
                 """
                 SELECT snapshot_id, snapshot_stage, http_status, payload_json, created_timestamp
                 FROM zenodo_record_snapshots
-                WHERE record_id = ?
+                WHERE record_id = ? AND snapshot_stage != 'lod_generation'
                 ORDER BY snapshot_id ASC
                 """,
                 (int(record_id),),

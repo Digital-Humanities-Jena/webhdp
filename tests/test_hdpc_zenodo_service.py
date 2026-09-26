@@ -850,27 +850,37 @@ def test_changed_generated_file_is_reuploaded_after_remote_refresh(tmp_path):
 def test_lod_upload_requires_explicit_validation_and_matching_content_hash(tmp_path):
     from pathlib import Path
     from services.lod_reliability import digest
-    from services.lod_artifact_service import suspend_previous_artifacts
+    from services.lod_artifact_service import suspend_previous_artifacts, current_record_context
     hdpc_path = str(tmp_path / 'lod-upload.hdpc')
     _create_hdpc_with_source(hdpc_path, str(tmp_path))
     create_local_record_with_metadata(hdpc_path, file_id=101, metadata={'title': 'Metadata', 'creators': [{'name': 'Museum'}]}, is_sandbox=True, access_token='sandbox-token')
     http = _DummyZenodoHttp()
     assert create_api_draft(hdpc_path, 1, http=http)['success']
-    path = str(tmp_path / 'edm.xml')
+    output = tmp_path / 'outputs/record-1/model'
+    output.mkdir(parents=True)
+    path = str(output / 'edm.xml')
     Path(path).write_text('<rdf/>')
+    report = {'valid': True, 'sha256': digest(Path(path).read_bytes()), 'standard': 'edm'}
+    manifest = {'request': {'record': current_record_context(hdpc_path, 1), 'options': {
+        'generate_iiif': False, 'generate_mets': False, 'generate_cidoc_crm': False, 'generate_jsonld': False,
+    }}, 'formats': {'edm': {'success': True, 'status': 'generated', 'sha256': report['sha256'], 'validation': report}}}
+    (output / 'lod-generation.json').write_text(json.dumps(manifest))
     add_local_source_files(hdpc_path, absolute_file_paths=[path], record_id_to_associate=1, pipeline_name='lod_generation')
     result = upload_files_for_deposition(hdpc_path, 1, http=http)
-    assert result['failed_upload_count'] == 1
+    assert not result['success']
     assert not any('edm.xml' in str(call) for call in http.put_calls)
     report = {'valid': True, 'sha256': digest(Path(path).read_bytes()), 'standard': 'edm'}
     add_local_source_files(hdpc_path, absolute_file_paths=[path], record_id_to_associate=1, pipeline_name='lod_generation', validation_reports={path: report})
     Path(path).write_text('changed after validation')
     result = upload_files_for_deposition(hdpc_path, 1, http=http)
-    assert result['failed_upload_count'] == 1
+    assert not result['success']
     assert not any('edm.xml' in str(call) for call in http.put_calls)
     suspend_previous_artifacts(hdpc_path, 1)
     with sqlite3.connect(hdpc_path) as conn:
         assert conn.execute("SELECT upload_status FROM record_files_map WHERE file_id IN (SELECT file_id FROM source_files WHERE filename='edm.xml')").fetchone()[0] == 'validation_pending'
     report['sha256'] = digest(Path(path).read_bytes())
+    manifest['formats']['edm']['sha256'] = report['sha256']
+    manifest['formats']['edm']['validation'] = report
+    (output / 'lod-generation.json').write_text(json.dumps(manifest))
     add_local_source_files(hdpc_path, absolute_file_paths=[path], record_id_to_associate=1, pipeline_name='lod_generation', validation_reports={path: report})
     assert upload_files_for_deposition(hdpc_path, 1, http=http)['uploaded_file_count'] == 1

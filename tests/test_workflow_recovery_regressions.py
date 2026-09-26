@@ -5,13 +5,19 @@ from unittest.mock import Mock
 
 import pytest
 
-from test_lod_reliability import services_app, specification
+from test_lod_reliability import services_app, specification as base_specification
 from test_hdpc_zenodo_service import _create_hdpc_with_source, _DummyZenodoHttp
 from services.hdpc_local_service import add_local_source_files, create_local_record_with_metadata, read_hdpc_record_context
 from services.hdpc_zenodo_service import create_api_draft, upload_files_for_deposition, publish_record
 from services.lod_artifact_service import generate_artifacts, suspend_previous_artifacts, record_lod_readiness
 from services.submission_pipeline_service import _split_batch_shared_zenodo_metadata
 from services.linked_data_service import generate_linked_data
+
+
+def specification():
+    spec = base_specification()
+    spec['record'] = {'id': 9001, 'doi': '10.5072/zenodo.9001', 'links': {'html': 'https://sandbox.zenodo.org/records/9001'}}
+    return spec
 
 
 def test_batch_preview_never_becomes_another_records_file():

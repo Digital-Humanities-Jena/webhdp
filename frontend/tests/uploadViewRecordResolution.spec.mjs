@@ -341,4 +341,65 @@ describe('UploadView record-resolution gating', () => {
     wrapper.unmount()
   })
 
+  it('keeps a batch retry identity when browser storage is unavailable', async () => {
+    const wrapper = mountUpload()
+    await flushPromises()
+    const state = wrapper.vm.$.setupState
+    const read = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('Storage unavailable') })
+    const write = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('Storage unavailable') })
+    state.zipFile = new File(['archive'], 'models.zip', { lastModified: 1 })
+    const first = state.ensureDirectorySubmitState()
+    expect(state.ensureDirectorySubmitState().submit_token).toBe(first.submit_token)
+    state.sharingScope = 'institution'
+    expect(state.ensureDirectorySubmitState().submit_token).not.toBe(first.submit_token)
+    read.mockRestore(); write.mockRestore()
+    wrapper.unmount()
+  })
+
+  it('does not reconnect to another user’s saved batch upload', async () => {
+    sessionStorage.setItem('directory_upload_state:another-user', JSON.stringify({ submit_token: 'private-upload' }))
+    const wrapper = mountUpload()
+    await flushPromises()
+    expect(mocked.api.post).not.toHaveBeenCalledWith('/sessions/directory/recover', expect.anything(), expect.anything())
+    wrapper.unmount()
+  })
+
+  it('uses a new batch request when the metadata file or source folder changes', async () => {
+    const wrapper = mountUpload()
+    await flushPromises()
+    const state = wrapper.vm.$.setupState
+    state.zipFile = new File(['archive'], 'models.zip', { lastModified: 1 })
+    state.msfFile = new File(['original'], 'metadata.csv', { lastModified: 1 })
+    const first = state.ensureDirectorySubmitState().submit_token
+    state.msfFile = new File(['revised!'], 'metadata.csv', { lastModified: 2 })
+    const second = state.ensureDirectorySubmitState().submit_token
+    expect(second).not.toBe(first)
+    state.directoryPath = 'new-folder'
+    expect(state.ensureDirectorySubmitState().submit_token).not.toBe(second)
+    wrapper.unmount()
+  })
+
+  it('stops on a saved batch cancellation even when the queue still says pending', async () => {
+    const wrapper = mountUpload()
+    await flushPromises()
+    mocked.api.get.mockResolvedValue({ data: { upload_progress: { current_stage: 'failed', dispatch_cancelled: true, status_message: 'Cancelled before processing' } } })
+    await expect(wrapper.vm.$.setupState.pollProgress(42, 'unconfirmed-task')).rejects.toThrow('Cancelled before processing')
+    expect(wrapper.vm.$.setupState.directoryUploadNeedsRestart).toBe(true)
+    expect(mocked.api.get).not.toHaveBeenCalledWith('/sessions/tasks/unconfirmed-task', expect.anything())
+    wrapper.unmount()
+  })
+
+  it('shows an explicit restart after reloading a cancelled batch upload', async () => {
+    sessionStorage.setItem('directory_upload_state:undefined', JSON.stringify({ submit_token: 'cancelled-upload' }))
+    mocked.api.post.mockResolvedValue({ data: { session_id: 42, session_status: 'failed', dispatch_cancelled: true } })
+    const wrapper = mountUpload()
+    await flushPromises()
+    expect(wrapper.text()).toContain('cancelled before processing')
+    expect(wrapper.text()).not.toContain('Resume / Retry Failed Files')
+    await wrapper.findAll('button').find(button => button.text() === 'Start a new upload').trigger('click')
+    expect(sessionStorage.getItem('directory_upload_state:undefined')).toBeNull()
+    expect(mocked.api.post).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
 })
