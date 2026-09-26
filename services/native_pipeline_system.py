@@ -517,6 +517,8 @@ class NativePipelineSystemService:
             query = query.filter_by(is_public=True)
         if status:
             query = query.filter_by(status=status)
+        if os.environ.get("WEBHDP_CORE_ONLY", "false").lower() == "true":
+            query = query.filter(PipelineDefinition.identifier.in_(["render", METADATA_ONLY_PIPELINE_ID]))
         definitions = query.order_by(PipelineDefinition.identifier.asc()).all()
         return [self._serialize_pipeline_summary(definition) for definition in definitions]
 
@@ -524,6 +526,8 @@ class NativePipelineSystemService:
         self.ensure_seeded()
         requested_identifier = str(identifier or "").strip()
         canonical_identifier = self.resolve_pipeline_identifier(requested_identifier)
+        if os.environ.get("WEBHDP_CORE_ONLY", "false").lower() == "true" and canonical_identifier not in {"render", METADATA_ONLY_PIPELINE_ID}:
+            raise ValidationError("This optional pipeline is disabled in the core workflow profile")
         definition = PipelineDefinition.query.filter_by(identifier=canonical_identifier, is_active=True).first()
         if definition is None:
             raise ResourceNotFoundError("Pipeline not found", details={"identifier": identifier})
@@ -3252,7 +3256,7 @@ class NativePipelineSystemService:
         record_resolution_by_record_id = execution_context.get("record_resolution_by_record_id") or {}
         for index, (record_id, file_path, file_zenodo_metadata) in enumerate(record_info_list, start=1):
             filename = os.path.basename(file_path)
-            specific_output_dir = os.path.join(outputs_dir, os.path.splitext(filename)[0])
+            specific_output_dir = os.path.join(outputs_dir, f"record-{record_id}", os.path.splitext(filename)[0])
             os.makedirs(specific_output_dir, exist_ok=True)
             record_contexts.append(
                 {
@@ -4501,7 +4505,10 @@ class NativePipelineSystemService:
 
         record_results: Dict[str, Any] = {}
         for local_path in files_to_render:
-            record_output_dir = os.path.join(output_dir, os.path.splitext(os.path.basename(local_path))[0])
+            input_root = os.path.commonpath([os.path.dirname(path) for path in files_to_render])
+            record_output_dir = os.path.join(output_dir, os.path.relpath(local_path, input_root))
+            if not os.path.isdir(record_output_dir):
+                record_output_dir = os.path.join(output_dir, os.path.splitext(os.path.basename(local_path))[0])
             discovered_render_outputs = legacy._collect_generated_output_files(record_output_dir)
             thumbnail_files = legacy._collect_rendered_thumbnail_files(record_output_dir)
             render_payload = _deepcopy(mapped_results.get(local_path) or {})
@@ -4731,7 +4738,7 @@ class NativePipelineSystemService:
         }
 
     def _mark_lod_step_skipped(self, record_context: Dict[str, Any], *, status: str) -> None:
-        for standard_id in ("edm", "iiif", "mets"):
+        for standard_id in ("edm", "iiif", "mets", "cidoc_crm", "jsonld"):
             self._set_lod_status(record_context, standard_id, success=True, status=status)
 
     def _builtin_zenodo_draft_handler(self, request: AdapterExecutionRequest) -> Dict[str, Any]:
@@ -5086,11 +5093,25 @@ class NativePipelineSystemService:
                     status="skipped_disabled",
                     lod_policy=lod_policy,
                 )
+            from services.linked_data_service import generate_linked_data
+
+            linked_outputs = generate_linked_data(
+                build_lod_metadata("cidoc_crm"), zenodo_resp,
+                main_file_key=main_file_key, additional_files=additional_files_for_lod,
+            )
+            for standard_id, (filename, content) in linked_outputs.items():
+                path = os.path.join(record_context["specific_output_dir"], filename)
+                with open(path, "w", encoding="utf-8") as handle:
+                    handle.write(content)
+                self._register_record_files(execution_context, record_context["record_id"], [path], "lod_generation", "xml_generator")
+                legacy._append_unique_paths(record_context["generated_files"], [path])
+                self._set_lod_status(record_context, standard_id, success=True, status="generated", path=path, lod_policy=lod_policy)
+                generated_outputs[standard_id] = path
         except Exception as exc:
             current_app.logger.error("LOD generation failed for %s: %s", record_context["filename"], exc)
             failure_message = f"LOD generation failed for {record_context['filename']}: {exc}"
             failure_status = "failed_required" if lod_policy == "required" else "failed_optional"
-            for standard_id in ("edm", "iiif", "mets"):
+            for standard_id in ("edm", "iiif", "mets", "cidoc_crm", "jsonld"):
                 status_value = (record_context["record_status"].get(standard_id) or {}).get("status")
                 if status_value in {"generated", "skipped_disabled", "skipped_missing_draft"}:
                     continue

@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
+import time
+from datetime import datetime
 from typing import Any, Dict, Optional
 from urllib.parse import urljoin
 
@@ -12,6 +15,8 @@ import requests
 from exceptions import APIConnectionError, APITimeoutError, ValidationError
 
 logger = logging.getLogger(__name__)
+_service_tokens = {}
+_service_token_lock = threading.Lock()
 
 
 class HpcLinkClient:
@@ -26,8 +31,8 @@ class HpcLinkClient:
 
     def _headers(self) -> Dict[str, str]:
         headers = {"Accept": "application/json"}
-        if self.token:
-            token = self.token
+        token = self._service_token() or self.token
+        if token:
             if token.lower().startswith("bearer "):
                 headers["Authorization"] = token
             elif token.count(".") == 2:
@@ -36,6 +41,40 @@ class HpcLinkClient:
                 # Older HPC-Link deployments document X-API-Key for service integrations.
                 headers["X-API-Key"] = token
         return headers
+
+    def _service_token(self) -> str:
+        """Renew an invited service user's bearer token before it expires.
+
+        Environment credentials are sent only to the operator-configured URL,
+        never to an alternative endpoint entered in the admin interface.
+        """
+        username = os.environ.get("HPC_LINK_USERNAME", "")
+        password = os.environ.get("HPC_LINK_PASSWORD", "")
+        trusted_url = os.environ.get("HPC_LINK_BASE_URL", "").strip().rstrip("/")
+        if not username or not password or self.base_url != trusted_url:
+            return ""
+        key = (self.base_url, username)
+        with _service_token_lock:
+            cached = _service_tokens.get(key)
+            if cached and cached[1] > time.time() + 60:
+                return cached[0]
+            try:
+                response = requests.post(
+                    self._url("/api/auth/login"),
+                    json={"username": username, "password": password},
+                    timeout=self.timeout, allow_redirects=False,
+                )
+                if response.status_code != 200:
+                    raise ValueError("Login rejected")
+                payload = response.json()
+                token = payload["access_token"]
+                expires = datetime.fromisoformat(payload["expires_at"].replace("Z", "+00:00")).timestamp()
+                if not token or expires <= time.time() + 60:
+                    raise ValueError("Invalid token lifetime")
+            except (requests.RequestException, ValueError, KeyError, TypeError) as exc:
+                raise APIConnectionError("HPC-Link service account authentication failed") from exc
+            _service_tokens[key] = (token, expires)
+            return token
 
     def _url(self, path: str) -> str:
         normalized = str(path or "").lstrip("/")
@@ -103,6 +142,21 @@ class HpcLinkClient:
             return response.json()
         except ValueError as exc:
             raise APIConnectionError(f"HPC-Link returned non-JSON response for {path}") from exc
+
+    def upload_file(self, path: str, source_path: str, *, timeout: float = 7200) -> Any:
+        """Stream a file without retaining its contents in application memory."""
+        try:
+            with open(source_path, "rb") as handle:
+                response = requests.put(self._url(path), data=handle,
+                    headers={**self._headers(), "Content-Type": "application/octet-stream"},
+                    timeout=timeout, allow_redirects=False)
+            if response.status_code != 200:
+                raise APIConnectionError(f"HPC-Link upload returned HTTP {response.status_code}")
+            return response.json()
+        except requests.Timeout as exc:
+            raise APITimeoutError("HPC-Link file upload timed out") from exc
+        except (requests.RequestException, ValueError) as exc:
+            raise APIConnectionError("HPC-Link file upload failed") from exc
 
     def download_to_file(self, path: str, destination_path: str, *, timeout: Optional[float] = None) -> int:
         url = self._url(path)

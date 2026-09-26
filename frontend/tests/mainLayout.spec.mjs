@@ -47,6 +47,10 @@ vi.mock('@/stores/auth', () => ({
   useAuthStore: () => mocked.authStore,
 }))
 
+vi.mock('@/stores/system', () => ({
+  useSystemStore: () => ({ coreOnly: false }),
+}))
+
 vi.mock('@/stores/notifications', () => ({
   useNotificationStore: () => mocked.notificationStore,
 }))

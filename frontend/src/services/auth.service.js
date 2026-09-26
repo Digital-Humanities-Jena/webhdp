@@ -45,6 +45,14 @@ export default {
     })
   },
 
+  configureMfa(payload) {
+    return api.post('/auth/me/mfa', payload)
+  },
+
+  verifyMfaEnrollment(payload) {
+    return api.post('/auth/me/mfa/verify', payload)
+  },
+
   getRecoveryCodes() {
     return api.get('/auth/me/recovery-codes')
   },

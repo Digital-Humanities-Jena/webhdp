@@ -468,6 +468,16 @@ class HpcLinkExecutionAdapter(BaseExecutionAdapter):
             if isinstance(batch_record, dict):
                 cls._collect_existing_local_paths(batch_record.get("file_path"), paths)
 
+        hdpc_path = execution_context.get("hdpc_path")
+        if hdpc_path and os.path.isfile(hdpc_path):
+            from services.hdpc_local_service import read_hdpc_record_inputs
+            records = [record_context] + list(request.metadata.get("batch_records") or [])
+            for record in records:
+                if not isinstance(record, dict) or not record.get("record_id"):
+                    continue
+                for item in read_hdpc_record_inputs(hdpc_path, int(record["record_id"])):
+                    cls._collect_existing_local_paths(item.get("absolute_path"), paths)
+
         deduplicated: List[str] = []
         seen: set[str] = set()
         for path in paths:

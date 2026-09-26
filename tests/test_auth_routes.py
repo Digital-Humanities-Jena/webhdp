@@ -59,7 +59,7 @@ def auth_app():
 
     with app.app_context():
         db.create_all()
-        user = User(email="owner@example.com", role=UserRole.USER, is_verified=True)
+        user = User(email="owner@example.com", role=UserRole.USER, is_verified=True, mfa_enabled=True)
         user.set_password("password123")
         user.set_capabilities(["developer_access"])
         recipient = User(email="recipient@example.com", role=UserRole.USER, is_verified=True)
@@ -296,13 +296,10 @@ def test_configured_provider_bypass_skips_email_mfa(auth_app):
     assert response.status_code == 200
     payload = response.get_json()["data"]
     assert payload["access_token"]
-    assert payload["mfa_bypassed"] is True
     assert payload["user"]["email"] == "person@gmail.com"
     assert auth_app["email_service"].login_codes == []
     with auth_app["app"].app_context():
         assert UserMfaChallenge.query.count() == 0
-        audit_event = AuditEvent.query.filter_by(event_type="auth.login_mfa_bypassed").one()
-        assert audit_event.details["email_domain"] == "gmail.com"
 
 
 def test_recovery_code_generation_returns_plaintext_once_and_stores_hashes(auth_app):
@@ -648,3 +645,37 @@ def test_account_update_accepts_internal_profile_visibility_and_rejects_public(a
     )
     assert public_response.status_code == 400
     assert "private or internal" in public_response.get_json()["error"]["message"]
+
+
+def test_password_login_is_default_without_email_delivery(auth_app):
+    response = _login_for_mfa(auth_app, email="recipient@example.com")
+    assert response.status_code == 200
+    assert response.get_json()["data"]["access_token"]
+    assert response.get_json()["data"]["user"]["mfa_enabled"] is False
+    assert not auth_app["email_service"].login_codes
+
+
+def test_optional_mfa_enrollment_verify_and_disable(auth_app):
+    client = auth_app["client"]
+    headers = auth_app["recipient_headers"]
+    start = client.post("/api/v1/auth/me/mfa", headers=headers, json={"enabled": True, "current_password": "password123"})
+    assert start.status_code == 202
+    token = start.get_json()["data"]["mfa_token"]
+    code = auth_app["email_service"].login_codes[-1]["code"]
+    assert _login_for_mfa(auth_app, email="recipient@example.com").status_code == 200
+    assert client.post("/api/v1/auth/login/verify-code", json={"mfa_token": token, "code": code}).status_code == 400
+    assert client.post("/api/v1/auth/me/mfa/verify", headers=auth_app["headers"], json={"mfa_token": token, "code": code}).status_code == 400
+    confirmed = client.post("/api/v1/auth/me/mfa/verify", headers=headers, json={"mfa_token": token, "code": code})
+    assert confirmed.status_code == 200
+    assert confirmed.get_json()["data"]["user"]["mfa_enabled"] is True
+    assert _login_for_mfa(auth_app, email="recipient@example.com").status_code == 202
+    assert client.post("/api/v1/auth/me/mfa", headers=headers, json={"enabled": False, "current_password": "wrong"}).status_code == 400
+    assert client.post("/api/v1/auth/me/mfa", headers=headers, json={"enabled": False, "current_password": "password123"}).status_code == 200
+    assert _login_for_mfa(auth_app, email="recipient@example.com").status_code == 200
+
+
+def test_provider_setting_cannot_bypass_user_enabled_mfa(auth_app):
+    with auth_app["app"].app_context():
+        db.session.add(SystemConfig(key="mfa_provider_bypass", value=json.dumps({"enabled": True, "domains": ["example.com"]})))
+        db.session.commit()
+    assert _login_for_mfa(auth_app).status_code == 202

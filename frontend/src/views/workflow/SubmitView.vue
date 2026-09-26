@@ -194,7 +194,7 @@
                 </div>
               </div>
 
-              <div class="p-4 bg-rose-50 rounded-lg border border-rose-200">
+              <div v-if="!isUsdzDisabled" class="p-4 bg-rose-50 rounded-lg border border-rose-200">
                 <div class="flex items-center justify-between">
                   <div class="pr-3">
                     <h3 class="text-sm font-medium text-gray-900">Critical Error Policy</h3>
@@ -415,12 +415,13 @@
 
           <div class="bg-gray-50 rounded-lg p-6 border border-gray-200 mb-8 text-left">
             <h4 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Workflow Summary</h4>
-            <div v-if="executionTimings" class="mb-4 grid grid-cols-2 gap-2 text-xs">
-              <div v-for="(time, key) in executionTimings" :key="key" class="flex justify-between p-2 bg-white rounded border border-gray-100">
+            <details v-if="executionTimingSummary.length" class="mb-4 text-xs">
+              <summary class="cursor-pointer text-gray-600">Processing times</summary>
+              <div v-for="[key, time] in executionTimingSummary" :key="key" class="flex justify-between p-2 bg-white rounded border border-gray-100">
                 <span class="text-gray-500 capitalize">{{ key.replace('_', ' ') }}:</span>
-                <span class="font-mono font-bold text-indigo-600">{{ typeof time === 'number' ? time.toFixed(2) + 's' : time }}</span>
+                <span class="font-mono font-bold text-indigo-600">{{ time.toFixed(2) }}s</span>
               </div>
-            </div>
+            </details>
             <ul class="space-y-2 text-sm">
               <li class="flex items-center text-green-700">
                 <svg class="h-4 w-4 mr-2" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" /></svg>
@@ -536,6 +537,7 @@ const statusMessage = ref('Initializing pipeline...')
 const isSandbox = ref(true)
 const abortOnCriticalError = ref(false)
 const executionTimings = ref(null)
+const executionTimingSummary = computed(() => Object.entries(executionTimings.value || {}).filter(([, time]) => typeof time === 'number' && Number.isFinite(time)))
 const submissionId = ref(null)
 const pipelineRunId = ref(null)
 const processingProgress = ref(null)

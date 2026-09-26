@@ -198,7 +198,7 @@ const navigation = computed(() => rawNavigation.map((item) => {
 }))
 
 const enabledItems = computed(() => navigation.value.filter((item) => item.enabled))
-const disabledItems = computed(() => navigation.value.filter((item) => !item.enabled))
+const disabledItems = computed(() => context.value.core_only ? [] : navigation.value.filter((item) => !item.enabled))
 
 const isActive = (href) => route.path.startsWith(href)
 

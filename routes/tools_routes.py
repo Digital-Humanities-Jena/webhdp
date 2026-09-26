@@ -714,6 +714,26 @@ def _build_validation_report(
     return validation
 
 
+@tools_bp.before_request
+def enforce_core_tools_profile():
+    if os.environ.get("WEBHDP_CORE_ONLY", "false").lower() == "true":
+        if request.path.rstrip("/") not in {"/api/v1/tools/context", "/api/v1/tools/hpc-diagnostics"}:
+            return APIResponse.error("FEATURE_DISABLED", "This optional tool is disabled in the core workflow profile.", 403)
+
+
+@tools_bp.after_request
+def filter_core_tools_context(response):
+    if os.environ.get("WEBHDP_CORE_ONLY", "false").lower() == "true" and request.path.rstrip("/").endswith("/context") and response.status_code == 200:
+        payload = response.get_json()
+        data = payload.get("data", {})
+        data["core_only"] = True
+        for key, feature in data.get("features", {}).items():
+            if key != "hpc_diagnostics":
+                feature.update(enabled=False, reason="Disabled in the core workflow profile")
+        response.set_data(json.dumps(payload))
+    return response
+
+
 @tools_bp.route("/context", methods=["GET"])
 @jwt_required()
 def tools_context():

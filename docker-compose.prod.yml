@@ -1,6 +1,6 @@
 services:
   backend:
-    image: ${WEBHDP_BACKEND_IMAGE:-webhdp-backend:${WEBHDP_IMAGE_TAG:-0.1.0-alpha.1}}
+    image: ${WEBHDP_BACKEND_IMAGE:-webhdp-backend:${WEBHDP_IMAGE_TAG:-0.1.0-alpha.2}}
     restart: unless-stopped
     env_file:
       - .env
@@ -55,7 +55,7 @@ services:
       start_period: 40s
 
   frontend:
-    image: ${WEBHDP_FRONTEND_IMAGE:-webhdp-frontend:${WEBHDP_IMAGE_TAG:-0.1.0-alpha.1}}
+    image: ${WEBHDP_FRONTEND_IMAGE:-webhdp-frontend:${WEBHDP_IMAGE_TAG:-0.1.0-alpha.2}}
     restart: unless-stopped
     environment:
       - OEMBED_FRAME_ANCESTORS=${OEMBED_FRAME_ANCESTORS:-'self'}
@@ -78,7 +78,7 @@ services:
   fast-renderer:
     profiles:
       - local-hdp-components
-    image: ${WEBHDP_FAST_RENDERER_IMAGE:-webhdp-fast-renderer:${WEBHDP_IMAGE_TAG:-0.1.0-alpha.1}}
+    image: ${WEBHDP_FAST_RENDERER_IMAGE:-webhdp-fast-renderer:${WEBHDP_IMAGE_TAG:-0.1.0-alpha.2}}
     restart: unless-stopped
     volumes:
       - ${WEBHDP_SESSIONS_PATH:-/srv/webhdp/sessions}:/shared/sessions
@@ -101,7 +101,7 @@ services:
   any-to-usdz:
     profiles:
       - local-hdp-components
-    image: ${WEBHDP_ANY_TO_USDZ_IMAGE:-webhdp-any-to-usdz:${WEBHDP_IMAGE_TAG:-0.1.0-alpha.1}}
+    image: ${WEBHDP_ANY_TO_USDZ_IMAGE:-webhdp-any-to-usdz:${WEBHDP_IMAGE_TAG:-0.1.0-alpha.2}}
     platform: ${ANY_TO_USDZ_PLATFORM:-linux/amd64}
     restart: unless-stopped
     volumes:
@@ -135,7 +135,7 @@ services:
       start_period: 5s
 
   worker:
-    image: ${WEBHDP_BACKEND_IMAGE:-webhdp-backend:${WEBHDP_IMAGE_TAG:-0.1.0-alpha.1}}
+    image: ${WEBHDP_BACKEND_IMAGE:-webhdp-backend:${WEBHDP_IMAGE_TAG:-0.1.0-alpha.2}}
     command: celery -A celery_app.celery worker --loglevel=info --time-limit=${CELERY_TASK_TIME_LIMIT:-3600} --soft-time-limit=${CELERY_TASK_SOFT_TIME_LIMIT:-3300}
     restart: unless-stopped
     stop_grace_period: 10m

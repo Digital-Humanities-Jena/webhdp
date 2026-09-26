@@ -363,3 +363,31 @@ def test_minimum_viable_edm_removes_deferred_3drepo_viewer_and_keeps_direct_3d_w
         )
         == "image/png"
     )
+
+
+def test_all_bundled_templates_pass_real_edm_xsd(tmp_path):
+    from database.models import LodTemplate
+    app = _build_generation_app(tmp_path)
+    with app.app_context():
+        db.create_all()
+        ensure_default_lod_templates()
+        service = EdmService()
+        for template in LodTemplate.query.filter_by(standard="edm").all():
+            generation = service.generate_edm_xml_with_report(
+                metadata={"title": "Heritage object & context", "description": "A documented heritage object used to validate the bundled metadata templates.",
+                          "creators": [{"name": "Example, Researcher", "affiliation": "Museum"}],
+                          "license": "cc-by-4.0", "upload_type": "dataset", "publication_date": "2026-09-26"},
+                zenodo_record={"id": 123, "metadata": {"prereserve_doi": {"doi": "10.5281/zenodo.123"}},
+                               "links": {"html": "https://zenodo.org/records/123"},
+                               "files": [{"key": "object.glb", "size": 1000}, {"key": "object_r000.png", "size": 100}]},
+                template_id=template.id, main_file_key="object.glb", validate=False,
+            )
+            result = service.validate_with_xsd(generation["content"])
+            assert result["valid"], (template.name, result["errors"])
+            assert result["skipped"] is False
+
+
+def test_xsd_validation_rejects_well_formed_but_unknown_elements():
+    result = EdmService().validate_with_xsd('<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><unknown/></rdf:RDF>')
+    assert result["valid"] is False
+    assert result["errors"]

@@ -307,6 +307,14 @@ async def stage_webhdp_uploaded_files(request: Request, session_id: str, payload
     )
 
 
+@router.put("/webhdp/sessions/{session_id}/stage/file")
+async def stream_webhdp_file(request: Request, session_id: str, path: str):
+    return await hpc_application_service.stream_webhdp_file(
+        session_id, path, request.stream(), get_request_user(request),
+        expected_size=request.headers.get("content-length"),
+    )
+
+
 @router.post("/webhdp/sessions/{session_id}/components/preflight", response_model=WebHdpPreflightResponse)
 @limiter.limit("10/minute")
 async def preflight_webhdp_components(request: Request, session_id: str, payload: WebHdpPreflightRequest):
@@ -327,6 +335,11 @@ async def run_webhdp_component(request: Request, session_id: str, payload: WebHd
         payload,
         get_request_user(request),
     )
+
+
+@router.get("/webhdp/sessions/{session_id}/artifacts/download")
+async def download_webhdp_artifact(request: Request, session_id: str, path: str = Query(...)):
+    return await hpc_application_service.download_webhdp_artifact(session_id, path, get_request_user(request))
 
 
 @router.post("/webhdp/components/validate-install")

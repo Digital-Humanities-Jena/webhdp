@@ -415,6 +415,7 @@ class WebHdpComponentRunRequest(BaseModel):
     scope: str = "record"
     record_context: dict[str, Any] = Field(default_factory=dict)
     batch_records: list[dict[str, Any]] = Field(default_factory=list)
+    staged_files: list[dict[str, Any]] = Field(default_factory=list)
 
     @field_validator("profile")
     @classmethod

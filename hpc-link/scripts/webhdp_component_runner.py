@@ -167,6 +167,16 @@ def _common_input_root(paths: list[Path], remote_input_dir: Path) -> Path:
         return remote_input_dir
 
 
+def _resolve_staged_input(value: str, request: dict[str, Any], remote_input_dir: Path) -> Path:
+    for item in request.get("staged_files") or []:
+        if item.get("local_path") == value and item.get("remote_path"):
+            resolved = Path(item["remote_path"]).resolve()
+            if not resolved.is_relative_to(remote_input_dir.resolve()) or not resolved.is_file():
+                raise ValueError("Staged input must exist inside the allocation input directory")
+            return resolved
+    return _resolve_input_path(value, remote_input_dir)
+
+
 def _collect_render_inputs(request: dict[str, Any], remote_input_dir: Path) -> tuple[list[str], list[Path]]:
     inputs = request.get("inputs") if isinstance(request.get("inputs"), dict) else {}
     batch_records = request.get("batch_records") if isinstance(request.get("batch_records"), list) else []
@@ -188,7 +198,7 @@ def _collect_render_inputs(request: dict[str, Any], remote_input_dir: Path) -> t
                 originals.append(str(path))
                 remotes.append(path.resolve())
         return originals, remotes
-    remote_paths = [_resolve_input_path(value, remote_input_dir) for value in original_values]
+    remote_paths = [_resolve_staged_input(value, request, remote_input_dir) for value in original_values]
     return original_values, remote_paths
 
 
@@ -246,7 +256,7 @@ def _render_component(request: dict[str, Any]) -> dict[str, Any]:
 
     for original, remote_path in zip(originals, remote_paths):
         raw = raw_results.get(str(remote_path.resolve()), raw_results.get(str(remote_path), {}))
-        remote_output_subdir = output_dir / remote_path.relative_to(input_root).with_suffix("")
+        remote_output_subdir = output_dir / remote_path.relative_to(input_root)
         render_outputs = sorted(str(path.resolve()) for path in remote_output_subdir.rglob("*") if path.is_file())
         thumbnail_files = [path for path in render_outputs if Path(path).suffix.lower() == ".png"]
         success = bool(raw.get("success")) and bool(render_outputs)
@@ -380,7 +390,7 @@ def _usdz_component(request: dict[str, Any]) -> dict[str, Any]:
     original = str(inputs.get("input_file") or record_context.get("file_path") or "").strip()
     if not original:
         return {"success": False, "status": "failed", "error": "USDZ Converter requires an input file.", "outputs": {}}
-    input_path = _resolve_input_path(original, remote_input_dir)
+    input_path = _resolve_staged_input(original, request, remote_input_dir)
     output_dir = _component_output_dir("any_to_usdz", request) / input_path.stem
     output_path = output_dir / f"{input_path.stem}.usdz"
     started = time.time()

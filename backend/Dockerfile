@@ -4,10 +4,9 @@
 FROM python:3.11-slim AS builder
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 WORKDIR /app
-COPY requirements.txt ./
-# RUN uv export --no-dev --format requirements-txt > requirements.txt
-RUN pip wheel --no-cache-dir --no-deps --wheel-dir /app/wheels -r requirements.txt
-RUN pip wheel --no-cache-dir --no-deps --wheel-dir /app/wheels PyYAML
+COPY pyproject.toml uv.lock ./
+RUN uv export --frozen --no-dev --no-emit-project --format requirements-txt > requirements.lock \
+    && pip wheel --no-cache-dir --wheel-dir /app/wheels -r requirements.lock
 
 # Stage 2: Final
 FROM python:3.11-slim

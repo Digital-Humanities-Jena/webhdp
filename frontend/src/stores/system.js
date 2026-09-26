@@ -10,6 +10,7 @@ function tokenFromCurrentUrl() {
 }
 
 export const useSystemStore = defineStore('system', () => {
+  const coreOnly = ref(false)
   const isInitialized = ref(true)
   const statusChecked = ref(false)
   const loading = ref(true)
@@ -48,6 +49,7 @@ export const useSystemStore = defineStore('system', () => {
     if (statusChecked.value) return
     try {
       const response = await api.get('/setup/status')
+      coreOnly.value = Boolean(response.data.core_only)
       isInitialized.value = response.data.initialized
       statusChecked.value = true
     } catch (error) {
@@ -89,6 +91,7 @@ export const useSystemStore = defineStore('system', () => {
   }
 
   return {
+    coreOnly,
     isInitialized,
     loading,
     setupToken,

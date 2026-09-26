@@ -110,7 +110,7 @@
                                 </div>
                                 <div class="min-w-0 flex-1">
                                     <p class="text-sm font-medium text-gray-900 truncate" :title="asset.name">{{ asset.name }}</p>
-                                    <p class="text-xs text-gray-500">{{ (asset.size / 1024).toFixed(1) }} KB</p>
+                                    <p class="text-xs text-gray-500">{{ ((asset.size ?? asset.size_bytes ?? 0) / 1024).toFixed(1) }} KB</p>
                                 </div>
                                 <div class="flex-shrink-0">
                                     <div :class="['w-4 h-4 rounded-full border flex items-center justify-center', selectedFile?.name === asset.name ? 'border-indigo-600' : 'border-gray-300']">
@@ -171,8 +171,8 @@
                             <span class="text-[9px] px-1.5 py-0.5 rounded bg-gray-200 text-gray-500 font-bold uppercase">{{ systemConfig.enable_schematron_validation ? 'Active' : 'Skipped' }}</span>
                         </div>
                     </div>
-                    <p v-if="!systemConfig.enable_xsd_validation" class="mt-3 text-[10px] text-gray-400 italic">
-                        * XSD/Schematron are currently handled by local rule checks; Local EDM Validator remains the source of truth.
+                    <p v-if="!localValidatorEnabled" class="mt-3 text-[10px] text-gray-400 italic">
+                        External validation is optional. The report below identifies checks that ran and checks that were skipped.
                     </p>
                 </div>
 
@@ -197,8 +197,8 @@
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
                             </svg>
                             <div>
-                                <p class="font-bold text-sm">{{ validationResult.valid ? 'Strictly Compliant' : 'Issues Found' }}</p>
-                                <p class="text-xs opacity-80">{{ validationResult.valid ? 'The generated XML follows Europeana schemas and business rules.' : 'Your submission has some issues that should be addressed.' }}</p>
+                                <p class="font-bold text-sm">{{ validationResult.valid ? 'Available checks passed' : 'Issues Found' }}</p>
+                                <p class="text-xs opacity-80">{{ validationResult.valid ? 'The generated XML passed the checks listed below. Skipped checks have not been performed.' : 'Your submission has some issues that should be addressed.' }}</p>
                             </div>
                         </div>
 
@@ -251,8 +251,8 @@
                             <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
                                 <div v-for="(res, type) in validationResult.details" :key="type" class="flex flex-col items-center justify-center p-2 bg-gray-50 rounded-lg border border-gray-100">
                                     <span class="text-[9px] uppercase font-bold text-gray-400">{{ formatValidationStep(type) }}</span>
-                                    <span :class="['text-[10px] font-bold', validationDetailPassed(res) ? 'text-green-600' : 'text-red-600']">
-                                        {{ validationDetailPassed(res) ? 'PASS' : 'FAIL' }}
+                                    <span :class="['text-[10px] font-bold', !res || res.skipped ? 'text-gray-500' : validationDetailPassed(res) ? 'text-green-600' : 'text-red-600']">
+                                        {{ !res || res.skipped ? 'SKIPPED' : validationDetailPassed(res) ? 'PASS' : 'FAIL' }}
                                     </span>
                                 </div>
                             </div>

@@ -173,6 +173,9 @@ def test_create_and_scan_hdpc_project_scans_preferred_primary_dependencies_in_hy
         assert by_filename["temple_column.obj"][2] == "Valid"
         assert by_filename["temple_column.mtl"][1] == "primary"
         assert by_filename["detail.obj"][2] == "Valid"
+        assert by_filename["detail.obj"][1] == "primary_source"
+        assert by_filename["detail.obj"][3] is None
+        assert by_filename["temple_column.obj"][3] is None
         assert by_filename["detail.mtl"][1] == "primary"
 
 

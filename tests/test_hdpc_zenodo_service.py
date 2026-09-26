@@ -748,3 +748,44 @@ def test_create_new_version_with_files_reuses_existing_draft_without_reuploading
         assert [row["zenodo_file_key"] for row in file_map] == ["model.glb", "preview.png"]
     finally:
         conn.close()
+
+
+def test_retry_reuses_draft_and_restores_missing_original(tmp_path):
+    hdpc_path = str(tmp_path / "retry.hdpc")
+    _create_hdpc_with_source(hdpc_path, str(tmp_path))
+    create_local_record_with_metadata(
+        hdpc_path, file_id=101,
+        metadata={"title": "Retry", "description": "Description", "creators": [{"name": "Museum"}]},
+        is_sandbox=True, access_token="sandbox-token",
+    )
+    http = _DummyZenodoHttp()
+    assert create_api_draft(hdpc_path, 1, http=http)["success"]
+    assert upload_files_for_deposition(hdpc_path, 1, http=http)["success"]
+    http.draft_files = []  # A remote deletion must not leave a false uploaded flag.
+    result = create_api_draft(hdpc_path, 1, http=http)
+    assert result["success"]
+    assert result["zenodo_response"]["id"] == 9001
+    assert len(http.post_calls) == 1
+    upload = upload_files_for_deposition(hdpc_path, 1, http=http)
+    assert upload["success"] and upload["uploaded_file_count"] == 1
+    assert any(item["filename"] == "model.glb" for item in http.draft_files)
+    assert create_api_draft(hdpc_path, 1, http=http)["success"]
+    assert upload_files_for_deposition(hdpc_path, 1, http=http)["uploaded_file_count"] == 0
+    assert len(http.post_calls) == 1
+
+
+def test_retry_does_not_replace_unavailable_or_submitted_draft(tmp_path):
+    hdpc_path = str(tmp_path / "retry.hdpc")
+    _create_hdpc_with_source(hdpc_path, str(tmp_path))
+    create_local_record_with_metadata(
+        hdpc_path, file_id=101,
+        metadata={"title": "Retry", "creators": [{"name": "Museum"}]},
+        is_sandbox=True, access_token="sandbox-token",
+    )
+    http = _DummyZenodoHttp()
+    assert create_api_draft(hdpc_path, 1, http=http)["success"]
+    http.get = lambda *args, **kwargs: _DummyResponse(503, {})
+    assert not create_api_draft(hdpc_path, 1, http=http)["success"]
+    http.get = lambda *args, **kwargs: _DummyResponse(200, {"id": 9001, "submitted": True})
+    assert not create_api_draft(hdpc_path, 1, http=http)["success"]
+    assert len(http.post_calls) == 1

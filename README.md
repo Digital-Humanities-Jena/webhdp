@@ -2,12 +2,12 @@
 
 WebHDP is a web application for preparing, validating, and publishing
 heritage-science datasets, with strong support for 3D assets, tabular metadata,
-Zenodo workflows, and generated EDM, IIIF, and METS outputs.
+Zenodo workflows, and generated EDM, CIDOC-CRM, JSON-LD, IIIF, and METS/MODS outputs.
 
 Canonical source repository:
 `https://github.com/Digital-Humanities-Jena/webhdp`
 
-Current public release: `v0.1.0-alpha.1`
+Release version: `v0.1.0-alpha.2`
 
 ## What WebHDP Does
 
@@ -22,7 +22,7 @@ Core capabilities:
 - Guided session workflow from source files and MSF spreadsheets to records
 - Local `.hdpc` project state for record identity, provenance, and reruns
 - Metadata extraction, mapping, normalization, and validation
-- EDM, IIIF, and METS generation
+- EDM, CIDOC-CRM, JSON-LD, IIIF, and METS/MODS generation
 - Optional local EDM validation via a pinned external validator checkout
 - Optional 3D rendering and USDZ conversion services
 - Public record pages and oEmbed responses for published records
@@ -35,10 +35,19 @@ Core capabilities:
 This is an alpha repository release. The most stable path is the predefined
 `render` pipeline and the low-resource `metadata_only` pipeline.
 
+The HPC-Link renderer path supports authenticated service accounts, allocation
+preflight, dependency staging, and downloads restricted to allocation outputs.
+Each deployment must validate its scheduler, GPU driver, and Blender runtime.
+
+Set `WEBHDP_CORE_ONLY=true` to expose only the predefined workflows and HPC
+diagnostics, and disable optional tools and pipeline authoring. Set
+`ZENODO_PUBLISH_ENABLED=false` for draft-only demonstrations and testing.
+Username (email) and password login is the default; users may enroll in email
+two-factor authentication from their account settings.
+
 HDP Component installation, Pipeline Constructor workflows, local Docker-backed
-component execution, and HPC-Link or SIF-based execution are included for
-evaluation and operator validation. Treat them as deployment-specific features
-until the target machine or HPC environment has been tested.
+components, and SIF execution remain optional evaluation features outside the
+validated core profile.
 
 This repository does not contain private HPC credentials, local runtime data,
 deployment secrets, generated reports, or vendored local-edm-validator source.

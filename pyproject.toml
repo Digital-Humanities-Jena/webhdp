@@ -1,6 +1,6 @@
 [project]
 name = "webhdp"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "WebHDP web application for preparing, validating, and publishing heritage-science datasets."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -33,6 +33,7 @@ dependencies = [
     "google-auth-httplib2>=0.2.0",
     "google-auth-oauthlib>=1.0.0",
     "dropbox>=11.36.0",
+    "rdflib>=7.1,<8",
 ]
 
 [project.urls]

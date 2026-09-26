@@ -65,7 +65,7 @@ PIPELINE_DEFINITION = {
         {
             "id": "lod_generation",
             "name": "LOD Generation",
-            "description": "Generates EDM, IIIF, and METS metadata files.",
+            "description": "Generates EDM, CIDOC-CRM, JSON-LD, IIIF, and METS/MODS metadata files.",
             "enabled": True,
             "parameters": {
                 "generate_edm": True,
@@ -119,7 +119,7 @@ METADATA_ONLY_PIPELINE_DEFINITION = {
         {
             "id": "lod_generation",
             "name": "LOD Generation",
-            "description": "Generates EDM, IIIF, and METS metadata.",
+            "description": "Generates EDM, CIDOC-CRM, JSON-LD, IIIF, and METS/MODS metadata.",
             "enabled": True,
             "parameters": {
                 "generate_edm": True,

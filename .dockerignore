@@ -37,3 +37,16 @@ test_data/
 *.tgz
 *.7z
 docs/screen_recordings/raw/
+
+credentials/
+hpc-link/secrets/
+hpc-link/data/
+**/.env
+**/.env.*
+**/*credentials*.txt
+*.env
+**/*.env
+**/secrets/
+private-secrets/
+hpc-auth/
+*-profile.yml

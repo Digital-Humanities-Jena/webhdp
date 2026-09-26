@@ -69,7 +69,7 @@ def require_setup_authorization(func):
 @setup_bp.route("/status", methods=["GET"])
 def get_status():
     """Check if the system is initialized."""
-    return APIResponse.success(data={"initialized": _setup_completed()})
+    return APIResponse.success(data={"initialized": _setup_completed(), "core_only": os.environ.get("WEBHDP_CORE_ONLY", "false").lower() == "true"})
 
 @setup_bp.route("/reset", methods=["POST"])
 @jwt_required()

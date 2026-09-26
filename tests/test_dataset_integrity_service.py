@@ -120,7 +120,7 @@ def test_sandbox_record_creation_allows_missing_dataset_key(monkeypatch):
     monkeypatch.setattr(
         service,
         "collect_dataset_records",
-        lambda include_all_sessions=True: pytest.fail("duplicate scan should not run without a dataset key in sandbox"),
+        lambda include_all_sessions=True: ([], []),
     )
 
     service.ensure_fresh_record_creation_allowed(
@@ -160,27 +160,19 @@ def test_scan_candidate_files_infers_upload_context_for_zip_batch(tmp_path, monk
     assert candidates[0].dataset_key == "session_42_dataset"
 
 
-def test_production_record_creation_still_requires_dataset_key(monkeypatch):
-    monkeypatch.setattr(
-        service,
-        "get_session_dataset_context",
-        lambda session_row: {
-            "msf_path": None,
-            "directory_root": None,
-            "dataset_key": None,
-            "directory_recursive": True,
-            "prepared_candidate_files": [],
-        },
-    )
-
-    with pytest.raises(service.DatasetIntegrityConflictError) as exc_info:
-        service.ensure_fresh_record_creation_allowed(
-            SimpleNamespace(id=1),
-            source_file_path="/shared/sessions/hdp_session_abcd/uploads/test_model.glb",
-            is_sandbox=False,
-        )
-
-    assert "Dataset key could not be inferred" in str(exc_info.value)
+def test_production_uploaded_files_use_session_identity_and_block_duplicates(monkeypatch):
+    monkeypatch.setattr(service, "get_session_dataset_context", lambda session_row: {})
+    source = "/shared/sessions/hdp_session_abcd/uploads/test_model.glb"
+    monkeypatch.setattr(service, "collect_dataset_records", lambda **kwargs: ([], []))
+    service.ensure_fresh_record_creation_allowed(SimpleNamespace(id=1), source_file_path=source, is_sandbox=False)
+    monkeypatch.setattr(service, "collect_dataset_records", lambda **kwargs: ([{
+        "dataset_key_lower": "session_1_dataset", "source_file_path": source,
+        "normalized_source_file_path": service.normalize_source_path(source, "session_1_dataset"),
+        "source_file_name": "test_model.glb", "is_sandbox": False,
+        "record_status": "draft", "concept_rec_id": "123", "session_id": 1,
+    }], []))
+    with pytest.raises(service.DatasetIntegrityConflictError, match="Duplicate"):
+        service.ensure_fresh_record_creation_allowed(SimpleNamespace(id=1), source_file_path=source, is_sandbox=False)
 
 
 def test_sandbox_record_creation_still_blocks_duplicates_when_dataset_key_exists(monkeypatch):

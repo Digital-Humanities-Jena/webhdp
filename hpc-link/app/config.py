@@ -77,7 +77,7 @@ class Settings(BaseSettings):
 
     # API
     api_title: str = "HPC Link API"
-    api_version: str = "0.1.0-alpha.1"
+    api_version: str = "0.1.0-alpha.2"
     api_key: str | None = None  # If set, requires X-API-Key header
     legacy_api_key_auth_enabled: bool = False
     cors_origins: Annotated[list[str], NoDecode] = [

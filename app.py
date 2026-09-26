@@ -525,7 +525,7 @@ def health_check():
                 "enable_local_edm_validation": app.config.get("ENABLE_LOCAL_EDM_VALIDATION", True),
                 "local_edm_validator_url": app.config.get("LOCAL_EDM_VALIDATOR_URL"),
                 "enable_metis_validation": app.config.get("ENABLE_METIS_VALIDATION", True),
-                "enable_xsd_validation": False,  # Hardcoded as disabled in EdmService
+                "enable_xsd_validation": True,
                 "enable_schematron_validation": False,  # Hardcoded as disabled in EdmService
                 "enable_renderer": app.config.get("ENABLE_RENDERER", True),
                 "enable_usdz_conversion": app.config.get("ENABLE_USDZ_CONVERSION", True),

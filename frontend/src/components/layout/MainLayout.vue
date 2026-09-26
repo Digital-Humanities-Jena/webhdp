@@ -95,6 +95,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { useSystemStore } from '@/stores/system'
 import { useNotificationStore } from '@/stores/notifications'
 import { buildIssueDraftContext, saveIssueDraftContext } from '@/utils/issueDraft'
 import NotificationBell from '@/components/layout/NotificationBell.vue'
@@ -103,6 +104,7 @@ import LegalLinks from '@/components/legal/LegalLinks.vue'
 const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
+const systemStore = useSystemStore()
 const notificationStore = useNotificationStore()
 const versionInfo = ref(null)
 
@@ -185,6 +187,10 @@ const navigationItems = computed(() => {
     authStore.hasGroup('developer')
   ) {
     items.push({ label: 'Developer', to: '/developer' })
+  }
+  if (systemStore.coreOnly) {
+    const corePaths = new Set(["/onboarding", "/dashboard", "/uploads", "/submissions", "/records/explorer", "/hpc-resources", "/tools", "/docs", "/admin/dashboard"])
+    return items.filter((item) => corePaths.has(item.to))
   }
   return items
 })

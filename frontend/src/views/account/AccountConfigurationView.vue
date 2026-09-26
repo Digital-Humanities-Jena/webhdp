@@ -46,6 +46,25 @@
         <p class="mt-1">An administrator reset your recovery access. Update your password before continuing.</p>
       </section>
 
+      <section class="rounded-xl border border-gray-200 bg-white p-6 space-y-3" aria-labelledby="mfa-heading">
+        <h2 id="mfa-heading" class="text-lg font-semibold text-gray-900">Two-factor authentication</h2>
+        <p class="text-sm text-gray-600">{{ authStore.user?.mfa_enabled ? 'Enabled: an email code is required when you sign in.' : 'Optional: sign in with your email and password, or add an email confirmation code.' }}</p>
+        <form v-if="!mfaToken" class="flex flex-wrap items-end gap-3" @submit.prevent="configureMfa">
+          <label class="text-sm font-medium text-gray-700">Current password
+            <input v-model="mfaPassword" type="password" autocomplete="current-password" required class="mt-1 block rounded-md border-gray-300" />
+          </label>
+          <button :disabled="mfaBusy || passwordChangeRequired" class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{{ mfaBusy ? 'Please wait…' : authStore.user?.mfa_enabled ? 'Disable email verification' : 'Set up email verification' }}</button>
+        </form>
+        <form v-else class="flex flex-wrap items-end gap-3" @submit.prevent="verifyMfa">
+          <label class="text-sm font-medium text-gray-700">Code sent to your email
+            <input v-model.trim="mfaCode" type="text" inputmode="numeric" autocomplete="one-time-code" required class="mt-1 block rounded-md border-gray-300" />
+          </label>
+          <button :disabled="mfaBusy" class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{{ mfaBusy ? 'Verifying…' : 'Verify and enable' }}</button>
+          <button type="button" :disabled="mfaBusy" class="text-sm text-gray-600" @click="mfaToken = ''; mfaCode = ''">Cancel</button>
+        </form>
+        <p v-if="mfaMessage" role="status" class="text-sm text-gray-700">{{ mfaMessage }}</p>
+      </section>
+
       <section class="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <article class="xl:col-span-2 bg-white shadow-sm rounded-xl border border-gray-200">
           <div class="px-6 py-5 border-b border-gray-200">
@@ -550,6 +569,48 @@ import { useToast } from '@/composables/useToast'
 const authStore = useAuthStore()
 const route = useRoute()
 const toast = useToast()
+
+const mfaPassword = ref('')
+const mfaCode = ref('')
+const mfaToken = ref('')
+const mfaBusy = ref(false)
+const mfaMessage = ref('')
+
+async function configureMfa() {
+  mfaBusy.value = true
+  mfaMessage.value = ''
+  try {
+    const response = await authService.configureMfa({ enabled: !authStore.user?.mfa_enabled, current_password: mfaPassword.value })
+    const data = response.data
+    mfaPassword.value = ''
+    if (data.mfa_token) {
+      mfaToken.value = data.mfa_token
+      mfaMessage.value = data.development_mfa_code ? `Development code: ${data.development_mfa_code}` : 'Enter the code within 10 minutes to finish setup.'
+    } else {
+      authStore.user = data.user
+      mfaMessage.value = 'Two-factor authentication disabled.'
+    }
+  } catch (error) {
+    mfaMessage.value = error?.error?.message || error?.message || 'Unable to update two-factor authentication.'
+  } finally {
+    mfaBusy.value = false
+  }
+}
+
+async function verifyMfa() {
+  mfaBusy.value = true
+  try {
+    const response = await authService.verifyMfaEnrollment({ mfa_token: mfaToken.value, code: mfaCode.value })
+    authStore.user = response.data.user
+    mfaToken.value = ''
+    mfaCode.value = ''
+    mfaMessage.value = 'Two-factor authentication enabled. Save recovery codes below in case you lose email access.'
+  } catch (error) {
+    mfaMessage.value = error?.error?.message || error?.message || 'Unable to verify the code.'
+  } finally {
+    mfaBusy.value = false
+  }
+}
 
 const credentialEnvironments = ['sandbox', 'production']
 

@@ -1,4 +1,5 @@
 import logging
+import os
 from functools import wraps
 
 from flask import Blueprint, current_app, request, send_file
@@ -40,6 +41,8 @@ def _current_user_can_author_pipelines() -> bool:
 def require_pipeline_author(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
+        if os.environ.get("WEBHDP_CORE_ONLY", "false").lower() == "true":
+            return APIResponse.error("FEATURE_DISABLED", "Pipeline authoring is disabled in the core workflow profile.", 403)
         if not _current_user_can_author_pipelines():
             raise SecurityError("Pipeline author access required")
         return func(*args, **kwargs)

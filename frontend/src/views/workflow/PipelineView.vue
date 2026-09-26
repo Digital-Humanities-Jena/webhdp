@@ -87,13 +87,6 @@
                         </svg>
                         {{ step.name }}
                       </span>
-                      <span
-                        v-else
-                        class="inline-flex items-center rounded border border-gray-200 bg-gray-50 px-2 py-0.5 text-[10px] font-medium uppercase tracking-tighter text-gray-400 line-through"
-                        title="Disabled in active config"
-                      >
-                        {{ step.name }}
-                      </span>
                     </template>
                   </div>
                 </div>

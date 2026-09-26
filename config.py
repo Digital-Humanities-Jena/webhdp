@@ -166,7 +166,7 @@ class Config:
     MAIL_DEFAULT_SENDER = os.environ.get("MAIL_DEFAULT_SENDER", "noreply@heritage-data.org")
     MAIL_TIMEOUT = _env_int("MAIL_TIMEOUT", 5)
 
-    # Mandatory email MFA for login
+    # Optional email MFA for login
     MFA_DEVELOPMENT_CODE_DELIVERY = os.environ.get("MFA_DEVELOPMENT_CODE_DELIVERY", "")
     MFA_EMAIL_CODE_LENGTH = _env_int("MFA_EMAIL_CODE_LENGTH", 6)
     MFA_EMAIL_CODE_TTL_SECONDS = _env_int("MFA_EMAIL_CODE_TTL_SECONDS", 600)

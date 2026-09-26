@@ -24,7 +24,6 @@ from services.recovery_code_service import (
     regenerate_user_recovery_codes,
 )
 from services.hpc_resource_request_service import HpcResourceRequestService
-from services.mfa_config_service import email_domain_matches_config, get_email_domain
 from services.user_service import UserService
 from services.zenodo_credential_service import ZenodoCredentialService
 from database.database import db
@@ -310,25 +309,25 @@ def _mask_email(email: str) -> str:
 def _send_login_mfa_code(user: User, code: str) -> bool:
     email_service = getattr(current_app, "email_service", None)
     if not email_service:
-        logger.error("Email service is not available for mandatory login MFA")
+        logger.error("Email service is not available for email login MFA")
         return False
     expires_minutes = max(1, int((_mfa_ttl_seconds() + 59) / 60))
     return bool(email_service.send_login_mfa_code_email(user.email, code, expires_minutes))
 
 
-def _create_email_mfa_challenge(user: User) -> tuple[UserMfaChallenge, str, str]:
+def _create_email_mfa_challenge(user: User, method: str = "email") -> tuple[UserMfaChallenge, str, str]:
     now = datetime.utcnow()
     token = secrets.token_urlsafe(32)
     token_hash = _hash_token(token)
     code = _generate_mfa_code()
     UserMfaChallenge.query.filter(
         UserMfaChallenge.user_id == user.id,
-        UserMfaChallenge.method == "email",
+        UserMfaChallenge.method == method,
         UserMfaChallenge.consumed_at.is_(None),
     ).update({"consumed_at": now, "updated_at": now}, synchronize_session=False)
     challenge = UserMfaChallenge(
         user_id=user.id,
-        method="email",
+        method=method,
         token_hash=token_hash,
         code_hash=_hash_mfa_code(code, token_hash),
         expires_at=now + timedelta(seconds=_mfa_ttl_seconds()),
@@ -442,7 +441,7 @@ def verify_email(token):
 
 @auth_bp.route("/login", methods=["POST"])
 def login():
-    """Authenticate user credentials and start email MFA unless a provider bypass is configured."""
+    """Authenticate with a password, followed by email verification when enabled by the user."""
     data = request.get_json() or {}
 
     email = (data.get("email") or "").strip()
@@ -463,19 +462,10 @@ def login():
         _record_rate_limit_event("login", email, failed=True)
         return APIResponse.error("EMAIL_NOT_VERIFIED", "Please verify your email address before logging in", 403)
 
-    if email_domain_matches_config(user.email):
-        record_audit_event(
-            actor_user_id=user.id,
-            event_type="auth.login_mfa_bypassed",
-            entity_type="user",
-            entity_id=user.id,
-            details={"email_domain": get_email_domain(user.email)},
-        )
-        db.session.commit()
+    if not user.mfa_enabled:
         _clear_rate_limit("login", email)
-        access_token = _create_access_token_for_user(user)
         return APIResponse.success(
-            data={"user": _serialize_user_context(user), "access_token": access_token, "mfa_bypassed": True},
+            data={"user": _serialize_user_context(user), "access_token": _create_access_token_for_user(user)},
             message="Login successful",
         )
 
@@ -636,6 +626,65 @@ def resend_login_code():
         data=payload,
         message="Verification code sent",
     )
+
+
+@auth_bp.route("/me/mfa", methods=["POST"])
+@jwt_required()
+def configure_mfa():
+    """Start email enrollment or disable optional two-factor authentication."""
+    user = user_service.get_by_id(int(get_jwt_identity()))
+    data = request.get_json() or {}
+    limited = _check_rate_limit("mfa_settings", str(user.id))
+    if limited:
+        return limited
+    if not user.check_password(str(data.get("current_password") or "")):
+        _record_rate_limit_event("mfa_settings", str(user.id), failed=True)
+        raise ValidationError("Current password is incorrect")
+    if not isinstance(data.get("enabled"), bool):
+        raise ValidationError("enabled must be a boolean")
+    if not data["enabled"]:
+        user.mfa_enabled = False
+        UserMfaChallenge.query.filter_by(user_id=user.id, consumed_at=None).update(
+            {"consumed_at": datetime.utcnow()}, synchronize_session=False
+        )
+        record_audit_event(actor_user_id=user.id, event_type="auth.mfa_disabled", entity_type="user", entity_id=user.id)
+        db.session.commit()
+        return APIResponse.success(data={"user": _serialize_user_context(user)}, message="Two-factor authentication disabled")
+    limited = _check_rate_limit("mfa_enrollment", user.email)
+    if limited:
+        return limited
+    _record_rate_limit_event("mfa_enrollment", user.email, failed=True)
+    challenge, token, code = _create_email_mfa_challenge(user, method="email_setup")
+    delivered, delivery = _deliver_login_mfa_code(user, code)
+    if not delivered:
+        db.session.rollback()
+        return APIResponse.error("MFA_EMAIL_FAILED", "Unable to send a verification email. Two-factor authentication has not been changed.", 503)
+    db.session.commit()
+    return APIResponse.success(data=_attach_development_mfa_code(_mfa_response_payload(challenge, token, user), code, delivery), status_code=202)
+
+
+@auth_bp.route("/me/mfa/verify", methods=["POST"])
+@jwt_required()
+def verify_mfa_enrollment():
+    """Enable two-factor authentication only after proving email access."""
+    user = user_service.get_by_id(int(get_jwt_identity()))
+    data = request.get_json() or {}
+    challenge = UserMfaChallenge.query.filter_by(
+        token_hash=_hash_token(str(data.get("mfa_token") or "")), user_id=user.id, method="email_setup"
+    ).first()
+    challenge, error = _validate_mfa_challenge(challenge)
+    if error:
+        return error
+    code = str(data.get("code") or "").strip()
+    if not hmac.compare_digest(challenge.code_hash, _hash_mfa_code(code, challenge.token_hash)):
+        challenge.attempts += 1
+        db.session.commit()
+        return APIResponse.error("MFA_CODE_INVALID", "Invalid verification code", 400)
+    challenge.consumed_at = datetime.utcnow()
+    user.mfa_enabled = True
+    record_audit_event(actor_user_id=user.id, event_type="auth.mfa_enabled", entity_type="user", entity_id=user.id)
+    db.session.commit()
+    return APIResponse.success(data={"user": _serialize_user_context(user)}, message="Two-factor authentication enabled")
 
 
 @auth_bp.route("/me/recovery-codes", methods=["GET"])

@@ -62,3 +62,24 @@ def test_generic_singularity_component_builds_command_and_reads_response(tmp_pat
     assert env["SINGULARITYENV_WEBHDP_OUTPUT_DIR"] == "/outputs"
     assert result["outputs"]["report"] == str(output_dir.resolve() / "report.json")
     assert result["artifacts"][0]["remote_path"] == str(output_dir.resolve() / "report.json")
+
+
+def test_staged_mapping_preserves_duplicate_names_and_rejects_escape(tmp_path):
+    import pytest
+    from app.schemas.apps import WebHdpComponentRunRequest
+    runner = _load_runner()
+    inputs = tmp_path / 'inputs'
+    paths = []
+    for folder in ['first', 'second']:
+        path = inputs / folder / 'model.gltf'
+        path.parent.mkdir(parents=True)
+        path.write_text('{}')
+        paths.append(path)
+    mappings = [{'local_path': '/source/' + str(i) + '/model.gltf', 'remote_path': str(path)} for i, path in enumerate(paths)]
+    request = WebHdpComponentRunRequest(component_key='fast_renderer', inputs={'input_files':[m['local_path'] for m in mappings]}, staged_files=mappings).model_dump()
+    originals, remotes = runner._collect_render_inputs(request, inputs)
+    assert remotes == paths
+    assert len(originals) == 2
+    request['staged_files'][0]['remote_path'] = str(tmp_path / 'private')
+    with pytest.raises(ValueError):
+        runner._collect_render_inputs(request, inputs)

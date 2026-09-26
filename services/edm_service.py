@@ -4,6 +4,8 @@ import xml.etree.ElementTree as ET
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 from functools import lru_cache
+from pathlib import Path
+from lxml import etree
 import jinja2
 import re
 import fnmatch
@@ -69,7 +71,7 @@ class EdmService:
             "ore": "http://www.openarchives.org/ore/terms/",
             "foaf": "http://xmlns.com/foaf/0.1/",
             "skos": "http://www.w3.org/2004/02/skos/core#",
-            "crm": "http://www.cidoe-crm.org/rdfs/cidoc_crm_v5.0.2_english_label.rdfs#",
+            "crm": "http://www.cidoc-crm.org/cidoc-crm/",
             "wgs84_pos": "http://www.w3.org/2003/01/geo/wgs84_pos#",
             "rdaGr2": "http://rdvocab.info/ElementsGr2/",
             "svcs": "http://rdfs.org/sioc/services#",
@@ -1228,18 +1230,16 @@ class EdmService:
                     result['warnings'].append(f"[{self.PROBLEM_PATTERNS['P9']['title']}] Description is very short (<= 50 chars).")
 
     def validate_with_xsd(self, xml_string: str, xsd_path: Optional[str] = None) -> Dict[str, Any]:
-        """
-        Validates XML against an XSD schema.
-
-        DISABLE NOTE: This validator is currently disabled due to inconsistent behavior.
-        local-edm-validator remains the source of truth.
-        """
-        return {
-            'valid': True,
-            'errors': [],
-            'skipped': True,
-            'message': "XSD validation is currently disabled in favor of local-edm-validator validation (source of truth)."
-        }
+        """Validate with the bundled RDF-wrapped EDM entry schema, offline."""
+        schema_path = Path(xsd_path) if xsd_path else Path(__file__).resolve().parent.parent / "schema_xsds" / "EDM.xsd"
+        parser = etree.XMLParser(resolve_entities=False, no_network=True)
+        try:
+            schema = etree.XMLSchema(etree.parse(str(schema_path), parser))
+            document = etree.fromstring(xml_string.encode("utf-8"), parser)
+            valid = schema.validate(document)
+            return {"valid": valid, "errors": [error.message for error in schema.error_log], "skipped": False}
+        except (etree.LxmlError, OSError, ValueError) as exc:
+            return {"valid": False, "errors": [f"EDM schema validation failed: {exc}"], "skipped": False}
 
     def validate_with_schematron(self, xml_string: str, xslt_path: Optional[str] = None) -> Dict[str, Any]:
         """
@@ -1681,6 +1681,18 @@ class EdmService:
 
         for web_resource in root.xpath("//edm:WebResource", namespaces=ns):
             self._reorder_children_by_qname(web_resource, webresource_order)
+
+        aggregation_order = [
+            f"{{{ns[prefix]}}}{name}" for prefix, name in [
+                ("edm", "aggregatedCHO"), ("edm", "dataProvider"), ("edm", "hasView"),
+                ("edm", "isShownAt"), ("edm", "isShownBy"), ("edm", "object"),
+                ("edm", "provider"), ("dc", "rights"), ("edm", "rights"),
+                ("edm", "ugc"), ("edm", "intermediateProvider"),
+                ("dcterms", "created"), ("dcterms", "modified"),
+            ]
+        ]
+        for aggregation in root.xpath("//ore:Aggregation", namespaces=ns):
+            self._reorder_children_by_qname(aggregation, aggregation_order)
 
     def _ensure_minimum_viable_edm(self, xml_content: str, metadata: Optional[Dict[str, Any]] = None) -> str:
         """

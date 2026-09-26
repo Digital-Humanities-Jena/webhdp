@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+import os
 
 from database.models import HpcAllocation, HpcLinkConfig, User, UserRole
 from services.hpc_allocation_service import HpcAllocationService, mask_secret
@@ -269,3 +270,61 @@ def test_serialize_config_preserves_zero_gpu_default():
     )()
 
     assert service.serialize_config(config)["default_gpu_count"] == 0
+
+
+def test_local_staging_streams_dependency_tree_without_basename_collisions(tmp_path, monkeypatch):
+    from urllib.parse import unquote
+    service = HpcAllocationService()
+    allocation = type('Allocation', (), {'remote_session_id':'s1', 'remote_input_dir':'/remote/inputs', 'last_health_json':None})()
+    files = []
+    for folder in ['first', '模型']:
+        path = tmp_path / folder / 'buffer.bin'
+        path.parent.mkdir()
+        path.write_bytes(folder.encode())
+        files.append(str(path))
+    class Client:
+        def upload_file(self, path, local):
+            assert '/stage/file?path=' in path
+            relative = unquote(path.split('?path=')[1])
+            return {'name':'buffer.bin', 'remote_path':'/remote/inputs/'+relative, 'size_bytes':os.path.getsize(local)}
+    monkeypatch.setattr(service, 'client', lambda: Client())
+    monkeypatch.setattr('services.hpc_allocation_service.db.session.commit', lambda: None)
+    result = service.stage_local_files(allocation, files)['staged_files']
+    assert [r['remote_path'] for r in result] == ['/remote/inputs/first/buffer.bin', '/remote/inputs/模型/buffer.bin']
+    assert [r['local_path'] for r in result] == files
+
+
+def test_request_replaces_expired_running_allocation(monkeypatch):
+    from flask import Flask
+    from database.database import db
+    from database.models import Session
+    app = Flask(__name__)
+    app.config.update(SQLALCHEMY_DATABASE_URI='sqlite:///:memory:', SQLALCHEMY_TRACK_MODIFICATIONS=False)
+    db.init_app(app)
+    with app.app_context():
+        db.create_all()
+        user = User(email='operator@example.com', role=UserRole.ADMIN)
+        user.set_password('test-allocation-password')
+        db.session.add(user)
+        db.session.flush()
+        session = Session(user_id=user.id, session_dir='/tmp/workflow')
+        db.session.add(session)
+        db.session.flush()
+        previous = HpcAllocation(user_id=user.id, session_id=session.id, purpose='workflow', status='running', requested_partition='partition-a', remote_session_id='expired-job')
+        db.session.add_all([previous, HpcLinkConfig(enabled=True, default_partition='partition-a')])
+        db.session.commit()
+        service = HpcAllocationService()
+        monkeypatch.setattr(service, '_notify_allocation', lambda *args, **kwargs: None)
+        def refresh(allocation):
+            allocation.status = 'expired'
+            db.session.commit()
+        monkeypatch.setattr(service, 'refresh_allocation', refresh)
+        def start(allocation, config):
+            allocation.status = 'allocating'
+            db.session.commit()
+        monkeypatch.setattr(service, '_start_allocation', start)
+        result = service.request_allocation(user=user, session_id=session.id, purpose='workflow', payload={})
+        assert previous.status == 'expired'
+        assert result['allocation_id'] != previous.public_id
+        assert result['status'] == 'allocating'
+        assert HpcAllocation.query.count() == 2

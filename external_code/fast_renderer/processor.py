@@ -337,6 +337,16 @@ def normalize_scene():
                 obj.matrix_world.translation += offset
     bpy.ops.object.select_all(action="DESELECT")
 
+def validate_texture_images():
+    """Reject missing or unreadable textures instead of rendering placeholders."""
+    for image in bpy.data.images:
+        if image.source not in {"FILE", "TILED"}:
+            continue
+        if not image.has_data:
+            image.reload()
+        if not all(image.size) or not len(image.pixels):
+            raise RuntimeError("Texture could not be decoded: " + image.name)
+
 def import_model(filepath: str):
     """Imports a 3D model into Blender with format detection."""
     import os
@@ -366,7 +376,10 @@ def import_model(filepath: str):
         bpy.ops.wm.collada_import(filepath=filepath)
         return
     if ext == ".stl":
-        bpy.ops.import_mesh.stl(filepath=filepath)
+        if hasattr(bpy.ops.wm, "stl_import"):
+            bpy.ops.wm.stl_import(filepath=filepath)
+        else:
+            bpy.ops.import_mesh.stl(filepath=filepath)
         return
     if ext == ".ply":
         if hasattr(bpy.ops.wm, "ply_import"):
@@ -403,6 +416,7 @@ def main():
             try:
                 stage_start = time.time()
                 import_model(object_path)
+                validate_texture_images()
                 stage_timings["model_import"] = time.time() - stage_start
             except Exception as e:
                 print(f"BATCH_LOG:FAILURE:{object_path}:Import failed ({e})")
@@ -538,6 +552,9 @@ class OptimizedRendererProcessor:
 
     def _find_blender_executable(self) -> str:
         """Finds a Blender executable on the system."""
+        configured = os.environ.get("BLENDER_BIN")
+        if configured:
+            return configured
         blender_path = shutil.which("blender")
         if blender_path:
             return blender_path
@@ -577,7 +594,7 @@ class OptimizedRendererProcessor:
             path_obj = Path(path)
             try:
                 relative_path = path_obj.relative_to(input_path_obj)
-                output_sub_dir = relative_path.with_suffix("")
+                output_sub_dir = relative_path
                 model_output_dir = output_path_obj / output_sub_dir
                 model_output_dir.mkdir(parents=True, exist_ok=True)
             except ValueError as e:
@@ -652,7 +669,7 @@ class OptimizedRendererProcessor:
         for p in file_paths:
             path_obj = Path(p)
             relative_path = path_obj.relative_to(input_path_obj)
-            output_sub_dir = relative_path.with_suffix("")
+            output_sub_dir = relative_path
 
             models_list.append(
                 {
@@ -744,7 +761,7 @@ class OptimizedRendererProcessor:
                                     images = []
                                     try:
                                         rel_path = Path(path).relative_to(Path(input_dir))
-                                        model_out_subdir = rel_path.with_suffix("")
+                                        model_out_subdir = rel_path
                                         model_out_path = Path(output_dir) / model_out_subdir
                                         if model_out_path.exists():
                                             images = [str(p.resolve()) for p in model_out_path.glob("*.png")]

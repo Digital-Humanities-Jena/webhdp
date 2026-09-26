@@ -47,6 +47,7 @@ class User(db.Model):
     is_verified = db.Column(db.Boolean, default=False)
     verification_token = db.Column(db.String(100), unique=True, nullable=True)
     force_password_change = db.Column(db.Boolean, nullable=False, default=False)
+    mfa_enabled = db.Column(db.Boolean, nullable=False, default=False, server_default="0")
     token_version = db.Column(db.Integer, nullable=False, default=0)
     capabilities_json = db.Column(db.Text, nullable=False, default="[]")
     onboarding_required = db.Column(db.Boolean, nullable=False, default=False)
@@ -229,6 +230,7 @@ class User(db.Model):
             "role": self.role.value if self.role else "user",
             "created_at": self.created_at.isoformat(),
             "force_password_change": bool(self.force_password_change),
+            "mfa_enabled": bool(self.mfa_enabled),
             "capabilities": self.capabilities,
             "groups": self.groups,
             "onboarding_required": bool(self.onboarding_required),

@@ -74,6 +74,14 @@ class NativePipelineSystemTestCase(unittest.TestCase):
             db.session.remove()
             db.drop_all()
 
+    def test_core_profile_lists_and_accepts_only_validated_pipelines(self):
+        with patch.dict(os.environ, {"WEBHDP_CORE_ONLY": "true"}), self.app.app_context():
+            identifiers = {item["identifier"] for item in self.native_service.list_pipelines(include_hidden=True)}
+            self.assertEqual(identifiers, {"render", "metadata_only"})
+            self.assertEqual(self.native_service.get_pipeline("render")["identifier"], "render")
+            with self.assertRaises(ValidationError):
+                self.native_service.get_pipeline(next(iter(OPTIONAL_3D_PIPELINE_DEFINITIONS)))
+
     def test_server_deployment_blocks_local_renderer_without_hpc_allocation(self):
         self.app.config["WEBHDP_DEPLOYMENT_MODE"] = "server"
         self.app.config["WEBHDP_ALLOW_LOCAL_HDP_COMPONENTS"] = False

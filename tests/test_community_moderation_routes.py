@@ -132,6 +132,9 @@ def community_moderation_app():
 
 def test_community_moderation_requests_route_uses_default_community(monkeypatch, community_moderation_app):
     app, moderator_token, _, _ = community_moderation_app
+    from services.zenodo_config_service import ZenodoConfigService
+    with app.app_context():
+        ZenodoConfigService.save_community_override_config({"enabled": True, "community": "3dbigdataspace"})
     client = app.test_client()
 
     def _mock_fetch(community_identifier):

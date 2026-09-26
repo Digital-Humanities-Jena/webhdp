@@ -11,7 +11,7 @@
   "info": {
     "description": "Generated from the Flask route map. This contract is an onboarding aid and route inventory; endpoint-specific request and response examples remain documented in docs/api/webhdp_api_reference.md and docs/api/webhdp_api_examples.md.",
     "title": "WebHDP API",
-    "version": "0.1.0-alpha.1"
+    "version": "0.1.0-alpha.2"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -2312,6 +2312,74 @@
           }
         ],
         "summary": "auth update_current_user",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/me/mfa": {
+      "post": {
+        "operationId": "post_auth_configure_mfa",
+        "responses": {
+          "200": {
+            "description": "Successful response. WebHDP API responses generally use {success, data, message, metadata}."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "auth configure_mfa",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/me/mfa/verify": {
+      "post": {
+        "operationId": "post_auth_verify_mfa_enrollment",
+        "responses": {
+          "200": {
+            "description": "Successful response. WebHDP API responses generally use {success, data, message, metadata}."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "auth verify_mfa_enrollment",
         "tags": [
           "auth"
         ]

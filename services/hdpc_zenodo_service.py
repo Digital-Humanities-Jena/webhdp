@@ -834,7 +834,8 @@ def create_api_draft(
         cursor = conn.cursor()
         row = cursor.execute(
             """
-            SELECT zr.record_id, zr.is_sandbox, zr.record_metadata_json
+            SELECT zr.record_id, zr.is_sandbox, zr.record_metadata_json,
+                   zr.record_status, zr.zenodo_record_id
             FROM zenodo_records zr
             WHERE zr.record_id = ?
             """,
@@ -846,6 +847,40 @@ def create_api_draft(
         is_sandbox = bool(row["is_sandbox"])
         token = _resolved_access_token(cursor, project_id, is_sandbox, access_token)
         stored_payload = _json_loads(row["record_metadata_json"], {})
+        existing_id = str(row["zenodo_record_id"] or "").strip()
+        if existing_id:
+            if row["record_status"] != "draft":
+                return {"success": False, "error": "An existing record must be edited through its draft or version workflow."}
+            response = http.get(
+                f"{_base_url(is_sandbox)}/api/deposit/depositions/{existing_id}",
+                params={"access_token": token}, timeout=120,
+            )
+            if response.status_code != 200:
+                return {"success": False, "error": "The existing Zenodo draft could not be retrieved. Retry after checking its availability."}
+            payload = response.json()
+            if payload.get("submitted") or payload.get("state") == "done":
+                return {"success": False, "error": "The Zenodo record is already submitted; create a new version to change its files."}
+            remote_names = {
+                str(item.get("filename") or item.get("key") or "")
+                for item in payload.get("files", [])
+            }
+            for mapped in cursor.execute(
+                """SELECT rfm.file_id, sf.filename FROM record_files_map rfm
+                   JOIN source_files sf ON sf.file_id = rfm.file_id
+                   WHERE rfm.record_id = ? AND rfm.upload_status = 'uploaded'""",
+                (int(local_record_id),),
+            ).fetchall():
+                if mapped["filename"] not in remote_names:
+                    cursor.execute(
+                        """UPDATE record_files_map SET upload_status = 'pending', upload_timestamp = NULL
+                           WHERE record_id = ? AND file_id = ?""",
+                        (int(local_record_id), mapped["file_id"]),
+                    )
+            _store_record_payload(cursor, int(local_record_id), payload=payload, record_status="draft")
+            _store_snapshot(cursor, int(local_record_id), "draft_reused", payload, http_status=200)
+            conn.commit()
+            return {"success": True, "message": "Existing Zenodo draft reused.",
+                    "local_record_db_id": int(local_record_id), "zenodo_response": payload}
         _store_snapshot(cursor, int(local_record_id), "prepared_before_draft", stored_payload)
         response = http.post(
             f"{_base_url(is_sandbox)}/api/deposit/depositions",
@@ -900,6 +935,10 @@ def create_api_draft(
         )
         _upsert_links(cursor, int(local_record_id), response_payload.get("links", {}))
         _store_snapshot(cursor, int(local_record_id), "draft_created", response_payload, http_status=response.status_code)
+        cursor.execute(
+            "UPDATE record_files_map SET upload_status = 'pending', upload_timestamp = NULL WHERE record_id = ?",
+            (int(local_record_id),),
+        )
         conn.commit()
         return {
             "success": True,
@@ -1058,6 +1097,8 @@ def publish_record(
     access_token: str | None = None,
     http=requests,
 ) -> Dict[str, Any]:
+    if os.environ.get("ZENODO_PUBLISH_ENABLED", "true").lower() not in {"true", "1", "yes", "on"}:
+        return {"success": False, "error": "Zenodo publication is disabled by this deployment"}
     conn = connect_hdpc(hdpc_path, timeout=30, row_factory=sqlite3.Row)
     try:
         project_id = ensure_hdpc_schema(conn, hdpc_path)
@@ -1207,7 +1248,7 @@ def upload_files_for_deposition(
             SELECT rfm.file_id, sf.absolute_path, sf.filename
             FROM record_files_map rfm
             JOIN source_files sf ON sf.file_id = rfm.file_id
-            WHERE rfm.record_id = ? AND rfm.upload_status = 'pending'
+            WHERE rfm.record_id = ? AND rfm.upload_status IN ('pending', 'upload_error')
             ORDER BY rfm.map_id ASC
             """,
             (int(local_record_id),),
@@ -1656,6 +1697,8 @@ def _update_record_communities(
                 },
             }
 
+        if os.environ.get("ZENODO_PUBLISH_ENABLED", "true").lower() not in {"true", "1", "yes", "on"}:
+            return {"success": False, "error": "Zenodo publication is disabled by this deployment"}
         publish_response = http.post(publish_url, params={"access_token": token}, timeout=120)
         http_statuses.append(publish_response.status_code)
         published_payload = _response_payload(publish_response)

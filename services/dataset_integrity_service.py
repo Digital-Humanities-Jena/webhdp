@@ -1323,7 +1323,8 @@ def read_session_record_inventory(session_row: DBSession) -> dict[str, Any]:
                     session_context.get("directory_root"),
                 )
             )
-            normalized_source_file_path = normalize_source_path(source_file_path, dataset_key) if dataset_key else normalize_source_path(source_file_path)
+            dataset_key = dataset_key or infer_session_dataset_key(session_row)
+            normalized_source_file_path = normalize_source_path(source_file_path, dataset_key)
             zenodo_record_id = row_dict.get("zenodo_record_id") or metadata_payload.get("id")
             is_sandbox = bool(row_dict.get("is_sandbox")) if row_dict.get("is_sandbox") is not None else False
             mapped_files = files_by_record.get(int(row_dict["record_id"]), [])
@@ -2394,13 +2395,9 @@ def ensure_fresh_record_creation_allowed(
     concept_rec_id: str = "",
 ) -> None:
     dataset_key = normalize_dataset_key(extract_dataset_key(source_file_path, *(get_session_dataset_context(session_row).values())))
-    if not dataset_key:
-        if is_sandbox:
-            return
-        raise DatasetIntegrityConflictError(
-            "Dataset key could not be inferred for duplicate detection.",
-            details={"source_file_path": source_file_path},
-        )
+    # Arbitrary uploaded filenames have no named dataset root. Give them the
+    # same session-scoped identity as candidate scans and persisted records.
+    dataset_key = dataset_key or infer_session_dataset_key(session_row)
     candidate = CandidateFile(
         source_file_path=source_file_path,
         source_file_name=os.path.basename(source_file_path),

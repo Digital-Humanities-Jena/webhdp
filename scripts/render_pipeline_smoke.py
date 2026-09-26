@@ -108,6 +108,15 @@ def wait_for_session_file(token: str, session_id: int, task_id: str | None) -> s
             if isinstance(source_file_path, str) and source_file_path.strip():
                 return source_file_path.strip()
 
+        response = requests.get(
+            f"{BASE_URL}/sessions/{session_id}/files",
+            headers=_auth_headers(token), timeout=30,
+        )
+        if response.ok:
+            for item in response.json().get("data", {}).get("items", []):
+                if item.get("is_primary_source") and item.get("absolute_path"):
+                    return item["absolute_path"]
+
         local_file_path = get_local_session_file_path(session_id)
         if local_file_path:
             return local_file_path

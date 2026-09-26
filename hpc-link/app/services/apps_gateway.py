@@ -19,6 +19,8 @@ from typing import Any
 from urllib.parse import urlparse
 
 from fastapi import HTTPException
+from fastapi.responses import StreamingResponse
+import asyncssh
 
 from app.auth_store import AuthenticatedUser
 from app.config import get_settings
@@ -1970,6 +1972,41 @@ while true; do sleep 120; done
             stderr_tail=stderr_tail,
         )
 
+    async def download_webhdp_artifact(self, session_id: str, path: str, actor: AuthenticatedUser):
+        """Stream only artifacts inside an owned allocation's output directory."""
+        from app.security import validate_path
+
+        async with self._lock:
+            session = self._webhdp_sessions.get(session_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail="WebHDP session not found")
+        self._ensure_owner_access(session.owner_username, actor)
+        root = session.remote_output_dir
+        safe_path = validate_path(path, base_path=root)
+        try:
+            async with await ssh_manager.open_sftp() as sftp:
+                resolved = validate_path(str(await sftp.realpath(safe_path)), base_path=root)
+                attrs = await sftp.stat(resolved)
+                if not stat_module.S_ISREG(attrs.permissions or 0):
+                    raise HTTPException(status_code=400, detail="Artifact must be a regular file")
+                size = attrs.size or 0
+        except asyncssh.SFTPError:
+            raise HTTPException(status_code=404, detail="Artifact not found")
+
+        async def chunks():
+            async with await ssh_manager.open_sftp() as sftp:
+                resolved = validate_path(str(await sftp.realpath(safe_path)), base_path=root)
+                async with sftp.open(resolved, "rb") as handle:
+                    remaining = size
+                    while remaining:
+                        chunk = await handle.read(min(1024 * 1024, remaining))
+                        if not chunk:
+                            raise IOError("Artifact ended before the declared file size")
+                        remaining -= len(chunk)
+                        yield chunk
+
+        return StreamingResponse(chunks(), media_type="application/octet-stream", headers={"Content-Length": str(size)})
+
     async def stage_webhdp_cloud_files(
         self,
         session_id: str,
@@ -2050,6 +2087,47 @@ while true; do sleep 120; done
                 staged.append({"name": filename, "remote_path": target_path, "size_bytes": len(data)})
 
         return WebHdpCloudStageResponse(session_id=session_id, staged_files=staged)
+
+    async def stream_webhdp_file(self, session_id, path, chunks, actor, *, expected_size=None):
+        """Atomically stage one owned input, preserving relative directories."""
+        from app.security import validate_path
+        async with self._lock:
+            session = self._webhdp_sessions.get(session_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail="WebHDP session not found")
+        self._ensure_owner_access(session.owner_username, actor)
+        if not path or PurePosixPath(path).is_absolute() or ".." in PurePosixPath(path).parts:
+            raise HTTPException(status_code=400, detail="A safe relative input path is required")
+        root = session.remote_input_dir
+        target = validate_path(f"{root}/{path}", base_path=root)
+        temporary = target + ".part-" + uuid.uuid4().hex
+        size = 0
+        async with await ssh_manager.open_sftp() as sftp:
+            parent = root
+            for part in PurePosixPath(path).parts[:-1]:
+                parent += "/" + part
+                try:
+                    attrs = await sftp.lstat(parent)
+                except asyncssh.SFTPNoSuchFile:
+                    await sftp.mkdir(parent)
+                    attrs = await sftp.lstat(parent)
+                if not stat_module.S_ISDIR(attrs.permissions or 0):
+                    raise HTTPException(status_code=400, detail="Input parent must be a directory, not a link")
+            try:
+                async with sftp.open(temporary, "wb") as handle:
+                    async for chunk in chunks:
+                        await handle.write(chunk)
+                        size += len(chunk)
+                if expected_size is not None and size != int(expected_size):
+                    raise HTTPException(status_code=400, detail="Incomplete file upload")
+                await sftp.posix_rename(temporary, target)
+            except BaseException:
+                try:
+                    await sftp.remove(temporary)
+                except asyncssh.SFTPError:
+                    pass
+                raise
+        return {"name": PurePosixPath(path).name, "remote_path": target, "size_bytes": size}
 
     async def preflight_webhdp_components(
         self,

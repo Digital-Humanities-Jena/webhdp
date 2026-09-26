@@ -644,6 +644,31 @@ def create_and_scan_hdpc_project(
         archive_subdirectories = bool((scan_options.get("obj_options") or {}).get("archive_subdirectories"))
 
         file_groups = _build_file_groups(data_in, batch_entity, extensions_to_scan, bundling_config)
+        # An MSF row identifies a record, even when several records share a
+        # wrapper directory. Keep explicitly listed sources as separate roots.
+        if batch_entity == "hybrid" and preferred_primary_files:
+            split_groups = {}
+            for group_key, files in file_groups.items():
+                primaries = [path for path in files if (
+                    path.name.lower() in preferred_primary_files
+                    or path.relative_to(data_in).as_posix().lower() in preferred_primary_files
+                )]
+                if len(primaries) < 2:
+                    split_groups[group_key] = files
+                    continue
+                for primary in primaries:
+                    split_groups[str(primary)] = [primary]
+                for path in files:
+                    if path in primaries:
+                        continue
+                    # Associate siblings and alternate formats with the closest
+                    # source; referenced dependencies are also scanned below.
+                    owner = max(primaries, key=lambda primary: (
+                        len(os.path.commonpath([str(path.parent), str(primary.parent)])),
+                        path.stem.lower() == primary.stem.lower(),
+                    ))
+                    split_groups[str(owner)].append(path)
+            file_groups = split_groups
         found_files: list[dict[str, Any]] = []
         files_added = 0
 

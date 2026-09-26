@@ -1253,6 +1253,25 @@ def read_hdpc_file_hierarchy(hdpc_path: str, file_id: int) -> dict[str, Any] | N
     return _find_node(file_tree)
 
 
+def read_hdpc_record_inputs(hdpc_path: str, record_id: int) -> list[dict[str, Any]]:
+    """Include unpacked descendants of upload archives needed by processors."""
+    conn = connect_hdpc(hdpc_path, readonly=True, timeout=30, row_factory=sqlite3.Row)
+    try:
+        return [dict(row) for row in conn.execute(
+            """WITH RECURSIVE inputs(file_id) AS (
+                SELECT file_id FROM record_files_map WHERE record_id = ?
+                UNION
+                SELECT sf.file_id FROM source_files sf
+                JOIN inputs ON sf.parent_file_id = inputs.file_id
+            )
+            SELECT sf.* FROM source_files sf JOIN inputs ON inputs.file_id = sf.file_id
+            WHERE sf.pipeline_source IN ('scan', 'ingestion')""",
+            (int(record_id),),
+        ).fetchall()]
+    finally:
+        conn.close()
+
+
 def read_hdpc_record_files(hdpc_path: str, record_id: int) -> list[dict[str, Any]]:
     snapshot = _load_hdpc_snapshot(
         hdpc_path,

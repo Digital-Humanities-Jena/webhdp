@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import base64
 import re
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
@@ -116,7 +115,10 @@ class HpcAllocationService:
             "enabled": bool(config.enabled),
             "require_for_components": bool(config.require_for_components),
             "base_url": config.base_url or "",
-            "has_token": bool(config.encrypted_token),
+            "has_token": bool(config.encrypted_token) or bool(
+                os.environ.get("HPC_LINK_USERNAME") and os.environ.get("HPC_LINK_PASSWORD")
+                and str(config.base_url or "").rstrip("/") == os.environ.get("HPC_LINK_BASE_URL", "").rstrip("/")
+            ),
             "masked_token_preview": config.masked_token_preview or "",
             "default_partition": config.default_partition,
             "partition_sequence_configured": bool(self._env_partition_sequence()),
@@ -378,7 +380,8 @@ class HpcAllocationService:
             )
         if existing is not None:
             self.process_queue()
-            return self.serialize_allocation(existing)
+            if existing.status in QUEUEABLE_ALLOCATION_STATES:
+                return self.serialize_allocation(existing)
 
         requested_gpu_count = payload.get("gpu_count")
         if requested_gpu_count in (None, ""):
@@ -413,7 +416,9 @@ class HpcAllocationService:
         config = self.get_or_create_config()
         if not config.enabled:
             return
-        for allocation in HpcAllocation.query.filter_by(status="allocating").order_by(HpcAllocation.requested_at.asc()).all():
+        for allocation in HpcAllocation.query.filter(
+            HpcAllocation.status.in_(list(ACTIVE_ALLOCATION_STATES))
+        ).order_by(HpcAllocation.requested_at.asc()).all():
             self.refresh_allocation(allocation)
         queued = HpcAllocation.query.filter_by(status="queued").order_by(HpcAllocation.requested_at.asc()).all()
         for allocation in queued:
@@ -676,7 +681,8 @@ class HpcAllocationService:
 
         staged_files: list[Dict[str, Any]] = []
         seen: set[str] = set()
-        upload_files: list[Dict[str, Any]] = []
+        normalized_paths = [os.path.abspath(str(path)) for path in file_paths or [] if str(path).strip()]
+        common_root = os.path.commonpath([os.path.dirname(path) for path in normalized_paths]) if normalized_paths else ""
 
         for raw_path in file_paths or []:
             local_path = os.path.abspath(str(raw_path or "").strip())
@@ -687,32 +693,17 @@ class HpcAllocationService:
                 raise ValidationError(f"Cannot stage missing local file for HPC-Link: {raw_path}")
 
             remote_name = os.path.basename(local_path)
-            with open(local_path, "rb") as handle:
-                content_base64 = base64.b64encode(handle.read()).decode("ascii")
-            upload_files.append(
-                {
-                    "name": remote_name,
-                    "content_base64": content_base64,
-                    "relative_dir": "",
-                }
+            relative_dir = os.path.relpath(os.path.dirname(local_path), common_root)
+            if relative_dir == ".":
+                relative_dir = ""
+            relative_path = "/".join(part for part in [relative_dir, remote_name] if part)
+            uploaded = self.client().upload_file(
+                f"/api/apps/webhdp/sessions/{allocation.remote_session_id}/stage/file?path={quote(relative_path, safe='')}",
+                local_path,
             )
-            staged_files.append({"name": remote_name, "local_path": local_path, "size_bytes": os.path.getsize(local_path)})
-
-        if upload_files:
-            response = self.client().post(
-                f"/api/apps/webhdp/sessions/{allocation.remote_session_id}/stage/upload",
-                {"files": upload_files},
-                timeout=7200,
-            )
-            staged_by_name = {
-                str(item.get("name") or ""): item
-                for item in response.get("staged_files") or []
-                if isinstance(item, dict)
-            }
-            for item in staged_files:
-                staged_remote = staged_by_name.get(str(item.get("name") or "")) or {}
-                item["remote_path"] = staged_remote.get("remote_path")
-                item["size_bytes"] = staged_remote.get("size_bytes", item.get("size_bytes"))
+            if uploaded.get("size_bytes") != os.path.getsize(local_path) or not uploaded.get("remote_path"):
+                raise ValidationError("HPC-Link did not confirm the complete staged file")
+            staged_files.append({**uploaded, "local_path": local_path, "relative_dir": relative_dir})
 
         if staged_files:
             allocation.last_health_json = json.dumps(
@@ -794,7 +785,7 @@ class HpcAllocationService:
         if session_dir and remote_path != session_dir and not remote_path.startswith(f"{session_dir}/"):
             raise SecurityError("Remote artifact is outside the active HPC allocation directory")
         bytes_written = self.client().download_to_file(
-            f"/api/files/download?path={quote(remote_path, safe='')}",
+            f"/api/apps/webhdp/sessions/{allocation.remote_session_id}/artifacts/download?path={quote(remote_path, safe='')}",
             local_path,
             timeout=900,
         )

@@ -235,7 +235,7 @@
               </div>
 
               <p class="text-xs text-gray-500">
-                Supported formats include: .obj, .mtl, .jpg, .png, .xml, .txt
+                Upload a model (GLB, glTF, OBJ, STL, FBX, PLY) or an image. For models with separate materials or textures, use a ZIP batch to keep the files together.
               </p>
             </div>
           </div>

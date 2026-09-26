@@ -44,9 +44,9 @@ git remote add github git@github.com:Digital-Humanities-Jena/webhdp.git
 git remote add codeberg git@codeberg.org:<owner>/<repo>.git
 git push github main
 git push codeberg main
-git tag -a v0.1.0-alpha.1 -m "WebHDP v0.1.0-alpha.1"
-git push github v0.1.0-alpha.1
-git push codeberg v0.1.0-alpha.1
+git tag -a v0.1.0-alpha.2 -m "WebHDP v0.1.0-alpha.2"
+git push github v0.1.0-alpha.2
+git push codeberg v0.1.0-alpha.2
 ```
 
 After pushing, confirm GitHub Actions and Codeberg/Woodpecker checks pass on the published commit.

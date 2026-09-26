@@ -158,19 +158,15 @@ STANDARD_TEMPLATE = '''<?xml version="1.0" encoding="UTF-8"?>
   <ore:Aggregation rdf:about="{{ aggregation_uri }}">
     <edm:aggregatedCHO rdf:resource="{{ cho_uri }}"/>
     <edm:dataProvider>{{ metadata.provider | default('Zenodo') }}</edm:dataProvider>
-    <edm:isShownAt rdf:resource="{{ zenodo.links.html | replace('/deposit/', '/records/') }}"/>
-
     {% if main_file %}
-    {% if main_file.viewer_url %}
-    <edm:isShownBy rdf:resource="{{ main_file.viewer_url }}"/>
-    {% endif %}
     <edm:hasView rdf:resource="{{ main_file.content_url }}"/>
     {% endif %}
-
-    {% if thumbnail_files %}
     {% for thumb in thumbnail_files %}
     <edm:hasView rdf:resource="{{ thumb.content_url }}"/>
     {% endfor %}
+    <edm:isShownAt rdf:resource="{{ zenodo.links.html | replace('/deposit/', '/records/') }}"/>
+    {% if main_file and main_file.viewer_url %}
+    <edm:isShownBy rdf:resource="{{ main_file.viewer_url }}"/>
     {% endif %}
 
     {% if thumbnail_file %}
@@ -364,19 +360,15 @@ MODEL_3D_TEMPLATE = '''<?xml version="1.0" encoding="UTF-8"?>
   <ore:Aggregation rdf:about="{{ aggregation_uri }}">
     <edm:aggregatedCHO rdf:resource="{{ cho_uri }}"/>
     <edm:dataProvider>{{ metadata.provider | default('Zenodo') }}</edm:dataProvider>
-    <edm:isShownAt rdf:resource="{{ zenodo.links.html | replace('/deposit/', '/records/') }}"/>
-
     {% if main_file %}
     <edm:hasView rdf:resource="{{ main_file.content_url }}"/>
-    {% if helpers.is_oembed(main_file.viewer_url) %}
-    <edm:isShownBy rdf:resource="{{ main_file.viewer_url }}"/>
     {% endif %}
-    {% endif %}
-
-    {% if thumbnail_files %}
     {% for thumb in thumbnail_files %}
     <edm:hasView rdf:resource="{{ thumb.content_url }}"/>
     {% endfor %}
+    <edm:isShownAt rdf:resource="{{ zenodo.links.html | replace('/deposit/', '/records/') }}"/>
+    {% if main_file and helpers.is_oembed(main_file.viewer_url) %}
+    <edm:isShownBy rdf:resource="{{ main_file.viewer_url }}"/>
     {% endif %}
 
     {% if thumbnail_file %}
@@ -665,17 +657,15 @@ DOCUMENT_TEMPLATE = '''<?xml version="1.0" encoding="UTF-8"?>
   <ore:Aggregation rdf:about="{{ aggregation_uri }}">
     <edm:aggregatedCHO rdf:resource="{{ cho_uri }}"/>
     <edm:dataProvider>{{ metadata.provider | default('Zenodo') }}</edm:dataProvider>
-    <edm:isShownAt rdf:resource="{{ zenodo.links.html | replace('/deposit/', '/records/') }}"/>
-
     {% if main_file %}
-    <edm:isShownBy rdf:resource="{{ main_file.viewer_url }}"/>
     <edm:hasView rdf:resource="{{ main_file.content_url }}"/>
     {% endif %}
-
-    {% if thumbnail_files %}
     {% for thumb in thumbnail_files %}
     <edm:hasView rdf:resource="{{ thumb.content_url }}"/>
     {% endfor %}
+    <edm:isShownAt rdf:resource="{{ zenodo.links.html | replace('/deposit/', '/records/') }}"/>
+    {% if main_file and main_file.viewer_url %}
+    <edm:isShownBy rdf:resource="{{ main_file.viewer_url }}"/>
     {% endif %}
 
     {% if thumbnail_file %}
@@ -814,17 +804,15 @@ VIDEO_TEMPLATE = '''<?xml version="1.0" encoding="UTF-8"?>
   <ore:Aggregation rdf:about="{{ aggregation_uri }}">
     <edm:aggregatedCHO rdf:resource="{{ cho_uri }}"/>
     <edm:dataProvider>{{ metadata.provider | default('Zenodo') }}</edm:dataProvider>
-    <edm:isShownAt rdf:resource="{{ zenodo.links.html | replace('/deposit/', '/records/') }}"/>
-
     {% if main_file %}
-    <edm:isShownBy rdf:resource="{{ main_file.viewer_url }}"/>
     <edm:hasView rdf:resource="{{ main_file.content_url }}"/>
     {% endif %}
-
-    {% if thumbnail_files %}
     {% for thumb in thumbnail_files %}
     <edm:hasView rdf:resource="{{ thumb.content_url }}"/>
     {% endfor %}
+    <edm:isShownAt rdf:resource="{{ zenodo.links.html | replace('/deposit/', '/records/') }}"/>
+    {% if main_file and main_file.viewer_url %}
+    <edm:isShownBy rdf:resource="{{ main_file.viewer_url }}"/>
     {% endif %}
 
     {% if thumbnail_file %}
@@ -960,17 +948,15 @@ SOUND_TEMPLATE = '''<?xml version="1.0" encoding="UTF-8"?>
   <ore:Aggregation rdf:about="{{ aggregation_uri }}">
     <edm:aggregatedCHO rdf:resource="{{ cho_uri }}"/>
     <edm:dataProvider>{{ metadata.provider | default('Zenodo') }}</edm:dataProvider>
-    <edm:isShownAt rdf:resource="{{ zenodo.links.html | replace('/deposit/', '/records/') }}"/>
-
     {% if main_file %}
-    <edm:isShownBy rdf:resource="{{ main_file.viewer_url }}"/>
     <edm:hasView rdf:resource="{{ main_file.content_url }}"/>
     {% endif %}
-
-    {% if thumbnail_files %}
     {% for thumb in thumbnail_files %}
     <edm:hasView rdf:resource="{{ thumb.content_url }}"/>
     {% endfor %}
+    <edm:isShownAt rdf:resource="{{ zenodo.links.html | replace('/deposit/', '/records/') }}"/>
+    {% if main_file and main_file.viewer_url %}
+    <edm:isShownBy rdf:resource="{{ main_file.viewer_url }}"/>
     {% endif %}
 
     {% if thumbnail_file %}

@@ -7,7 +7,7 @@ from database.models import SystemConfig
 
 class ZenodoConfigService:
     CONFIG_KEY = "zenodo_community_override"
-    DEFAULT_ENABLED = True
+    DEFAULT_ENABLED = False
     DEFAULT_COMMUNITY = "3dbigdataspace"
 
     @classmethod

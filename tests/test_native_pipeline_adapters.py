@@ -231,3 +231,28 @@ def test_hpc_link_adapter_forwards_component_payload_to_allocation_service():
         "index": None,
         "total_records": None,
     }
+
+
+def test_hpc_staging_includes_nested_archived_texture_without_other_records(tmp_path):
+    import sqlite3
+    hdpc = tmp_path / 'inputs.hdpc'
+    model = tmp_path / 'model.obj'
+    archive = tmp_path / 'textures.zip'
+    texture = tmp_path / 'textures' / 'albedo.jpg'
+    other = tmp_path / 'other.obj'
+    texture.parent.mkdir()
+    for path in (model, archive, texture, other):
+        path.write_bytes(b'input')
+    with sqlite3.connect(hdpc) as conn:
+        conn.execute('CREATE TABLE source_files (file_id INTEGER, parent_file_id INTEGER, absolute_path TEXT, pipeline_source TEXT)')
+        conn.execute('CREATE TABLE record_files_map (record_id INTEGER, file_id INTEGER)')
+        conn.executemany('INSERT INTO source_files VALUES (?, ?, ?, ?)', [
+            (1, None, str(model), 'scan'), (2, 1, str(archive), 'scan'),
+            (3, 2, str(texture), 'scan'), (4, None, str(other), 'scan'),
+        ])
+        conn.executemany('INSERT INTO record_files_map VALUES (?, ?)', [(1, 1), (1, 2), (2, 4)])
+    request = AdapterExecutionRequest(
+        step_id='fast_renderer', profile={}, workdir=str(tmp_path), inputs={}, parameters={},
+        metadata={'execution_context': {'hdpc_path': str(hdpc)}, 'record_context': {'record_id': 1}},
+    )
+    assert set(HpcLinkExecutionAdapter._local_paths_for_request(request)) == {str(model), str(archive), str(texture)}
