@@ -133,6 +133,27 @@ class TestUploadIdempotency(unittest.TestCase):
         self.assertEqual(payload["data"]["session_id"], self.session_id)
         self.assertEqual(payload["data"]["task_id"], "task-abc-123")
 
+    def test_directory_preflight_accepts_windows_archive_separators(self):
+        import io
+        import zipfile
+
+        archive_bytes = io.BytesIO()
+        with zipfile.ZipFile(archive_bytes, "w") as archive:
+            archive.writestr("nested\\model.obj", "v 0 0 0\n")
+        archive_bytes.seek(0)
+        with patch("services.cloud_upload_service.CloudUploadService.get_storage_mode", return_value="server_only"), patch(
+            "services.cloud_upload_service.CloudUploadService.get_available_storage", return_value=("server", "Ready")
+        ):
+            response = self.client.post(
+                "/api/v1/sessions/directory?validate_only=true",
+                headers=self._auth_headers(),
+                data={"zip_file": (archive_bytes, "windows.zip"),
+                      "msf_file": (io.BytesIO(b"filename,title\nmodel.obj,Model\n"), "metadata.csv")},
+                content_type="multipart/form-data",
+            )
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertTrue(response.get_json()["data"]["msf_validation"]["is_valid"])
+
     def test_recover_endpoint_returns_existing_context(self):
         response = self.client.post(
             "/api/v1/sessions/directory/recover",

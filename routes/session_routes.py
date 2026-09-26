@@ -2707,10 +2707,11 @@ def start_session_directory():
                         return APIResponse.validation_error("ZIP file is required for validate_only mode")
 
                     with zipfile.ZipFile(zip_save_path, 'r') as zip_ref:
+                        safe_extract_zip(zip_ref, extract_dir, validate_only=True)
                         all_zip_paths = zip_ref.namelist()
                         zip_filenames = [
                             os.path.basename(path)
-                            for path in all_zip_paths
+                            for path in (name.replace('\\', '/') for name in all_zip_paths)
                             if not path.endswith('/') and not path.startswith('__MACOSX')
                         ]
                         preflight_policy = msf_duplicate_policy if msf_auto_patch else "fail"
@@ -2801,9 +2802,10 @@ def start_session_directory():
                 zip_filenames = []
                 if zip_file and zip_save_path and os.path.exists(zip_save_path):
                     with zipfile.ZipFile(zip_save_path, 'r') as zip_ref:
+                        safe_extract_zip(zip_ref, extract_dir, validate_only=True)
                         zip_filenames = [
                             os.path.basename(path)
-                            for path in zip_ref.namelist()
+                            for path in (name.replace('\\', '/') for name in zip_ref.namelist())
                             if not path.endswith('/') and not path.startswith('__MACOSX')
                         ]
                 preflight_policy = msf_duplicate_policy if msf_auto_patch else "fail"
@@ -3036,7 +3038,7 @@ def start_session_directory():
             }
         )
 
-    except (SecurityError, ValidationError) as e:
+    except (SecurityError, ValidationError, zipfile.BadZipFile) as e:
         logger.warning(f"Rejected unsafe session upload: {e}")
         if extract_dir_to_cleanup:
             shutil.rmtree(extract_dir_to_cleanup, ignore_errors=True)

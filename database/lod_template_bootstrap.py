@@ -77,6 +77,22 @@ def _repair_default_iiif_v3_template() -> int:
     return updated
 
 
+def _repair_mets_file_identifiers() -> int:
+    """Upgrade legacy filename-derived IDs and their matching references."""
+    updated = 0
+    for template in LodTemplate.query.filter_by(standard=LodStandard.METS).all():
+        content = template.content or ""
+        repaired = content
+        for variable, role in [("main_file", "FILE"), ("thumb", "THUMB"), ("thumbnail_file", "THUMB")]:
+            old = "FILE_{{ " + variable + ".filename | replace('.', '_') }}"
+            new = "{{ helpers.file_id(" + variable + ".filename, '" + role + "') }}"
+            repaired = repaired.replace(old, new)
+        if repaired != content:
+            template.content = repaired
+            updated += 1
+    return updated
+
+
 def ensure_default_lod_templates() -> dict[str, list[str]]:
     """Seed missing LOD template standards on demand."""
     existing = _current_standards()
@@ -97,6 +113,8 @@ def ensure_default_lod_templates() -> dict[str, list[str]]:
             repaired.append(LodStandard.EDM.value)
         if _repair_default_iiif_v3_template():
             repaired.append(LodStandard.IIIF.value)
+        if _repair_mets_file_identifiers():
+            repaired.append(LodStandard.METS.value)
         if seeded or repaired:
             db.session.commit()
     except Exception:

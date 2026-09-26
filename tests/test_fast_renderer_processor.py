@@ -41,3 +41,38 @@ def test_texture_validation_rejects_unreadable_images_and_accepts_decoded_images
     image.size = (32, 32)
     image.pixels = [0.0] * (32 * 32 * 4)
     namespace['validate_texture_images']()
+
+
+def test_obj_material_normalization_preserves_source_and_relative_dependencies(tmp_path):
+    from pathlib import Path
+    from external_code.fast_renderer.processor import prepare_obj_material_libraries
+    for name in ["first.mtl", "second library.mtl"]:
+        (tmp_path / name).touch()
+    source = tmp_path / "model.obj"
+    original = 'mtllib first.mtl "second library.mtl"\nv 0 0 0\n'
+    source.write_text(original)
+    prepared = Path(prepare_obj_material_libraries(str(source)))
+    try:
+        assert prepared != source and prepared.parent == source.parent
+        assert prepared.read_text() == "mtllib first.mtl\nmtllib second library.mtl\nv 0 0 0\n"
+        assert source.read_text() == original
+    finally:
+        prepared.unlink()
+
+
+def test_obj_material_normalization_keeps_existing_space_named_library(tmp_path):
+    from external_code.fast_renderer.processor import prepare_obj_material_libraries
+    (tmp_path / "one library.mtl").touch()
+    source = tmp_path / "model.obj"
+    source.write_text("mtllib one library.mtl\nv 0 0 0\n")
+    assert prepare_obj_material_libraries(str(source)) == str(source)
+
+
+def test_obj_material_normalization_rejects_missing_library(tmp_path):
+    import pytest
+    from external_code.fast_renderer.processor import prepare_obj_material_libraries
+    source = tmp_path / "model.obj"
+    source.write_text("mtllib missing.mtl\nv 0 0 0\n")
+    with pytest.raises(RuntimeError, match="Material library not found"):
+        prepare_obj_material_libraries(str(source))
+    assert not list(tmp_path.glob(".materials-*.obj"))

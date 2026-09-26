@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from collections import defaultdict
 from celery_app import celery
 from flask import current_app
+from services.pipeline_execution_lock import PipelineAlreadyRunning
 
 from constants import (
     UPLOAD_PROGRESS_FIELD,
@@ -794,7 +795,7 @@ def execute_submission_pipeline_task(
                     submission.completed_at = datetime.utcnow()
 
             db_session = db.session.get(DBSession, db_session_id)
-            if db_session:
+            if db_session and not isinstance(exc, PipelineAlreadyRunning):
                 db_session.status = "failed"
                 notify_user(
                     recipient_user_id=db_session.user_id,

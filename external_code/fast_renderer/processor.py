@@ -9,6 +9,7 @@ constants. It is strictly a processing library and does not handle
 CLI parsing or high-level orchestration.
 """
 import json
+import inspect
 import logging
 import os
 import shutil
@@ -77,6 +78,54 @@ def select_cycles_backend(device_inventory: Dict[str, List[Dict[str, Any]]]) -> 
         "matched_devices": [],
         "diagnostics": diagnostics,
     }
+
+def prepare_obj_material_libraries(filepath: str) -> str:
+    """Expand OBJ material-library lists for Blender without changing the source."""
+    import os
+    import shlex
+    import tempfile
+    from pathlib import Path
+
+    source = Path(filepath)
+    replacements = {}
+    with source.open(encoding="utf-8", errors="replace") as handle:
+        for index, line in enumerate(handle):
+            parts = line.strip().split(None, 1)
+            if not parts or parts[0].lower() != "mtllib":
+                continue
+            if len(parts) != 2:
+                raise RuntimeError("OBJ material library reference is empty")
+            reference = parts[1].replace("\\", "/")
+            whole_filename = reference.strip('"')
+            if (source.parent / whole_filename).is_file():
+                references = [whole_filename]
+            else:
+                try:
+                    references = shlex.split(reference)
+                except ValueError as exc:
+                    raise RuntimeError("Invalid OBJ material library reference") from exc
+            for name in references:
+                if not (source.parent / name).is_file():
+                    raise RuntimeError("Material library not found: " + name)
+            normalized = "".join("mtllib " + name + "\n" for name in references)
+            if normalized != line:
+                replacements[index] = normalized
+    if not replacements:
+        return filepath
+
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", suffix=".obj", prefix=".materials-", dir=source.parent, delete=False) as output:
+            temporary_path = output.name
+            with source.open(encoding="utf-8", errors="replace") as handle:
+                for index, line in enumerate(handle):
+                    output.write(replacements.get(index, line))
+        return temporary_path
+    except Exception:
+        if temporary_path:
+            os.unlink(temporary_path)
+        raise
+
 
 # Consumed by main.py to determine default settings
 QUALITY_PRESETS = {
@@ -337,6 +386,8 @@ def normalize_scene():
                 obj.matrix_world.translation += offset
     bpy.ops.object.select_all(action="DESELECT")
 
+${obj_material_helper}
+
 def validate_texture_images():
     """Reject missing or unreadable textures instead of rendering placeholders."""
     for image in bpy.data.images:
@@ -359,10 +410,15 @@ def import_model(filepath: str):
         return
     if ext == ".obj":
         obj_dir = os.path.dirname(filepath)
-        if hasattr(bpy.ops.wm, "obj_import"):
-            bpy.ops.wm.obj_import(filepath=filepath)
-        else:
-            bpy.ops.import_scene.obj(filepath=filepath, directory=obj_dir)
+        import_path = prepare_obj_material_libraries(filepath)
+        try:
+            if hasattr(bpy.ops.wm, "obj_import"):
+                bpy.ops.wm.obj_import(filepath=import_path)
+            else:
+                bpy.ops.import_scene.obj(filepath=import_path, directory=obj_dir)
+        finally:
+            if import_path != filepath:
+                os.unlink(import_path)
         return
     if ext in [".usd", ".usda", ".usdc", ".usdz"]:
         if hasattr(bpy.ops.wm, "usd_import"):
@@ -679,6 +735,7 @@ class OptimizedRendererProcessor:
                 }
             )
         substitutions = {
+            "obj_material_helper": inspect.getsource(prepare_obj_material_libraries),
             "models_list": json.dumps(models_list, indent=4),
             "output_dir": str(Path(output_dir).resolve()).replace("\\", "/"),
             "engine": self.engine,

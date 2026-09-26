@@ -604,7 +604,8 @@ class EdmService:
              return self.PLACEHOLDER_THUMBNAIL_URL
 
         domain = "sandbox.zenodo.org" if is_sandbox else "zenodo.org"
-        return f"https://{domain}/api/records/{record_id}/files/{filename}/content"
+        from urllib.parse import quote
+        return f"https://{domain}/api/records/{record_id}/files/{quote(filename, safe='')}/content"
 
     def get_record_html_url(self, zenodo_record: Dict[str, Any]) -> str:
         """Return a stable Zenodo landing-page URL, preferring /records/ over legacy /deposit/."""

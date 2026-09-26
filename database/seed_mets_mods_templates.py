@@ -132,7 +132,7 @@ METS_MODS_TEMPLATE = '''<?xml version="1.0" encoding="UTF-8"?>
     <mets:fileSec>
         <mets:fileGrp USE="ORIGINAL">
              {% if main_file %}
-            <mets:file ID="FILE_{{ main_file.filename | replace('.', '_') }}" MIMETYPE="{{ main_file.mime_type }}"{% if main_file.size and main_file.size != 0 %} SIZE="{{ main_file.size }}"{% endif %}{% if main_file.checksum and main_file.checksum_type %} CHECKSUM="{{ main_file.checksum }}" CHECKSUMTYPE="{{ main_file.checksum_type }}"{% endif %}>
+            <mets:file ID="{{ helpers.file_id(main_file.filename, 'FILE') }}" MIMETYPE="{{ main_file.mime_type }}"{% if main_file.size and main_file.size != 0 %} SIZE="{{ main_file.size }}"{% endif %}{% if main_file.checksum and main_file.checksum_type %} CHECKSUM="{{ main_file.checksum }}" CHECKSUMTYPE="{{ main_file.checksum_type }}"{% endif %}>
                 <mets:FLocat LOCTYPE="URL" xlink:href="{{ main_file.content_url }}"/>
             </mets:file>
             {% endif %}
@@ -140,14 +140,14 @@ METS_MODS_TEMPLATE = '''<?xml version="1.0" encoding="UTF-8"?>
         {% if thumbnail_files and thumbnail_files|length > 0 %}
         <mets:fileGrp USE="THUMBNAIL">
             {% for thumb in thumbnail_files %}
-            <mets:file ID="FILE_{{ thumb.filename | replace('.', '_') }}" MIMETYPE="{{ thumb.mime_type }}"{% if thumb.size and thumb.size != 0 %} SIZE="{{ thumb.size }}"{% endif %}>
+            <mets:file ID="{{ helpers.file_id(thumb.filename, 'THUMB') }}" MIMETYPE="{{ thumb.mime_type }}"{% if thumb.size and thumb.size != 0 %} SIZE="{{ thumb.size }}"{% endif %}>
                 <mets:FLocat LOCTYPE="URL" xlink:href="{{ thumb.content_url }}"/>
             </mets:file>
             {% endfor %}
         </mets:fileGrp>
         {% elif thumbnail_file %}
         <mets:fileGrp USE="THUMBNAIL">
-            <mets:file ID="FILE_{{ thumbnail_file.filename | replace('.', '_') }}" MIMETYPE="{{ thumbnail_file.mime_type }}"{% if thumbnail_file.size and thumbnail_file.size != 0 %} SIZE="{{ thumbnail_file.size }}"{% endif %}>
+            <mets:file ID="{{ helpers.file_id(thumbnail_file.filename, 'THUMB') }}" MIMETYPE="{{ thumbnail_file.mime_type }}"{% if thumbnail_file.size and thumbnail_file.size != 0 %} SIZE="{{ thumbnail_file.size }}"{% endif %}>
                 <mets:FLocat LOCTYPE="URL" xlink:href="{{ thumbnail_file.content_url }}"/>
             </mets:file>
         </mets:fileGrp>
@@ -158,17 +158,17 @@ METS_MODS_TEMPLATE = '''<?xml version="1.0" encoding="UTF-8"?>
     <mets:structMap TYPE="LOGICAL">
         <mets:div TYPE="{{ helpers.map_structure_type(main_file.content_type) }}" DMDID="dmdSec_1" LABEL="{{ metadata.title }}">
             {% if main_file %}
-            <mets:fptr FILEID="FILE_{{ main_file.filename | replace('.', '_') }}"/>
+            <mets:fptr FILEID="{{ helpers.file_id(main_file.filename, 'FILE') }}"/>
             {% endif %}
             {% if thumbnail_files and thumbnail_files|length > 0 %}
             <mets:div TYPE="THUMBNAIL">
                 {% for thumb in thumbnail_files %}
-                <mets:fptr FILEID="FILE_{{ thumb.filename | replace('.', '_') }}"/>
+                <mets:fptr FILEID="{{ helpers.file_id(thumb.filename, 'THUMB') }}"/>
                 {% endfor %}
             </mets:div>
             {% elif thumbnail_file %}
             <mets:div TYPE="THUMBNAIL">
-                <mets:fptr FILEID="FILE_{{ thumbnail_file.filename | replace('.', '_') }}"/>
+                <mets:fptr FILEID="{{ helpers.file_id(thumbnail_file.filename, 'THUMB') }}"/>
             </mets:div>
             {% endif %}
         </mets:div>

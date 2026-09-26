@@ -1052,7 +1052,10 @@ class MSFService:
         duplicate_msf_names = sorted([name for name, count in msf_name_counts.items() if count > 1])
 
         dir_name_counts = Counter(f.lower() for f in directory_files if f and f.strip())
-        duplicate_dir_names = sorted([name for name, count in dir_name_counts.items() if count > 1])
+        duplicate_dir_names = sorted([
+            name for name, count in dir_name_counts.items()
+            if count > 1 and (not msf_name_counts or name in msf_name_counts)
+        ])
         result.duplicate_msf_files = duplicate_msf_names
         result.duplicate_directory_files = duplicate_dir_names
         if duplicate_dir_names:

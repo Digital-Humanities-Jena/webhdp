@@ -2,6 +2,7 @@ import os
 import re
 import stat
 import zipfile
+import shutil
 from pathlib import Path
 from werkzeug.utils import secure_filename
 
@@ -57,17 +58,30 @@ def sanitize_upload_filename(filename: str, *, allowed_extensions: set[str] | No
     return safe
 
 
-def safe_extract_zip(zip_ref: zipfile.ZipFile, destination: str | Path, *, max_members: int = 10000) -> None:
+def safe_extract_zip(zip_ref: zipfile.ZipFile, destination: str | Path, *, max_members: int = 10000, max_expanded_bytes: int = 50 * 1024**3, validate_only: bool = False) -> None:
     """Extract a ZIP archive after rejecting traversal, absolute paths, symlinks, and device entries."""
     dest = Path(destination).expanduser().resolve()
     members = zip_ref.infolist()
     if len(members) > max_members:
         raise ValidationError("ZIP archive contains too many entries", details={"max_members": max_members})
+    expanded_bytes = sum(member.file_size for member in members)
+    if expanded_bytes > max_expanded_bytes:
+        raise ValidationError("ZIP archive exceeds the expanded size limit")
+    existing_parent = dest
+    while not existing_parent.exists():
+        existing_parent = existing_parent.parent
+    if expanded_bytes > max(0, shutil.disk_usage(existing_parent).free - 128 * 1024**2):
+        raise ValidationError("There is not enough free storage to extract this ZIP archive")
 
+    destinations = {}
     for member in members:
+        if member.flag_bits & 1:
+            raise ValidationError("Encrypted ZIP archives are not supported; upload an unencrypted archive")
+        if member.compress_type not in {zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED, zipfile.ZIP_BZIP2, zipfile.ZIP_LZMA}:
+            raise ValidationError("ZIP archive uses an unsupported compression method")
         name = str(member.filename or "")
         normalized_name = name.replace("\\", "/")
-        if not normalized_name or normalized_name.startswith("/") or normalized_name.startswith("../"):
+        if not normalized_name or normalized_name.startswith("/") or normalized_name.startswith("../") or re.match(r"^[A-Za-z]:", normalized_name):
             raise SecurityError("ZIP archive contains an unsafe path", details={"member": name})
         if "/../" in f"/{normalized_name}":
             raise SecurityError("ZIP archive contains an unsafe path", details={"member": name})
@@ -77,10 +91,29 @@ def safe_extract_zip(zip_ref: zipfile.ZipFile, destination: str | Path, *, max_m
             raise SecurityError("ZIP archive contains an unsafe file type", details={"member": name})
 
         target = (dest / normalized_name).resolve(strict=False)
+        if target == dest and not normalized_name.endswith("/"):
+            raise ValidationError("ZIP archive contains an invalid file path")
         if not path_is_within(dest, target):
             raise SecurityError("ZIP archive member escapes destination", details={"member": name})
+        key = str(target).casefold()
+        if key in destinations:
+            raise ValidationError("ZIP archive contains duplicate output paths", details={"member": name})
+        destinations[key] = (member, target)
 
-    zip_ref.extractall(dest)
+    for member, target in destinations.values():
+        for parent in target.parents:
+            entry = destinations.get(str(parent).casefold())
+            if entry and not entry[0].filename.replace("\\", "/").endswith("/"):
+                raise ValidationError("ZIP archive contains conflicting file and directory paths")
+    if validate_only:
+        return
+    for member, target in destinations.values():
+        if member.filename.replace("\\", "/").endswith("/"):
+            target.mkdir(parents=True, exist_ok=True)
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with zip_ref.open(member) as source, target.open("wb") as output:
+                shutil.copyfileobj(source, output, length=1024 * 1024)
 
 
 class SecurityValidator:

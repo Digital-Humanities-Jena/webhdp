@@ -30,6 +30,7 @@ test_data/
 *.db
 *.sqlite
 *.sqlite3
+*.hdpc.pipeline.lock
 *.log
 *.zip
 *.tar

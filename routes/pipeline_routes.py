@@ -9,6 +9,7 @@ from api_utils import APIResponse
 from routes.access_helpers import get_session_with_permission
 from exceptions import FileProcessingError
 from exceptions import ResourceNotFoundError
+from services.pipeline_execution_lock import PipelineAlreadyRunning
 # Services will be accessed via current_app
 from database.database import db
 from database.models import Session as DBSession, Submission, SystemConfig
@@ -176,6 +177,13 @@ def execute_pipeline(identifier):
                 "timings": execution_output["timings"],
             }
         )
+    except PipelineAlreadyRunning as exc:
+        db.session.rollback()
+        duplicate = db.session.get(Submission, submission.id)
+        if duplicate:
+            db.session.delete(duplicate)
+        db.session.commit()
+        return APIResponse.error(exc.error_code, exc.message, exc.status_code)
     except FileProcessingError as exc:
         logger.error(f"Pipeline failed: {exc}", exc_info=True)
         db.session.rollback()

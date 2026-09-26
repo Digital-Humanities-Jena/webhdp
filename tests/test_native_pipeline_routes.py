@@ -163,6 +163,25 @@ class TestNativePipelineRoutes(unittest.TestCase):
         self.assertEqual(payload["data"]["result"]["run_id"], "run-123")
         self.assertEqual(payload["data"]["result"]["pipeline_version"], "1.1.0")
 
+    @patch("services.submission_pipeline_service.execute_submission_pipeline")
+    def test_v1_concurrent_execution_returns_conflict_without_failing_active_session(self, execute):
+        from services.pipeline_execution_lock import PipelineAlreadyRunning
+        from database.models import Submission
+
+        execute.side_effect = PipelineAlreadyRunning()
+        response = self.client.post(
+            "/api/v1/pipelines/render/execute_on_local_files",
+            json={"session_id": self.session_id,
+                  "local_file_paths": ["/tmp/session-routes/uploads/model.glb"],
+                  "is_sandbox": True},
+            headers=self._headers(),
+        )
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("already being processed", response.get_json()["error"]["message"])
+        with self.app.app_context():
+            self.assertNotEqual(db.session.get(DBSession, self.session_id).status, "failed")
+            self.assertEqual(Submission.query.filter_by(session_id=self.session_id).count(), 0)
+
     @patch("routes.pipeline_v2_routes.execute_submission_pipeline")
     def test_v2_execute_and_run_routes_use_native_backend(self, execute_submission_pipeline):
         self.app.native_pipeline_service.list_pipelines.return_value = [
@@ -212,6 +231,9 @@ class TestNativePipelineRoutes(unittest.TestCase):
 
     @patch("routes.pipeline_v2_routes.execute_submission_pipeline")
     def test_v2_sync_execution_accepts_record_ids(self, execute_submission_pipeline):
+        with self.app.app_context():
+            db.session.get(DBSession, self.session_id).status = "failed"
+            db.session.commit()
         execute_submission_pipeline.return_value = {
             "result": {
                 "success": True,
@@ -240,6 +262,18 @@ class TestNativePipelineRoutes(unittest.TestCase):
         self.assertEqual(execute_submission_pipeline.call_args.kwargs["db_session_id"], self.session_id)
         self.assertEqual(execute_submission_pipeline.call_args.kwargs["local_file_paths"], [])
         self.assertEqual(execute_submission_pipeline.call_args.kwargs["record_ids"], [21, 22])
+        with self.app.app_context():
+            self.assertEqual(db.session.get(DBSession, self.session_id).status, "completed")
+
+        execute_submission_pipeline.return_value["result"]["success"] = False
+        response = self.client.post(
+            "/api/v2/pipelines/render/execute",
+            json={"session_id": self.session_id, "record_ids": [21], "is_sandbox": True},
+            headers=self._headers(),
+        )
+        self.assertEqual(response.status_code, 200)
+        with self.app.app_context():
+            self.assertEqual(db.session.get(DBSession, self.session_id).status, "failed")
 
     @patch("routes.pipeline_v2_routes._enqueue_submission_pipeline_task")
     def test_v2_async_execution_precreates_native_run_and_accepts_record_ids(self, mock_enqueue):

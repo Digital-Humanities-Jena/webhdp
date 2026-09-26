@@ -8,6 +8,7 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable
+from urllib.parse import quote
 
 import requests
 
@@ -132,7 +133,7 @@ def _sync_uploaded_files(cursor: sqlite3.Cursor, record_id: int, payload: dict[s
         SELECT rfm.file_id, sf.filename
         FROM record_files_map rfm
         JOIN source_files sf ON sf.file_id = rfm.file_id
-        WHERE rfm.record_id = ?
+        WHERE rfm.record_id = ? AND rfm.upload_status = 'uploaded'
         """,
         (record_id,),
     ).fetchall()
@@ -1283,7 +1284,7 @@ def upload_files_for_deposition(
             try:
                 with open(file_path, "rb") as handle:
                     response = http.put(
-                        f"{bucket_url}/{file_path.name}",
+                        f"{bucket_url}/{quote(file_path.name, safe='')}",
                         params={"access_token": token},
                         data=handle,
                         timeout=300,

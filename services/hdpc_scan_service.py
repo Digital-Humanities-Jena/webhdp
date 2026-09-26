@@ -6,6 +6,10 @@ import json
 import logging
 import os
 import re
+import shlex
+from urllib.parse import unquote, urlsplit
+
+from exceptions import SecurityError
 import sqlite3
 import zipfile
 from datetime import datetime, timezone
@@ -90,7 +94,37 @@ def _is_excluded_path(path: Path) -> bool:
     return any(part.lower() in EXCLUDED_DIR_NAMES for part in path.parts)
 
 
-def _find_mtl_files_for_obj(obj_path: Path) -> list[Path]:
+def _dependency_path(base: Path, reference: str, root: Path | None) -> Path:
+    candidate = (base / reference.replace("\\", "/")).resolve()
+    if root is not None and candidate != root and root not in candidate.parents:
+        raise SecurityError("A model dependency points outside the uploaded dataset")
+    return candidate
+
+
+def _texture_reference(line: str) -> str:
+    tokens = shlex.split(line.replace("\\", "/"), comments=False)[1:]
+    arities = {"-blendu": 1, "-blendv": 1, "-boost": 1, "-mm": 2, "-texres": 1,
+               "-clamp": 1, "-bm": 1, "-imfchan": 1, "-type": 1, "-cc": 1}
+    while tokens and tokens[0].startswith("-"):
+        option = tokens.pop(0)
+        if option in {"-o", "-s", "-t"}:
+            for _ in range(3):
+                if not tokens:
+                    break
+                try:
+                    float(tokens[0])
+                except ValueError:
+                    break
+                tokens.pop(0)
+        else:
+            count = arities.get(option)
+            if count is None:
+                return ""
+            del tokens[:count]
+    return " ".join(tokens)
+
+
+def _find_mtl_files_for_obj(obj_path: Path, root: Path | None = None) -> list[Path]:
     results: list[Path] = []
     try:
         with open(obj_path, "r", encoding="utf-8", errors="ignore") as handle:
@@ -101,15 +135,21 @@ def _find_mtl_files_for_obj(obj_path: Path) -> list[Path]:
                 parts = stripped.split(None, 1)
                 if len(parts) != 2:
                     continue
-                candidate = (obj_path.parent / parts[1].strip()).resolve()
-                if candidate.is_file() and not _is_excluded_path(candidate):
-                    results.append(candidate)
+                reference = parts[1].strip().strip('"')
+                candidate = _dependency_path(obj_path.parent, reference, root)
+                candidates = [candidate] if candidate.is_file() else [
+                    _dependency_path(obj_path.parent, ref, root)
+                    for ref in shlex.split(parts[1].replace("\\", "/"))
+                ]
+                results.extend(path for path in candidates if path.is_file() and not _is_excluded_path(path))
+    except SecurityError:
+        raise
     except Exception as exc:
         logger.warning("Failed to read OBJ dependencies for %s: %s", obj_path, exc)
     return results
 
 
-def _find_texture_files_for_mtl(mtl_path: Path) -> Tuple[list[Path], list[str]]:
+def _find_texture_files_for_mtl(mtl_path: Path, root: Path | None = None) -> Tuple[list[Path], list[str]]:
     found: list[Path] = []
     missing: list[str] = []
     seen_found: set[str] = set()
@@ -123,17 +163,17 @@ def _find_texture_files_for_mtl(mtl_path: Path) -> Tuple[list[Path], list[str]]:
                 parts = line.strip().split()
                 if not parts:
                     continue
-                texture_ref = parts[-1].strip()
+                texture_ref = _texture_reference(line)
                 if not texture_ref:
                     continue
-                candidate = (mtl_path.parent / texture_ref).resolve()
+                candidate = _dependency_path(mtl_path.parent, texture_ref, root)
                 if candidate.is_file() and not _is_excluded_path(candidate):
                     key = str(candidate)
                     if key not in seen_found:
                         seen_found.add(key)
                         found.append(candidate)
                     continue
-                basename_candidate = (mtl_path.parent / Path(texture_ref).name).resolve()
+                basename_candidate = _dependency_path(mtl_path.parent, Path(texture_ref).name, root)
                 if basename_candidate.is_file() and not _is_excluded_path(basename_candidate):
                     key = str(basename_candidate)
                     if key not in seen_found:
@@ -144,12 +184,14 @@ def _find_texture_files_for_mtl(mtl_path: Path) -> Tuple[list[Path], list[str]]:
                 if missing_key not in seen_missing:
                     seen_missing.add(missing_key)
                     missing.append(missing_key)
+    except SecurityError:
+        raise
     except Exception as exc:
         logger.warning("Failed to read MTL dependencies for %s: %s", mtl_path, exc)
     return found, missing
 
 
-def _find_gltf_external_files(gltf_path: Path) -> Tuple[list[Path], list[str]]:
+def _find_gltf_external_files(gltf_path: Path, root: Path | None = None) -> Tuple[list[Path], list[str]]:
     found: list[Path] = []
     missing: list[str] = []
     try:
@@ -172,7 +214,11 @@ def _find_gltf_external_files(gltf_path: Path) -> Tuple[list[Path], list[str]]:
     seen_found: set[str] = set()
     seen_missing: set[str] = set()
     for uri in references:
-        candidate = (gltf_path.parent / uri).resolve()
+        parsed = urlsplit(uri)
+        if parsed.scheme or parsed.netloc:
+            missing.append(uri)
+            continue
+        candidate = _dependency_path(gltf_path.parent, unquote(parsed.path), root)
         if candidate.is_file() and not _is_excluded_path(candidate):
             key = str(candidate)
             if key not in seen_found:
@@ -220,7 +266,7 @@ def _generic_node(path: Path, node_type: str = "source") -> dict[str, Any]:
     }
 
 
-def _scan_associated_files(source_file: Path, scan_options: Dict[str, Any]) -> dict[str, Any]:
+def _scan_associated_files(source_file: Path, scan_options: Dict[str, Any], root: Path | None = None) -> dict[str, Any]:
     suffix = source_file.suffix.lower()
     obj_options = scan_options.get("obj_options") or {}
 
@@ -228,9 +274,9 @@ def _scan_associated_files(source_file: Path, scan_options: Dict[str, Any]) -> d
         node = _generic_node(source_file)
         if not obj_options.get("add_mtl"):
             return node
-        for mtl_path in _find_mtl_files_for_obj(source_file):
+        for mtl_path in _find_mtl_files_for_obj(source_file, root):
             mtl_node = _generic_node(mtl_path, "primary")
-            found_textures, missing_textures = _find_texture_files_for_mtl(mtl_path) if obj_options.get("add_textures") else ([], [])
+            found_textures, missing_textures = _find_texture_files_for_mtl(mtl_path, root) if obj_options.get("add_textures") else ([], [])
             if missing_textures:
                 mtl_node["missing_textures"] = missing_textures
             for texture_path in found_textures:
@@ -242,7 +288,7 @@ def _scan_associated_files(source_file: Path, scan_options: Dict[str, Any]) -> d
         node = _generic_node(source_file)
         if not obj_options.get("add_textures"):
             return node
-        found_files, missing_files = _find_gltf_external_files(source_file)
+        found_files, missing_files = _find_gltf_external_files(source_file, root)
         if missing_files:
             node["missing_textures"] = missing_files
         for child_path in found_files:
@@ -297,6 +343,8 @@ def _promote_primary_source(file_structure: dict[str, Any], primary_source_file:
 
 
 def _apply_archive_subdirectories(file_structure: dict[str, Any], data_out_path: Path, base_dir: Path, group_key: str, batch_entity: str) -> None:
+    written_archives: set[str] = set()
+
     def recurse(node: dict[str, Any]) -> None:
         for child in list(node.get("children") or []):
             recurse(child)
@@ -336,11 +384,16 @@ def _apply_archive_subdirectories(file_structure: dict[str, Any], data_out_path:
         for folder_name, archived_nodes in grouped.items():
             zip_filename = f"{base_stem}_{folder_name}.zip"
             zip_path = archive_dir / zip_filename
-            with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as archive:
+            mode = "a" if str(zip_path) in written_archives else "w"
+            written_archives.add(str(zip_path))
+            with zipfile.ZipFile(zip_path, mode, zipfile.ZIP_DEFLATED) as archive:
+                existing_members = set(archive.namelist())
                 for archived_node in archived_nodes:
                     archived_path = Path(archived_node["path"]).resolve()
                     arcname = archived_path.relative_to(base_dir)
-                    archive.write(archived_path, arcname=str(arcname))
+                    if str(arcname) not in existing_members:
+                        archive.write(archived_path, arcname=str(arcname))
+                        existing_members.add(str(arcname))
                     archived_node["type"] = "archived_file"
                     archived_node["archive_name"] = zip_filename
             archive_node = _generic_node(zip_path, "archive")
@@ -405,7 +458,10 @@ def _store_tree(
     status = str(node.get("status") or "pending")
     is_primary_source = 1 if file_type == "primary_source" else 0
 
-    row = cursor.execute("SELECT file_id FROM source_files WHERE absolute_path = ? LIMIT 1", (abs_path,)).fetchone()
+    row = cursor.execute(
+        "SELECT file_id FROM source_files WHERE absolute_path = ? AND parent_file_id IS ? LIMIT 1",
+        (abs_path, parent_id),
+    ).fetchone()
     if row:
         file_id = int(row[0])
         cursor.execute(
@@ -678,14 +734,14 @@ def create_and_scan_hdpc_project(
 
             primary_source = _select_primary_source(files_in_group, primary_source_ext, preferred_primary_files)
             scan_root = primary_source
-            file_structure = _scan_associated_files(scan_root, scan_options)
+            file_structure = _scan_associated_files(scan_root, scan_options, data_in)
 
             paths_in_tree = _all_paths_in_tree(file_structure)
             for file_path in files_in_group:
                 resolved = str(Path(file_path).resolve())
                 if resolved in paths_in_tree:
                     continue
-                child_structure = _scan_associated_files(Path(file_path).resolve(), scan_options)
+                child_structure = _scan_associated_files(Path(file_path).resolve(), scan_options, data_in)
                 file_structure.setdefault("children", []).append(child_structure)
                 paths_in_tree.update(_all_paths_in_tree(child_structure))
 

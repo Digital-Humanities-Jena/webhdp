@@ -1,4 +1,5 @@
 import logging
+import json
 import os
 from functools import wraps
 
@@ -168,7 +169,7 @@ def execute_pipeline_v2(identifier):
         "abort_on_critical_error": bool(data.get("abort_on_critical_error", False)),
     }
     request_model = PipelineExecutionRequestSchema.model_validate(payload)
-    _, _, error_response = get_session_with_permission(
+    session_row, _, error_response = get_session_with_permission(
         request_model.session_id,
         permission="edit",
         require_mutable=True,
@@ -214,6 +215,9 @@ def execute_pipeline_v2(identifier):
         record_ids=request_model.record_ids,
         execution_items=[item.model_dump(mode="python") for item in request_model.execution_items],
     )
+    session_row.status = "completed" if execution_output["result"].get("success", True) else "failed"
+    session_row.timings = json.dumps(execution_output["timings"])
+    db.session.commit()
     return APIResponse.success(
         data={
             "run_id": execution_output["result"].get("run_id"),

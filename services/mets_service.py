@@ -2,6 +2,7 @@
 import logging
 import json
 import re
+import hashlib
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List, Optional
@@ -100,9 +101,10 @@ class MetsService:
         text = str(value or "").strip().lower()
         return text in {"", "unknown", "n/a", "na", "none", "undated"}
 
-    def _safe_file_id(self, filename: str) -> str:
-        sanitized = "".join(ch if ch.isalnum() else "_" for ch in str(filename or "unknown"))
-        return f"FILE_{sanitized.strip('_') or 'unknown'}"
+    def _safe_file_id(self, filename: str, role: str = "FILE") -> str:
+        """Keep XML IDs valid and distinct across filenames and asset roles."""
+        digest = hashlib.sha256(str(filename or "unknown").encode("utf-8")).hexdigest()
+        return f"{role}_{digest}"
 
     def _prepare_mets_assets(
         self,
@@ -356,7 +358,7 @@ class MetsService:
                 if file_node.get("ID")
             }
             for thumb in thumbnail_files:
-                thumb_id = self._safe_file_id(thumb.get("filename"))
+                thumb_id = self._safe_file_id(thumb.get("filename"), "THUMB")
                 if thumb_id in existing_ids:
                     continue
                 thumb_file = etree.SubElement(
@@ -593,7 +595,8 @@ class MetsService:
                 'iso_date_full': self.iso_date_full,
                 'now_iso': self.now_iso,
                 'map_mods_type': self.map_mods_type,
-                'map_structure_type': self.map_structure_type
+                'map_structure_type': self.map_structure_type,
+                'file_id': self._safe_file_id,
             }
 
             jinja_template = env.from_string(template.content)

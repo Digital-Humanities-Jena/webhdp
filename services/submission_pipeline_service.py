@@ -18,6 +18,8 @@ from constants import (
 from database.database import db
 from database.models import BatchFileMetadata, Session as DBSession, SystemConfig, UserMetadata
 from exceptions import FileProcessingError
+from services.pipeline_execution_lock import guard_submission_execution
+from services.source_bundle_service import create_source_bundle
 from services.audit_service import record_audit_event
 from services.dataset_integrity_service import (
     analyze_session_record_resolution,
@@ -714,6 +716,7 @@ def _resolve_version_target_record(target_session_id: int, target_local_record_i
     return target_record
 
 
+@guard_submission_execution
 def execute_submission_pipeline(
     identifier: str,
     local_file_paths: Optional[List[str]],
@@ -1059,6 +1062,16 @@ def execute_submission_pipeline(
         if not paths_to_associate:
             paths_to_associate = [effective_file_path]
 
+        source_bundle = create_source_bundle(
+            effective_file_path, inspect_data.get("file_tree", []),
+            os.path.join(os.path.dirname(hdpc_path), "outputs", "source-bundles"),
+        )
+        if source_bundle:
+            names = [os.path.basename(path).casefold() for path in paths_to_associate]
+            if len(names) != len(set(names)):
+                paths_to_associate = [effective_file_path]
+            paths_to_associate.append(source_bundle)
+
         return {
             "file_id": file_id,
             "filename": filename,
@@ -1202,6 +1215,16 @@ def execute_submission_pipeline(
             if not source_file_path:
                 skipped_files.append(str(record_id))
                 continue
+            source_bundle = create_source_bundle(
+                source_file_path, inspect_data.get("file_tree", []),
+                os.path.join(os.path.dirname(hdpc_path), "outputs", "source-bundles"),
+            )
+            if source_bundle:
+                add_local_source_files(
+                    hdpc_path, absolute_file_paths=[source_bundle],
+                    record_id_to_associate=int(record_id),
+                    pipeline_name="ingestion", step_name="source_bundle",
+                )
             source_metadata = session_record.get("record_metadata") if isinstance(session_record.get("record_metadata"), dict) else {}
             record_ids_to_process.append(int(record_id))
             record_info_list.append((int(record_id), source_file_path, _merge_non_empty_metadata({}, source_metadata)))

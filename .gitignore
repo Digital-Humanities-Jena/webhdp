@@ -113,6 +113,7 @@ databases/pipeline_system.db
 
 *.ztp
 *.hdpc
+*.hdpc.pipeline.lock
 
 pipeline_components/*
 !pipeline_components/.gitkeep

@@ -39,6 +39,11 @@ The HPC-Link renderer path supports authenticated service accounts, allocation
 preflight, dependency staging, and downloads restricted to allocation outputs.
 Each deployment must validate its scheduler, GPU driver, and Blender runtime.
 
+Models whose dependencies span directories include a `<model>.sources.zip` in
+their Zenodo draft. Extract that archive to restore the original paths before
+opening the model locally. It preserves parent-directory references and files
+that share a basename; the source files are not rewritten.
+
 Set `WEBHDP_CORE_ONLY=true` to expose only the predefined workflows and HPC
 diagnostics, and disable optional tools and pipeline authoring. Set
 `ZENODO_PUBLISH_ENABLED=false` for draft-only demonstrations and testing.

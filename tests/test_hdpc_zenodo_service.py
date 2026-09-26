@@ -789,3 +789,59 @@ def test_retry_does_not_replace_unavailable_or_submitted_draft(tmp_path):
     http.get = lambda *args, **kwargs: _DummyResponse(200, {"id": 9001, "submitted": True})
     assert not create_api_draft(hdpc_path, 1, http=http)["success"]
     assert len(http.post_calls) == 1
+
+
+def test_failed_file_upload_retries_without_creating_another_draft(tmp_path):
+    import requests
+    hdpc_path = str(tmp_path / 'retry-transfer.hdpc')
+    _create_hdpc_with_source(hdpc_path, str(tmp_path))
+    create_local_record_with_metadata(hdpc_path, file_id=101, metadata={'title':'Retry transfer','creators':[{'name':'Museum'}]},is_sandbox=True,access_token='sandbox-token')
+    http=_DummyZenodoHttp()
+    assert create_api_draft(hdpc_path,1,http=http)['success']
+    put=http.put
+    def interrupted(*args,**kwargs):raise requests.Timeout('Interrupted transfer')
+    http.put=interrupted
+    failed=upload_files_for_deposition(hdpc_path,1,http=http)
+    assert not failed['success'] and failed['failed_upload_count']==1
+    http.put=put
+    assert create_api_draft(hdpc_path,1,http=http)['success']
+    retried=upload_files_for_deposition(hdpc_path,1,http=http)
+    assert retried['success'] and retried['uploaded_file_count']==1
+    assert len(http.post_calls)==1
+    assert upload_files_for_deposition(hdpc_path,1,http=http)['uploaded_file_count']==0
+
+
+def test_upload_encodes_reserved_and_unicode_filename_characters(tmp_path):
+    from urllib.parse import quote
+    hdpc_path=str(tmp_path/'reserved.hdpc');source,_=_create_hdpc_with_source(hdpc_path,str(tmp_path))
+    from pathlib import Path
+    renamed=Path(source).with_name('模型 #1? 50%.glb');Path(source).rename(renamed)
+    with sqlite3.connect(hdpc_path) as conn:conn.execute('UPDATE source_files SET filename=?,absolute_path=?,relative_path=? WHERE file_id=101',(renamed.name,str(renamed),renamed.name))
+    create_local_record_with_metadata(hdpc_path,file_id=101,metadata={'title':'Reserved names','creators':[{'name':'Museum'}]},is_sandbox=True,access_token='sandbox-token')
+    http=_DummyZenodoHttp();assert create_api_draft(hdpc_path,1,http=http)['success']
+    assert upload_files_for_deposition(hdpc_path,1,http=http)['success']
+    assert http.put_calls[0][0].endswith('/'+quote(renamed.name,safe=''))
+
+
+def test_changed_generated_file_is_reuploaded_after_remote_refresh(tmp_path):
+    from pathlib import Path
+    from services.hdpc_zenodo_service import _sync_uploaded_files
+    hdpc_path = str(tmp_path / "changed.hdpc")
+    source, _ = _create_hdpc_with_source(hdpc_path, str(tmp_path))
+    create_local_record_with_metadata(
+        hdpc_path, file_id=101, metadata={"title": "Changed file", "creators": [{"name": "Museum"}]},
+        is_sandbox=True, access_token="sandbox-token",
+    )
+    http = _DummyZenodoHttp()
+    assert create_api_draft(hdpc_path, 1, http=http)["success"]
+    assert upload_files_for_deposition(hdpc_path, 1, http=http)["success"]
+    Path(source).write_bytes(b"changed model bytes")
+    add_local_source_files(hdpc_path, absolute_file_paths=[source], record_id_to_associate=1, pipeline_name="render")
+    with sqlite3.connect(hdpc_path) as conn:
+        conn.row_factory = sqlite3.Row
+        _sync_uploaded_files(conn.cursor(), 1, http._draft_payload())
+        assert conn.execute("SELECT upload_status FROM record_files_map WHERE record_id=1").fetchone()[0] == "pending"
+    assert upload_files_for_deposition(hdpc_path, 1, http=http)["uploaded_file_count"] == 1
+    add_local_source_files(hdpc_path, absolute_file_paths=[source], record_id_to_associate=1, pipeline_name="render")
+    assert upload_files_for_deposition(hdpc_path, 1, http=http)["uploaded_file_count"] == 0
+    assert len(http.post_calls) == 1

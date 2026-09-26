@@ -1,4 +1,5 @@
 from lxml import etree
+import pytest
 
 from services.mets_service import MetsService
 
@@ -6,6 +7,8 @@ from services.mets_service import MetsService
 def _sample_zenodo_record():
     return {
         "id": "443547",
+        "metadata": {"publication_date": "2024-01-01", "creators": [{"name": "Example, Person"}],
+                     "prereserve_doi": {"doi": "10.5072/zenodo.443547"}},
         "links": {"html": "https://sandbox.zenodo.org/records/443547"},
         "files": [
             {
@@ -193,3 +196,73 @@ def test_mets_validation_runs_xsd_checks():
     assert validation["valid"] is False
     assert validation["details"]["xsd"]["valid"] is False
     assert any("CHECKSUMTYPE" in error for error in validation["errors"])
+
+
+@pytest.mark.parametrize("filename", ["offset torus.fbx", "模型 🏺 #1?.obj", "image #1?.jpg"])
+def test_seeded_mets_handles_complex_filenames_and_self_preview(filename):
+    from flask import Flask
+    from database.database import db
+
+    app = Flask(__name__)
+    app.config.update(SQLALCHEMY_DATABASE_URI="sqlite:///:memory:", SQLALCHEMY_TRACK_MODIFICATIONS=False)
+    db.init_app(app)
+    with app.app_context():
+        db.create_all()
+        try:
+            service = MetsService()
+            record = _sample_zenodo_record()
+            record["files"] = [{"filename": filename, "size": 1024}]
+            if not filename.endswith(".jpg"):
+                record["files"].append({"filename": filename.rsplit(".", 1)[0] + "_r000.png", "size": 256})
+            content = service.generate_mets_xml(
+                {"title": "Museum & Research", "publication_date": "2026-09-26", "license": "cc-by-4.0"},
+                record,
+                main_file_key=filename,
+            )
+            assert service.validate_mets_xml(content)["valid"]
+            root = etree.fromstring(content.encode())
+            ids = root.xpath(".//mets:file/@ID", namespaces=service.namespaces)
+            assert len(ids) == len(set(ids)) == 2
+            references = root.xpath(".//mets:fptr/@FILEID", namespaces=service.namespaces)
+            assert set(references) == set(ids)
+        finally:
+            db.session.remove()
+            db.drop_all()
+
+
+def test_existing_mets_template_identifiers_are_upgraded_with_their_references():
+    from flask import Flask
+    from database.database import db
+    from database.models import LodTemplate, LodStandard
+    from database.seed_mets_mods_templates import METS_MODS_TEMPLATE
+
+    app = Flask(__name__)
+    app.config.update(SQLALCHEMY_DATABASE_URI="sqlite:///:memory:", SQLALCHEMY_TRACK_MODIFICATIONS=False)
+    db.init_app(app)
+    with app.app_context():
+        db.create_all()
+        try:
+            legacy = METS_MODS_TEMPLATE
+            for variable, role in [("main_file", "FILE"), ("thumb", "THUMB"), ("thumbnail_file", "THUMB")]:
+                legacy = legacy.replace(
+                    "{{ helpers.file_id(" + variable + ".filename, '" + role + "') }}",
+                    "FILE_{{ " + variable + ".filename | replace('.', '_') }}",
+                )
+            template = LodTemplate(name="Existing METS", standard=LodStandard.METS, format="xml", content=legacy, is_default=True)
+            db.session.add(template)
+            db.session.commit()
+            record = _sample_zenodo_record()
+            record["files"] = [{"filename": "image with spaces.jpg", "size": 1024}]
+            content = MetsService().generate_mets_xml(
+                {"title": "Existing template", "publication_date": "2026-09-26", "license": "cc-by-4.0"}, record
+            )
+            assert MetsService().validate_mets_xml(content)["valid"]
+            assert "helpers.file_id" in template.content
+        finally:
+            db.session.remove()
+            db.drop_all()
+
+
+def test_mets_file_ids_do_not_collide_when_punctuation_is_normalized():
+    service = MetsService()
+    assert service._safe_file_id("model a.png") != service._safe_file_id("model_a.png")

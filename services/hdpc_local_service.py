@@ -2187,12 +2187,22 @@ def add_local_source_files(
                 continue
 
             existing = cursor.execute(
-                "SELECT file_id FROM source_files WHERE absolute_path = ? LIMIT 1",
+                "SELECT file_id, sha256_hash FROM source_files WHERE absolute_path = ? LIMIT 1",
                 (normalized_path,),
             ).fetchone()
             if existing:
                 file_id = int(existing[0])
                 skipped_existing_path += 1
+                current_hash = _file_sha256(normalized_path)
+                if str(existing[1] or "") != current_hash:
+                    cursor.execute(
+                        "UPDATE source_files SET sha256_hash = ?, size_bytes = ? WHERE file_id = ?",
+                        (current_hash, os.path.getsize(normalized_path), file_id),
+                    )
+                    cursor.execute(
+                        "UPDATE record_files_map SET upload_status = 'pending', upload_timestamp = NULL WHERE file_id = ?",
+                        (file_id,),
+                    )
             else:
                 file_type = "source" if pipeline_name in (None, "", "ingestion") else "generated"
                 file_id = _get_or_create_source_file(
