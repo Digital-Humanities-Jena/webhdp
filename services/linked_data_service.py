@@ -10,6 +10,8 @@ from urllib.parse import quote
 
 from rdflib import Graph, Literal, Namespace, URIRef
 from rdflib.namespace import DCTERMS, RDF, RDFS
+from rdflib.compare import isomorphic
+from services.lod_reliability import assert_public_document
 
 from services.edm_service import EdmService
 
@@ -40,6 +42,17 @@ def generate_linked_data(metadata, record, *, main_file_key, additional_files=No
     doi = (record.get("metadata") or {}).get("prereserve_doi", {}).get("doi") or record.get("doi")
     if doi:
         graph.add((subject, DCTERMS.identifier, URIRef("https://doi.org/" + str(doi))))
+    license_value = metadata.get("license")
+    if isinstance(license_value, dict):
+        license_value = license_value.get("id")
+    if license_value:
+        license_uri = edm._map_license_to_uri(license_value)
+        if license_uri:
+            graph.add((subject, DCTERMS.license, URIRef(license_uri)))
+    if metadata.get("language"):
+        graph.add((subject, DCTERMS.language, Literal(str(metadata["language"]))))
+    if metadata.get("publication_date"):
+        graph.add((subject, DCTERMS.issued, Literal(str(metadata["publication_date"]))))
     creators = metadata.get("creators") or []
     if isinstance(creators, list) and creators:
         creation = URIRef(record_url + "#creation")
@@ -70,6 +83,43 @@ def generate_linked_data(metadata, record, *, main_file_key, additional_files=No
         "crm": str(CRM), "dcterms": str(DCTERMS), "rdfs": str(RDFS)
     }, auto_compact=True, indent=2)
     # Serialization is checked before artifacts become eligible for upload.
-    Graph().parse(data=xml, format="xml")
-    json.loads(jsonld)
+    assert_public_document(xml)
+    assert_public_document(jsonld)
+    if not isomorphic(Graph().parse(data=xml, format="xml"), Graph().parse(data=jsonld, format="json-ld")):
+        raise ValueError("RDF/XML and JSON-LD graphs differ")
     return {"cidoc_crm": ("cidoc-crm.xml", xml), "jsonld": ("metadata.jsonld", jsonld)}
+
+
+def validate_linked_data(content, standard):
+    try:
+        assert_public_document(content)
+        if standard == 'jsonld':
+            payload = json.loads(content)
+            context = payload.get('@context') if isinstance(payload, dict) else None
+            if not isinstance(context, dict) or context != {'crm': str(CRM), 'dcterms': str(DCTERMS), 'rdfs': str(RDFS)}:
+                raise ValueError('JSON-LD must use the bundled inline vocabulary context')
+            def reject_nested_context(value):
+                if isinstance(value, dict):
+                    for key, child in value.items():
+                        if key == '@context':
+                            raise ValueError('Nested JSON-LD contexts are not supported')
+                        reject_nested_context(child)
+                elif isinstance(value, list):
+                    for child in value:
+                        reject_nested_context(child)
+            reject_nested_context({key: value for key, value in payload.items() if key != '@context'})
+        elif '<!DOCTYPE' in content.upper() or '<!ENTITY' in content.upper():
+            raise ValueError('RDF/XML must not declare external entities')
+        graph = Graph().parse(data=content, format='json-ld' if standard == 'jsonld' else 'xml')
+        datasets = list(graph.subjects(DCTERMS.isReferencedBy, None))
+        if len(datasets) != 1:
+            raise ValueError('Expected one digital dataset with its public record link')
+        dataset = datasets[0]
+        if (dataset, RDF.type, CRM.E73_Information_Object) not in graph or not list(graph.objects(dataset, CRM.P102_has_title)) or not list(graph.objects(dataset, CRM.P106_is_composed_of)):
+            raise ValueError('Dataset must have a CRM type, title, and file relationships')
+        for title in graph.objects(dataset, CRM.P102_has_title):
+            if not any(str(value).strip() for value in graph.objects(title, CRM.P190_has_symbolic_content)):
+                raise ValueError('Dataset title is empty')
+        return {'valid': True, 'errors': [], 'warnings': [], 'triple_count': len(graph)}
+    except Exception as exc:
+        return {'valid': False, 'errors': [str(exc)], 'warnings': []}

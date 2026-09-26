@@ -4,6 +4,7 @@ import pipelineService from '@/services/pipeline.service'
 export function usePersistentPipelineRun(userId) {
   const run = ref(null)
   const error = ref('')
+  const trackingUnavailable = ref(false)
   const submitting = ref(false)
   const pending = ref(null)
   const now = ref(Date.now())
@@ -21,18 +22,23 @@ export function usePersistentPipelineRun(userId) {
   }
   function schedule() {
     clearTimeout(pollTimer)
-    if (active.value && !disposed) pollTimer = setTimeout(refresh, 3000)
+    if (active.value && !disposed && !trackingUnavailable.value) pollTimer = setTimeout(refresh, 3000)
   }
   async function refresh() {
     if (!pending.value || refreshing || disposed) return
     refreshing = true
+    const runId = pending.value.runId
     try {
       const response = await pipelineService.getPipelineRun(pending.value.runId)
-      if (disposed) return
+      if (disposed || pending.value?.runId !== runId) return
       run.value = response.data?.run || response.data
       error.value = ''
+      trackingUnavailable.value = false
       if (run.value?.status === 'failed') error.value = run.value.error || 'The run failed. Review its step results before starting a new run.'
     } catch (err) {
+      if (disposed || pending.value?.runId !== runId) return
+      const status = err?.response?.status || err?.status
+      trackingUnavailable.value = [403, 404, 410].includes(status) || ['FORBIDDEN', 'NOT_FOUND', 'RESOURCE_NOT_FOUND', 'SECURITY_ERROR'].includes(err?.error?.code)
       error.value = err?.error?.message || err?.message || 'Status is temporarily unavailable. Processing may still be running; reconnect to this run.'
     } finally {
       refreshing = false
@@ -63,6 +69,17 @@ export function usePersistentPipelineRun(userId) {
       schedule()
     } finally { submitting.value = false }
   }
+  function dismiss() {
+    clearTimeout(pollTimer)
+    pending.value = null
+    run.value = null
+    error.value = ''
+    trackingUnavailable.value = false
+    persist()
+    const url = new URL(window.location.href)
+    url.searchParams.delete('run')
+    window.history.replaceState({}, '', url)
+  }
   async function start(request) {
     if (active.value || submitting.value) return
     run.value = null
@@ -77,5 +94,5 @@ export function usePersistentPipelineRun(userId) {
   }
   const clock = setInterval(() => { now.value = Date.now() }, 1000)
   onBeforeUnmount(() => { disposed = true; clearTimeout(pollTimer); clearInterval(clock) })
-  return { run, error, active, submitting, pending, elapsed, start, refresh, resume, retry: submit }
+  return { run, error, trackingUnavailable, dismiss, active, submitting, pending, elapsed, start, refresh, resume, retry: submit }
 }

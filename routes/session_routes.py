@@ -4777,3 +4777,72 @@ def get_session_nodes(session_id):
     except Exception as e:
         logger.error(f"Failed to retrieve nodes for session {session_id}: {e}", exc_info=True)
         return APIResponse.error(f"Failed to retrieve file nodes: {str(e)}", 500)
+
+
+@session_bp.route('/<int:session_id>/records/<int:local_record_id>/lod', methods=['GET', 'POST'])
+@jwt_required()
+def record_lod_recovery(session_id, local_record_id):
+    """Inspect or retry local metadata generation without remote side effects."""
+    from pathlib import Path
+    from contextlib import nullcontext
+    from services.lod_artifact_service import generate_artifacts, suspend_previous_artifacts, FILENAMES
+    from services.lod_reliability import digest
+    from flask import send_file
+    import io
+    from services.hdpc_local_service import add_local_source_files
+    from services.pipeline_execution_lock import session_pipeline_lock
+    from routes.access_helpers import get_session_with_permission
+    session, _, error = get_session_with_permission(session_id, permission='edit' if request.method == 'POST' else 'view', require_mutable=request.method == 'POST')
+    if error is not None:
+        return error
+    if not session.hdpc_path:
+        return APIResponse.validation_error('The session project is unavailable')
+    root = Path(session.hdpc_path).resolve().parent / 'outputs' / f'record-{local_record_id}'
+    paths = list(root.glob('*/lod-generation.json'))
+    if not paths:
+        return APIResponse.success(data={'formats': {}, 'available': False})
+    if len(paths) != 1 or not paths[0].resolve().is_relative_to(root.resolve()):
+        return APIResponse.validation_error('Ambiguous metadata recovery state')
+    with session_pipeline_lock(session.hdpc_path) if request.method == 'POST' else nullcontext():
+        with paths[0].open(encoding='utf-8') as stream:
+            manifest = json.load(stream)
+        requested_format = request.args.get('format')
+        if request.method == 'GET' and requested_format:
+            status = (manifest.get('formats') or {}).get(requested_format) or {}
+            if requested_format not in FILENAMES or status.get('status') != 'generated' or (status.get('validation') or {}).get('valid') is not True:
+                return APIResponse.validation_error('Only validated metadata exports can be downloaded')
+            artifact = paths[0].parent / FILENAMES[requested_format]
+            if not artifact.resolve().is_relative_to(root.resolve()):
+                return APIResponse.validation_error('The metadata export is outside this record')
+            try:
+                content = artifact.read_bytes()
+            except OSError:
+                return APIResponse.validation_error('The export is missing. Retry generation.')
+            if digest(content) != status.get('sha256'):
+                return APIResponse.validation_error('The export changed after validation. Retry generation.')
+            return send_file(io.BytesIO(content), as_attachment=True, download_name=artifact.name, mimetype='application/octet-stream')
+        if request.method == 'POST':
+            from services.hdpc_schema_service import connect_hdpc
+            with connect_hdpc(session.hdpc_path) as conn:
+                row = conn.execute('SELECT record_status FROM zenodo_records WHERE record_id = ?', (local_record_id,)).fetchone()
+            if not row or str(row[0]).lower() in ('published', 'done', 'submitted'):
+                return APIResponse.validation_error('Only an existing unpublished draft can regenerate metadata')
+            suspend_previous_artifacts(session.hdpc_path, local_record_id)
+            def register(path, validation):
+                result = add_local_source_files(session.hdpc_path, absolute_file_paths=[path], record_id_to_associate=local_record_id, pipeline_name='lod_generation', step_name='metadata_generator', validation_reports={path: validation})
+                if not result.get('success') or result.get('errors_count'):
+                    raise ValueError('Could not register the validated artifact')
+            _, manifest = generate_artifacts(str(paths[0].parent), manifest['request'], register)
+    for standard, status in manifest['formats'].items():
+        if status.get('status') == 'generated' and standard in FILENAMES:
+            artifact = paths[0].parent / FILENAMES[standard]
+            try:
+                intact = artifact.resolve().is_relative_to(root.resolve()) and digest(artifact.read_bytes()) == status.get('sha256')
+            except OSError:
+                intact = False
+            if not intact:
+                status.update(success=False, status='failed', error='The export is missing or changed after validation. Retry generation.')
+                status['validation'] = {'valid': False, 'errors': ['Stored artifact integrity check failed']}
+    # Do not expose the private request or local paths in the report.
+    formats = {key: {field: value for field, value in status.items() if field not in ('path',)} for key, status in manifest['formats'].items()}
+    return APIResponse.success(data={'formats': formats, 'available': True})

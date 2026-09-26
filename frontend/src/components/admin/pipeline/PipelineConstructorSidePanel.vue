@@ -158,6 +158,7 @@
         <a :href="`/tools/pipeline-constructor?run=${encodeURIComponent(runId)}`" class="mt-1 block break-all text-xs text-indigo-700 underline">Open saved run {{ runId }}</a>
         <ProgressBar v-if="executingPipeline" class="mt-3" :percentage="runPercentage" :label="pipelineExecutionRun?.result?.progress?.status_message || pipelineExecutionRun?.result?.progress?.message || 'Waiting for processing updates…'" />
         <button type="button" class="mt-2 text-indigo-700 underline" @click="$emit('reconnect-run')">Refresh run status</button>
+        <button v-if="pipelineExecutionError" type="button" class="mt-2 ml-3 text-indigo-700 underline" @click="$emit('dismiss-run')">Stop tracking (processing is not cancelled)</button>
         <button v-if="canRetryRequest && pipelineExecutionError && !pipelineExecutionRun" type="button" class="mt-2 ml-3 text-indigo-700 underline" @click="$emit('retry-run-request')">Retry same request</button>
       </div>
       <button
@@ -281,7 +282,7 @@ const props = defineProps({
 })
 
 const emit = defineEmits([
-  'retry-sessions', 'reconnect-run', 'retry-run-request', 'focus-diagnostic',
+  'retry-sessions', 'reconnect-run', 'retry-run-request', 'dismiss-run', 'focus-diagnostic',
   'update:preflight-session-id',
   'update:preflight-file-paths-text',
   'refresh-session-resources',

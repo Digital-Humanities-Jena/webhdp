@@ -555,8 +555,11 @@ class IiifService:
         from database.database import db
         from database.models import LodTemplate
 
+        from services.lod_reliability import normalize_record
+        zenodo_record = normalize_record(zenodo_record)
         try:
-            template = db.session.get(LodTemplate, template_id)
+            from services.lod_reliability import resolve_template
+            template = resolve_template("iiif", template_id)
             if not template:
                 logger.error(f"LodTemplate {template_id} not found.")
                 return None
@@ -666,26 +669,9 @@ class IiifService:
 
         ensure_default_lod_templates()
 
-        if template_id:
-            requested = db.session.get(LodTemplate, template_id)
-            requested_standard = getattr(getattr(requested, "standard", None), "value", None)
-            if not requested or requested_standard != "iiif":
-                template_id = None
+        from services.lod_reliability import resolve_template
+        template_id = resolve_template("iiif", template_id).id
 
-        if not template_id:
-            # Use default IIIF template
-            default = LodTemplate.query.filter_by(is_default=True, standard="iiif").first()
-            if default:
-                template_id = default.id
-            else:
-                # Fallback to first available
-                first = LodTemplate.query.filter_by(standard="iiif").first()
-                if first:
-                    template_id = first.id
-                else:
-                    raise ValueError("No IIIF templates found in database")
-
-        # Render
         rendered = self.render_template(
             template_id,
             metadata,
@@ -705,6 +691,8 @@ class IiifService:
             allow_placeholder_thumbnail=allow_placeholder_thumbnail,
             additional_files=additional_files,
         )
+        from services.lod_reliability import assert_public_document
+        assert_public_document(repaired)
         minimum_viable_applied = repaired != rendered
 
         validation = None

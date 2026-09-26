@@ -591,6 +591,18 @@ class NativePipelineSystemTestCase(unittest.TestCase):
             with self.assertRaises(OperationConflict):
                 self.native_service._verify_preflight(payload, {**saved["config"], "name": "Changed"}, self.user_id)
 
+    def test_preflight_rejects_changed_metadata_settings(self):
+        from database.models import UserMetadata
+        from services.registry_lock import OperationConflict
+        with self.app.app_context():
+            directory, source, session = self._prepare_generic_pipeline_session("preflight_metadata")
+            saved = self.native_service.create_pipeline_version_from_config("metadata_checked", {"identifier": "metadata_checked", "name": "Metadata checked", "version": "1.0.0", "steps": [{"id": "classify", "name": "Classify", "component_ref": "input_file_classification"}]})
+            checked = self.native_service.preflight_pipeline_constructor({"pipeline_definition": saved["config"], "session_id": session.id, "local_file_paths": [str(source)]}, self.user_id)
+            db.session.add(UserMetadata(session_id=session.id, field_name="zenodo_metadata_draft", field_value='{"title":"Changed title"}'))
+            db.session.commit()
+            with self.assertRaises(OperationConflict):
+                self.native_service.create_pending_run("metadata_checked", session_id=session.id, initiated_by_user_id=self.user_id, request_payload={"preflight_token": checked["preflight_token"], "session_id": session.id, "local_file_paths": [str(source)]})
+
     def test_publication_rejects_unpinned_container_artifacts(self):
         with self.app.app_context():
             for runtime, image in [("docker", "example/component:latest"), ("singularity", "/work/component.sif")]:
@@ -1959,19 +1971,19 @@ class NativePipelineSystemTestCase(unittest.TestCase):
             "content": "<edm />",
             "minimum_viable_applied": False,
         }
-        self.app.edm_service.validate_edm_document.return_value = {"warnings": []}
+        self.app.edm_service.validate_edm_document.return_value = {"valid": True, "warnings": []}
         self.app.iiif_service.generate_iiif_manifest_with_report.return_value = {
             "content": "{}",
-            "validation": {"warnings": []},
+            "validation": {"valid": True, "warnings": []},
             "minimum_viable_applied": False,
         }
-        self.app.iiif_service.validate_iiif_manifest.return_value = {"warnings": []}
+        self.app.iiif_service.validate_iiif_manifest.return_value = {"valid": True, "warnings": []}
         self.app.mets_service.generate_mets_xml_with_report.return_value = {
             "content": "<mets />",
-            "validation": {"warnings": []},
+            "validation": {"valid": True, "warnings": []},
             "minimum_viable_applied": False,
         }
-        self.app.mets_service.validate_mets_xml.return_value = {"warnings": []}
+        self.app.mets_service.validate_mets_xml.return_value = {"valid": True, "warnings": []}
 
         with self.app.app_context():
             from services.hdpc_local_service import create_local_record_with_metadata
@@ -2253,19 +2265,19 @@ class NativePipelineSystemTestCase(unittest.TestCase):
             "content": "<edm />",
             "minimum_viable_applied": False,
         }
-        self.app.edm_service.validate_edm_document.return_value = {"warnings": []}
+        self.app.edm_service.validate_edm_document.return_value = {"valid": True, "warnings": []}
         self.app.iiif_service.generate_iiif_manifest_with_report.return_value = {
             "content": "{}",
-            "validation": {"warnings": []},
+            "validation": {"valid": True, "warnings": []},
             "minimum_viable_applied": False,
         }
-        self.app.iiif_service.validate_iiif_manifest.return_value = {"warnings": []}
+        self.app.iiif_service.validate_iiif_manifest.return_value = {"valid": True, "warnings": []}
         self.app.mets_service.generate_mets_xml_with_report.return_value = {
             "content": "<mets />",
-            "validation": {"warnings": []},
+            "validation": {"valid": True, "warnings": []},
             "minimum_viable_applied": False,
         }
-        self.app.mets_service.validate_mets_xml.return_value = {"warnings": []}
+        self.app.mets_service.validate_mets_xml.return_value = {"valid": True, "warnings": []}
 
         with self.app.app_context():
             from services.hdpc_local_service import create_local_record_with_metadata

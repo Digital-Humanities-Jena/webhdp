@@ -242,6 +242,7 @@
           :can-retry-request="Boolean(persistentRun.pending.value?.request)"
           @retry-sessions="loadSessions"
           @reconnect-run="persistentRun.refresh"
+          @dismiss-run="persistentRun.dismiss"
           @retry-run-request="persistentRun.retry"
           @focus-diagnostic="focusDiagnostic"
           :validation-result="validationResult"

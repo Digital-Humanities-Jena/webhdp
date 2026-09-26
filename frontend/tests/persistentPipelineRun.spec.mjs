@@ -49,3 +49,25 @@ describe('persistent pipeline execution', () => {
     expect(firstOptions).toMatchObject({ asyncExecution: true, expectedVersion: '1.0.0', preflightToken: 'signed-check' })
   })
 })
+
+it('stops automatic polling for a removed run and permits explicit dismissal', async () => {
+  service.getPipelineRun.mockRejectedValue({ error: { code: 'RESOURCE_NOT_FOUND', message: 'Run not found' } })
+  await controller.resume('missing-run')
+  expect(controller.trackingUnavailable.value).toBe(true)
+  await vi.advanceTimersByTimeAsync(12000)
+  expect(service.getPipelineRun).toHaveBeenCalledTimes(1)
+  controller.dismiss()
+  expect(controller.active.value).toBe(false)
+  expect(controller.pending.value).toBe(null)
+})
+
+it('ignores an outstanding status response after tracking is dismissed', async () => {
+  let resolve
+  service.getPipelineRun.mockImplementation(() => new Promise(r => { resolve = r }))
+  const pending = controller.resume('slow-run')
+  controller.dismiss()
+  resolve({ data: { run: { status: 'running' } } })
+  await pending
+  expect(controller.run.value).toBe(null)
+  expect(controller.active.value).toBe(false)
+})

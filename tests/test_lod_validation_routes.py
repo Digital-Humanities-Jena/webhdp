@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 import pandas as pd
 from flask import Flask
 from flask_jwt_extended import JWTManager, create_access_token
@@ -188,6 +189,8 @@ def test_iiif_test_mapping_returns_validation_and_repair_flag(tmp_path, monkeypa
     msf_path = tmp_path / "input.csv"
     msf_path.write_text("filename,title\nartifact.glb,Artifact\n", encoding="utf-8")
 
+    monkeypatch.setattr(iiif_routes, "_resolve_authorized_session", lambda sid: (SimpleNamespace(id=1, session_dir=str(tmp_path), hdpc_path=""), None))
+    monkeypatch.setattr(iiif_routes, "_get_session_msf_profile", lambda session: {})
     monkeypatch.setattr(iiif_routes.msf_service, "parse_msf_file_with_profile", lambda *args, **kwargs: (
         pd.DataFrame([{"filename": "artifact.glb", "title": "Artifact"}]),
         {"filename_column": "filename"},
@@ -220,6 +223,8 @@ def test_mets_test_mapping_returns_validation_and_repair_flag(tmp_path, monkeypa
     msf_path = tmp_path / "input.csv"
     msf_path.write_text("filename,title\nartifact.glb,Artifact\n", encoding="utf-8")
 
+    monkeypatch.setattr(mets_routes, "_resolve_authorized_session", lambda sid: (SimpleNamespace(id=1, session_dir=str(tmp_path), hdpc_path=""), None))
+    monkeypatch.setattr(mets_routes, "_get_session_msf_profile", lambda session: {})
     monkeypatch.setattr(mets_routes.msf_service, "parse_msf_file_with_profile", lambda *args, **kwargs: (
         pd.DataFrame([{"filename": "artifact.glb", "title": "Artifact"}]),
         {"filename_column": "filename"},
@@ -252,6 +257,8 @@ def test_edm_test_mapping_returns_validation_and_repair_flag(tmp_path, monkeypat
     msf_path = tmp_path / "input.csv"
     msf_path.write_text("filename,title\nartifact.glb,Artifact\n", encoding="utf-8")
 
+    monkeypatch.setattr(edm_routes, "_resolve_authorized_session", lambda sid: (SimpleNamespace(id=1, session_dir=str(tmp_path), hdpc_path=""), None))
+    monkeypatch.setattr(edm_routes, "_get_session_msf_profile", lambda session: {})
     monkeypatch.setattr(edm_routes.msf_service, "parse_msf_file_with_profile", lambda *args, **kwargs: (
         pd.DataFrame([{"filename": "artifact.glb", "title": "Artifact"}]),
         {"filename_column": "filename"},

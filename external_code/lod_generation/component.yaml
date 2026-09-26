@@ -1,7 +1,7 @@
 metadata:
   name: lod_generation
   label: LOD Generation
-  description: Generates EDM, IIIF, and METS outputs using WebHDP services.
+  description: Generates validated EDM, IIIF, METS/MODS, CIDOC-CRM, and JSON-LD outputs using WebHDP services.
   tags:
     - lod
     - edm
@@ -13,7 +13,7 @@ metadata:
     - mets
     - linked open data
   category: Metadata Processing
-  version: "1.0.0"
+  version: "1.1.0"
   status: alpha
   component_schema: "0.1.0-alpha.1"
 
@@ -35,7 +35,22 @@ outputs:
     label: METS XML
     type: file_path
 
+  - name: cidoc_crm
+    label: CIDOC-CRM RDF/XML
+    type: file_path
+  - name: jsonld
+    label: JSON-LD
+    type: file_path
+
 parameter_groups:
+  - title: Validation policy
+    parameters:
+      - name: lod_policy
+        label: Metadata requirement
+        type: string_dropdown
+        default: required
+        options: [required, optional, disabled]
+        description: Required blocks upload when any enabled format fails. Optional uploads successful formats only. Disabled skips metadata generation.
   - title: Formats
     parameters:
       - name: generate_edm
@@ -45,5 +60,11 @@ parameter_groups:
         type: boolean
         default: true
       - name: generate_mets
+        type: boolean
+        default: true
+      - name: generate_cidoc_crm
+        type: boolean
+        default: true
+      - name: generate_jsonld
         type: boolean
         default: true

@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 publishing_context_service = PublishingContextService()
 
 ProgressCallback = Callable[[Dict[str, Any]], None]
-INTERNAL_ZENODO_KEYS = {"lod_mapping", "msf_path"}
+INTERNAL_ZENODO_KEYS = {"lod_mapping", "msf_path", "msf_parse_options", "edm_template_id", "iiif_template_id", "mets_template_id"}
 EXCLUDED_PATH_SEGMENTS = {"__macosx", "__pycache__"}
 SUPPORTED_RENDER_ENGINES = {"BLENDER_EEVEE", "BLENDER_WORKBENCH", "CYCLES"}
 RENDER_ENGINE_ALIASES = {
@@ -317,6 +317,8 @@ def _extract_standard_mapping(lod_mapping: Any, standard_id: str, modality_id: s
         return lod_mapping
 
     standard_node = lod_mapping.get(standard_id, {})
+    if standard_id == "cidoc_crm" and not standard_node:
+        standard_node = lod_mapping.get("jsonld", {})
     if _looks_like_tag_mapping(standard_node):
         return standard_node
     if not isinstance(standard_node, dict):
@@ -602,7 +604,8 @@ def _resolve_metadata_linked_asset(
     Returns: (resolved_file_id, resolved_absolute_path, resolved_metadata_or_none)
     """
     selected_filename = os.path.basename(selected_file_path).lower()
-    file_metadata = batch_metadata_map.get(selected_filename)
+    selected_relative = next((path for path, file_id in normalized_file_id_map.items() if str(file_id) == str(selected_file_id)), selected_filename)
+    file_metadata = batch_metadata_map.get(selected_relative)
     if file_metadata:
         return selected_file_id, selected_file_path, file_metadata
 
@@ -619,6 +622,8 @@ def _resolve_metadata_linked_asset(
         if not candidate_relative_paths:
             continue
 
+        if len(candidate_relative_paths) > 1:
+            raise FileProcessingError(f"Ambiguous metadata-linked source {meta_filename}. Use its relative path.")
         candidate_relative_paths = sorted(
             candidate_relative_paths,
             key=lambda rel: (_file_type_rank(rel), len(rel), rel),
@@ -845,31 +850,22 @@ def execute_submission_pipeline(
         basename = os.path.basename(relative_path).lower()
         basename_to_relative_paths.setdefault(basename, []).append(relative_path)
 
-    batch_metadata_records = db.session.query(BatchFileMetadata).filter_by(session_id=db_session_id).all()
-    batch_metadata_map: Dict[str, Dict[str, Any]] = {}
-    for record in batch_metadata_records:
-        try:
-            batch_metadata_map[record.filename.lower()] = json.loads(record.metadata_json)
-        except json.JSONDecodeError:
-            logger.warning(f"Invalid JSON in batch metadata for {record.filename}")
-
-    has_batch_metadata = len(batch_metadata_map) > 0
-
-    shared_zenodo_metadata: Dict[str, Any] = {}
-    user_metadata = db.session.query(UserMetadata).filter_by(
-        session_id=db_session_id,
-        field_name="zenodo_metadata_draft",
-    ).order_by(UserMetadata.id.desc()).first()
-    if user_metadata and user_metadata.field_value:
-        try:
-            shared_zenodo_metadata = json.loads(user_metadata.field_value)
-        except json.JSONDecodeError:
-            logger.warning(f"Invalid JSON in shared user metadata for session {db_session_id}")
+    from services.lod_reliability import capture_session_lod, MetadataRows
+    lod_snapshot = None
+    if precreated_run_public_id:
+        from database.models import PipelineRun
+        queued_run = PipelineRun.query.filter_by(public_id=precreated_run_public_id).first()
+        if queued_run:
+            lod_snapshot = json.loads(queued_run.request_json or '{}').get('lod_snapshot')
+    lod_snapshot = lod_snapshot or capture_session_lod(db_session_id)
+    shared_zenodo_metadata = lod_snapshot['metadata']
+    batch_metadata_map = MetadataRows(lod_snapshot['batch'].items(), normalized_file_id_map)
+    has_batch_metadata = bool(batch_metadata_map)
 
     batch_shared_zenodo_metadata, batch_item_defaults = _split_batch_shared_zenodo_metadata(shared_zenodo_metadata)
 
     lod_mapping_config = shared_zenodo_metadata.get("lod_mapping") if isinstance(shared_zenodo_metadata, dict) else None
-    lod_msf_path = shared_zenodo_metadata.get("msf_path") if isinstance(shared_zenodo_metadata, dict) else None
+    lod_msf_path = shared_zenodo_metadata.get("msf_path") or lod_snapshot["profile"].get("file_path")
     lod_msf_candidates = _resolve_lod_msf_candidates(
         hdpc_path,
         lod_msf_path if isinstance(lod_msf_path, str) else None,
@@ -883,9 +879,14 @@ def execute_submission_pipeline(
                 + ", ".join(lod_msf_candidates)
             )
         try:
+            if lod_snapshot.get("msf_sha256"):
+                from services.lod_reliability import digest
+                with open(resolved_lod_msf_path, "rb") as stream:
+                    if digest(stream.read()) != lod_snapshot["msf_sha256"]:
+                        raise FileProcessingError("The MSF changed after this run was queued. Repeat preflight and start a new run.")
             msf_service = current_app.msf_service
-            msf_df, _ = msf_service.parse_msf_file(resolved_lod_msf_path)
-            candidate_filenames_for_detection = [os.path.basename(path) for path in local_file_paths]
+            msf_df, _ = msf_service.parse_msf_file(resolved_lod_msf_path, parse_options=shared_zenodo_metadata.get("msf_parse_options") or lod_snapshot["profile"].get("parse_options") or {})
+            candidate_filenames_for_detection = list(normalized_file_id_map) + [os.path.basename(path) for path in local_file_paths]
             if not candidate_filenames_for_detection and execution_items:
                 candidate_filenames_for_detection = [
                     str(item.get("source_file_name") or os.path.basename(str(item.get("source_file_path") or ""))).strip()
@@ -900,10 +901,10 @@ def execute_submission_pipeline(
                 raise FileProcessingError(
                     f"LOD mapping MSF source '{resolved_lod_msf_path}' does not contain a usable filename column."
                 )
-            for _, row in msf_df.iterrows():
-                key = str(row.get(filename_col, "")).strip().lower()
-                if key:
-                    msf_rows_by_filename[key] = row
+            msf_rows_by_filename = MetadataRows(
+                ((row.get(filename_col, ""), row) for _, row in msf_df.iterrows()),
+                normalized_file_id_map,
+            )
             logger.info(
                 "Loaded LOD mapping source MSF for %s rows using filename column '%s'.",
                 len(msf_rows_by_filename),
@@ -1007,7 +1008,9 @@ def execute_submission_pipeline(
         else:
             zenodo_metadata = dict(shared_zenodo_metadata)
 
-        lod_row = msf_rows_by_filename.get(filename_lower)
+        lod_row = msf_rows_by_filename.get(resolved_relative_path or filename)
+        if lod_mapping_config and lod_row is None:
+            raise FileProcessingError(f"No metadata row matches {resolved_relative_path or filename}. Use the exact relative source path in the MSF.")
         if lod_row is not None and lod_mapping_config:
             modality = _infer_lod_modality(filename, zenodo_metadata)
             zenodo_mapping_for_modality = _extract_standard_mapping(
@@ -1357,6 +1360,8 @@ def execute_submission_pipeline(
         "lod_mapping_config": lod_mapping_config,
         "resolved_lod_msf_path": resolved_lod_msf_path,
         "msf_rows_by_filename": msf_rows_by_filename,
+        "lod_source_paths": absolute_to_relative_path,
+        "lod_templates": lod_snapshot["templates"],
         "normalized_file_id_map": normalized_file_id_map,
         "file_id_to_relative_path": file_id_to_relative_path,
         "bundle_file_paths_by_relative": bundle_file_paths_by_relative,

@@ -1,8 +1,8 @@
 <!-- src/components/workflow/LodMapper.vue -->
 <template>
-  <div class="lod-mapper-container glass-morphism rounded-2xl overflow-hidden shadow-2xl border border-white/20 flex flex-col h-[600px]">
+  <div class="lod-mapper-container glass-morphism rounded-2xl overflow-hidden shadow-2xl border border-white/20 flex flex-col min-h-[600px]">
     <!-- Header -->
-    <div class="bg-gradient-to-r from-sky-700/95 via-cyan-700/95 to-teal-700/95 p-4 flex items-center justify-between text-white">
+    <div class="bg-gradient-to-r from-sky-700/95 via-cyan-700/95 to-teal-700/95 p-4 flex flex-wrap gap-4 items-center justify-between text-white">
       <div class="flex items-center gap-3">
         <div class="p-2 bg-white/20 rounded-lg backdrop-blur-md">
           <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -14,7 +14,7 @@
           <p class="text-xs text-cyan-100 opacity-90">Map MSF & Zenodo metadata to Linked Open Data standards</p>
         </div>
       </div>
-      <div class="flex items-center gap-2">
+      <div class="flex flex-wrap items-center gap-2">
         <input
           type="file"
           ref="fileInput"
@@ -49,9 +49,10 @@
 
         <div class="w-px h-6 bg-white/20 mx-1"></div>
 
-        <div class="flex items-center gap-2">
-          <label class="text-[10px] uppercase tracking-wider text-cyan-100">Row</label>
+        <div class="flex flex-wrap items-center gap-2">
+          <label for="lod-sample-row" class="text-xs text-cyan-100">Sample row (starts at 0)</label>
           <input
+            id="lod-sample-row"
             v-model.number="selectedRowIndex"
             type="number"
             min="0"
@@ -79,8 +80,10 @@
 
     <div class="flex flex-1 overflow-hidden bg-white/5 backdrop-blur-sm">
       <!-- Sidebar: LOD Standards -->
-      <div class="w-20 bg-black/5 border-r border-white/10 flex flex-col items-center py-6 gap-6">
-        <div
+      <div class="w-20 shrink-0 bg-black/5 border-r border-white/10 flex flex-col items-center py-6 gap-6">
+        <button
+          type="button"
+          :aria-pressed="activeStandard === std.id"
           v-for="std in lodStandards"
           :key="std.id"
           class="group relative flex flex-col items-center gap-1 cursor-pointer"
@@ -91,19 +94,18 @@
           </div>
           <span :class="['text-[10px] font-bold tracking-tight uppercase px-1.5 py-0.5 rounded', activeStandard === std.id ? 'text-slate-900 bg-white/80' : 'text-slate-700 bg-white/65']">{{ std.name }}</span>
           <!-- Status Indicator -->
-          <div v-if="std.mapped" class="absolute -top-1 -right-1 w-3 h-3 bg-green-500 rounded-full border-2 border-white shadow-sm"></div>
-        </div>
+        </button>
       </div>
 
       <!-- Main Content -->
-      <div class="flex-1 flex flex-col overflow-hidden">
+      <div class="min-w-0 flex-1 flex flex-col overflow-hidden">
         <!-- Modality Tabs -->
-        <div class="flex border-b border-white/10 bg-black/5 px-6">
+        <div class="flex overflow-x-auto border-b border-white/10 bg-black/5 px-2 sm:px-6">
           <button
             v-for="mod in modalities"
             :key="mod.id"
             @click="activeModality = mod.id"
-            :class="['px-5 py-3 text-xs font-bold uppercase tracking-widest transition-all relative', activeModality === mod.id ? 'text-cyan-700' : 'text-gray-500 hover:text-gray-700']"
+            :class="['px-3 sm:px-5 py-3 text-xs font-bold uppercase tracking-widest transition-all relative', activeModality === mod.id ? 'text-cyan-700' : 'text-gray-500 hover:text-gray-700']"
           >
             {{ mod.name }}
             <div v-if="activeModality === mod.id" class="absolute bottom-0 left-0 right-0 h-0.5 bg-cyan-700 rounded-full transition-all"></div>
@@ -111,7 +113,7 @@
         </div>
 
         <!-- Scrollable Mapping Area -->
-        <div class="flex-1 overflow-y-auto p-6">
+        <div class="flex-1 overflow-y-auto p-3 sm:p-6">
           <div v-if="loadingColumns" class="flex flex-col items-center justify-center h-full opacity-50">
              <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-cyan-700 mb-2"></div>
              <p class="text-xs font-medium uppercase tracking-widest">Loading Fields...</p>
@@ -210,8 +212,10 @@
       </div>
     </div>
 
-    <!-- Test Results Overlay -->
-    <div v-if="testResult" class="absolute inset-x-0 bottom-0 bg-white shadow-2xl border-t border-gray-200 flex flex-col h-1/2 overflow-hidden z-10 transition-all duration-500 transform translate-y-0">
+    <p v-if="testError" role="alert" class="p-4 text-sm text-red-700">{{ testError }} Use Test Mapping to retry.</p>
+    <p v-if="['cidoc_crm', 'jsonld'].includes(activeStandard)" class="px-4 py-2 text-sm text-slate-700">CIDOC-CRM and JSON-LD describe the same digital dataset. Both use the CIDOC-CRM mappings.</p>
+    <!-- Test results -->
+    <div v-if="testResult" class="bg-white border-t border-gray-200 flex flex-col max-h-[600px] overflow-auto">
       <div class="flex items-center justify-between p-4 bg-gray-50 border-b">
         <div class="flex items-center gap-3">
           <span :class="['px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider', testResult.validation.valid ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700']">
@@ -219,14 +223,14 @@
           </span>
           <h3 class="text-sm font-bold text-gray-900">Preview Render (Row {{ testResult.row_index_used ?? selectedRowIndex }}) - {{ activeStandard.toUpperCase() }}</h3>
         </div>
-        <button @click="testResult = null" class="text-gray-400 hover:text-gray-600 transition-colors">
+        <button aria-label="Close preview" @click="testResult = null" class="text-gray-400 hover:text-gray-600 transition-colors">
           <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
           </svg>
         </button>
       </div>
-      <div class="flex flex-1 overflow-hidden">
-        <div class="w-1/3 border-r p-4 overflow-y-auto bg-gray-50/50">
+      <div class="flex flex-col lg:flex-row flex-1 overflow-auto">
+        <div class="w-full lg:w-1/3 min-w-0 border-r p-4 overflow-y-auto bg-gray-50/50">
           <h4 class="text-[10px] uppercase font-bold text-gray-400 mb-2">Applied Metadata</h4>
           <pre class="text-[10px] bg-white p-3 rounded-lg border border-gray-100 shadow-sm">{{ JSON.stringify(testResult.metadata, null, 2) }}</pre>
 
@@ -243,7 +247,7 @@
           </div>
           <p class="mt-4 text-[10px] text-gray-500">Row used: {{ testResult.row_index_used ?? selectedRowIndex }}</p>
         </div>
-        <div class="flex-1 bg-gray-900 overflow-y-auto">
+        <div class="min-w-0 flex-1 bg-gray-900 overflow-auto">
           <pre class="p-4 text-green-400 font-mono text-[10px] leading-relaxed">{{ testPreviewOutput }}</pre>
         </div>
       </div>
@@ -252,7 +256,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, reactive, computed, watch } from 'vue'
+import { ref, onMounted, onBeforeUnmount, reactive, computed, watch } from 'vue'
 import api from '@/services/api'
 import { useToast } from '@/composables/useToast'
 import { useWorkflowStore } from '@/stores/workflow'
@@ -262,7 +266,8 @@ const workflowStore = useWorkflowStore()
 
 const props = defineProps({
   msfPath: { type: String, required: true },
-  templateId: { type: Number, required: true }
+  templateId: { type: Number, required: true },
+  initialMapping: { type: Object, default: null }
 })
 
 const emit = defineEmits(['update:mapping'])
@@ -275,6 +280,9 @@ const exporting = ref(false)
 const importing = ref(false)
 const fileInput = ref(null)
 const testResult = ref(null)
+const testError = ref('')
+let testEpoch = 0
+let columnsEpoch = 0
 const msfColumns = ref([])
 const selectedRowIndex = ref(0)
 const suggestedRowIndex = ref(0)
@@ -333,6 +341,8 @@ const lodStandards = [
     }
   }
 ]
+
+lodStandards.push({ id: 'cidoc_crm', name: 'CIDOC-CRM', icon: lodStandards[1].icon }, { id: 'jsonld', name: 'JSON-LD', icon: lodStandards[1].icon })
 
 const modalities = [
   { id: '3d', name: '3D' },
@@ -436,6 +446,7 @@ const mapping = reactive({
 
 function getTagsForStandardAndModality(standardId, modalityId) {
   if (standardId === 'zenodo') return tagsByModality.zenodo
+  if (['cidoc_crm', 'jsonld'].includes(standardId)) return tagsByModality['3d'].filter(tag => ['dc:title', 'dc:description', 'dc:creator'].includes(tag.id))
   const tagKey = standardId === 'iiif' ? `iiif_${modalityId}` : modalityId
   if (tagsByModality[tagKey]) return tagsByModality[tagKey]
   if (standardId === 'iiif') return tagsByModality.iiif_3d
@@ -557,8 +568,9 @@ function resolveImportedModalityNode(importedStandard, modalityId) {
 
 function mergeImportedMapping(importedMapping) {
   if (!importedMapping || typeof importedMapping !== 'object') return
+  importedMapping = { ...importedMapping, cidoc_crm: importedMapping.cidoc_crm || importedMapping.jsonld }
   let firstMapped = null
-  lodStandards.forEach(std => {
+  lodStandards.filter(std => std.id !== 'jsonld').forEach(std => {
     const importedStandard = importedMapping[std.id]
     if (!importedStandard || typeof importedStandard !== 'object') return
 
@@ -582,6 +594,7 @@ function mergeImportedMapping(importedMapping) {
 }
 
 initializeMappingDefaults()
+mapping.jsonld = mapping.cidoc_crm
 
 const currentTags = computed(() => {
   return getTagsForStandardAndModality(activeStandard.value, activeModality.value)
@@ -594,7 +607,7 @@ const activeStandardLabel = computed(() => {
 
 const testPreviewOutput = computed(() => {
   if (!testResult.value) return ''
-  if (activeStandard.value === 'iiif') return testResult.value.json || ''
+  if (['iiif', 'jsonld'].includes(activeStandard.value)) return testResult.value.json || ''
   if (activeStandard.value === 'zenodo') {
     return JSON.stringify(testResult.value.payload || { metadata: testResult.value.metadata || {} }, null, 2)
   }
@@ -622,6 +635,7 @@ async function fetchCommunityOverride() {
 }
 
 async function fetchColumns() {
+  const epoch = ++columnsEpoch
   loadingColumns.value = true
   try {
     const payload = {
@@ -632,6 +646,7 @@ async function fetchColumns() {
       payload.msf_parse_options = msfParseOptions.value
     }
     const res = await api.post('/edm/msf-columns', payload)
+    if (epoch !== columnsEpoch) return
     if (res.success) {
       msfColumns.value = res.data.columns || []
       const suggested = Number.isInteger(res.data.suggested_row_index) ? res.data.suggested_row_index : 0
@@ -656,13 +671,18 @@ async function fetchColumns() {
       })
     }
   } catch (e) {
+    if (epoch !== columnsEpoch) return
+    msfColumns.value = []
     toast.error("Failed to load MSF columns")
   } finally {
-    loadingColumns.value = false
+    if (epoch === columnsEpoch) loadingColumns.value = false
   }
 }
 
 async function testMapping() {
+  const epoch = ++testEpoch
+  const standard = activeStandard.value
+  testError.value = ''
   testing.value = true
   testResult.value = null
   try {
@@ -679,12 +699,15 @@ async function testMapping() {
       zenodo: '/metadata/test-mapping',
       edm: '/edm/test-mapping',
       iiif: '/iiif/test-mapping',
-      mets: '/mets/test-mapping'
+      mets: '/mets/test-mapping',
+      cidoc_crm: '/edm/test-linked-mapping',
+      jsonld: '/edm/test-linked-mapping'
     }
     const endpoint = endpointByStandard[activeStandard.value] || '/edm/test-mapping'
 
     const safeRowIndex = Math.max(0, Number(selectedRowIndex.value) || 0)
     const payload = {
+      standard,
       msf_path: props.msfPath,
       session_id: workflowStore.sessionId,
       row_index: safeRowIndex,
@@ -709,24 +732,25 @@ async function testMapping() {
     if (Object.keys(msfParseOptions.value || {}).length > 0) {
       payload.msf_parse_options = msfParseOptions.value
     }
-    if (activeStandard.value !== 'zenodo') {
+    if (standard === 'edm') {
       payload.template_id = props.templateId
     }
 
     const res = await api.post(endpoint, payload)
 
+    if (epoch !== testEpoch) return
+    if (!res.success || typeof res.data?.validation?.valid !== 'boolean') throw new Error("Validation is unavailable")
     if (res.success) {
       testResult.value = res.data
-      if (Number.isInteger(res.data.row_index_used)) {
-        selectedRowIndex.value = res.data.row_index_used
-      }
+
       if (res.data.validation.valid) toast.success("Mapping test passed!")
       else toast.warning("Mapping test failed validation.")
     }
   } catch (e) {
-    toast.error("Mapping test failed: " + (e.error?.message || e.message))
+    if (epoch !== testEpoch) return
+    testError.value = "Mapping test failed: " + (e.error?.message || e.message)
   } finally {
-    testing.value = false
+    if (epoch === testEpoch) testing.value = false
   }
 }
 
@@ -793,12 +817,29 @@ async function importMapping(event) {
   }
 }
 
+watch([mapping, activeStandard, activeModality, selectedRowIndex, () => props.templateId, () => props.msfPath, () => workflowStore.sessionId, msfParseOptions], () => {
+  testEpoch++
+  testing.value = false
+  testResult.value = null
+  testError.value = ''
+}, { deep: true, flush: 'sync' })
+
 // Watch for changes and emit
 watch(mapping, (newMapping) => {
   emit('update:mapping', JSON.parse(JSON.stringify(newMapping)))
 }, { deep: true })
 
+watch(() => JSON.stringify([props.msfPath, workflowStore.sessionId, msfParseOptions.value]), () => {
+  columnsEpoch++
+  msfColumns.value = []
+  fetchColumns()
+})
+
+onBeforeUnmount(() => { testEpoch++; columnsEpoch++ })
+
 onMounted(() => {
+  if (props.initialMapping) mergeImportedMapping(props.initialMapping)
+  mapping.jsonld = mapping.cidoc_crm
   fetchColumns()
   fetchCommunityOverride()
 })

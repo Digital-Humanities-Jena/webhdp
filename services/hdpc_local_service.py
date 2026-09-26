@@ -2261,7 +2261,8 @@ def add_local_source_files(
                     ON CONFLICT(record_id, file_id)
                     DO UPDATE SET
                         file_path = excluded.file_path,
-                        file_purpose = excluded.file_purpose
+                        file_purpose = excluded.file_purpose,
+                        upload_status = CASE WHEN record_files_map.upload_status = 'validation_pending' THEN 'pending' ELSE record_files_map.upload_status END
                     """,
                     (
                         int(record_id_to_associate),
@@ -2273,7 +2274,7 @@ def add_local_source_files(
                 )
         conn.commit()
         return {
-            "success": True,
+            "success": errors_count == 0,
             "message": "File addition process completed.",
             "added_count": added_count,
             "skipped_existing_path": skipped_existing_path,

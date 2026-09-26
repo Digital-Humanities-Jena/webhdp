@@ -741,7 +741,7 @@ class NativePipelineSystemService:
         return {
             "valid": True,
             "pipeline": normalized,
-            "preflight_token": self._preflight_signer().dumps({"config_hash": _hash_payload(normalized), "session_id": request_model.session_id, "paths": request_model.local_file_paths, "user_id": user_id}),
+            "preflight_token": self._preflight_signer().dumps({"config_hash": _hash_payload(normalized), "session_id": request_model.session_id, "paths": request_model.local_file_paths, "user_id": user_id, "lod_hash": self._session_lod_hash(request_model.session_id)}),
             "validation": validation,
             "steps": summary_steps,
         }
@@ -1014,7 +1014,9 @@ class NativePipelineSystemService:
 
         if request_payload.get("expected_version") and version_row.version != request_payload["expected_version"]:
             raise OperationConflict("The active pipeline version changed. Reload it and repeat preflight.")
-        self._verify_preflight(request_payload, _json_loads(version_row.config_json, {}), initiated_by_user_id)
+        from services.lod_reliability import capture_session_lod
+        lod_snapshot = capture_session_lod(session_id) if session_id else None
+        self._verify_preflight(request_payload, _json_loads(version_row.config_json, {}), initiated_by_user_id, lod_snapshot=lod_snapshot)
         active_run = PipelineRun.query.filter(PipelineRun.session_id == session_id, PipelineRun.status.in_([PipelineRunStatus.PENDING, PipelineRunStatus.RUNNING])).first()
         if active_run:
             raise OperationConflict("This session already has an active run.", details={"run_id": active_run.public_id})
@@ -1025,7 +1027,7 @@ class NativePipelineSystemService:
             session_id=session_id,
             initiated_by_user_id=initiated_by_user_id,
             status=PipelineRunStatus.PENDING,
-            request_json=_json_dumps({**request_payload, "request_fingerprint": _hash_payload(request_payload)}),
+            request_json=_json_dumps({**request_payload, "request_fingerprint": _hash_payload(request_payload), "lod_snapshot": lod_snapshot}),
             started_at=datetime.utcnow(),
         )
         db.session.add(pipeline_run)
@@ -1628,7 +1630,11 @@ class NativePipelineSystemService:
     def _preflight_signer(self):
         return URLSafeTimedSerializer(current_app.config["SECRET_KEY"], salt="pipeline-preflight-v1")
 
-    def _verify_preflight(self, payload, config, user_id):
+    def _session_lod_hash(self, session_id):
+        from services.lod_reliability import capture_session_lod
+        return _hash_payload(capture_session_lod(session_id)) if session_id else None
+
+    def _verify_preflight(self, payload, config, user_id, *, lod_snapshot=None):
         token = payload.get("preflight_token")
         if not token:
             return
@@ -1636,9 +1642,9 @@ class NativePipelineSystemService:
             checked = self._preflight_signer().loads(token, max_age=3600)
         except BadSignature as exc:
             raise OperationConflict("Preflight expired or is invalid. Check the selected files again.") from exc
-        expected = {"config_hash": _hash_payload(self._normalize_pipeline_config(config)), "session_id": payload.get("session_id"), "paths": payload.get("local_file_paths"), "user_id": user_id}
+        expected = {"config_hash": _hash_payload(self._normalize_pipeline_config(config)), "session_id": payload.get("session_id"), "paths": payload.get("local_file_paths"), "user_id": user_id, "lod_hash": _hash_payload(lod_snapshot) if lod_snapshot is not None else self._session_lod_hash(payload.get("session_id"))}
         if checked != expected:
-            raise OperationConflict("The definition or selected files changed. Repeat preflight before running.")
+            raise OperationConflict("The definition, metadata, templates, or selected files changed. Repeat preflight before running.")
 
     def _get_component_manifest_by_key(self, component_key: str, version: Optional[str] = None) -> Dict[str, Any]:
         definition = ComponentDefinition.query.filter_by(key=component_key, is_active=True).first()
@@ -4325,7 +4331,7 @@ class NativePipelineSystemService:
         if not isinstance(hdpc_path, str) or not hdpc_path.strip():
             raise FileProcessingError("hdpc_path is required to register pipeline-generated files")
         try:
-            add_local_source_files(
+            result = add_local_source_files(
                 hdpc_path,
                 absolute_file_paths=file_paths,
                 record_id_to_associate=record_id,
@@ -4333,6 +4339,8 @@ class NativePipelineSystemService:
                 step_name=step_name,
                 validation_reports=validation_reports,
             )
+            if not result.get("success") or result.get("errors_count"):
+                raise FileProcessingError("Could not register all generated artifacts")
             return
         except Exception as exc:
             raise FileProcessingError(
@@ -4920,11 +4928,8 @@ class NativePipelineSystemService:
         execution_context = request.metadata["execution_context"]
         record_context = request.metadata["record_context"]
         progress_callback = execution_context.get("progress_callback")
-        lod_options = execution_context["steps_map"].get("lod_generation", {}).get("parameters", {})
+        lod_options = request.parameters or {}
         lod_policy = self._normalize_lod_policy(lod_options)
-        if not execution_context["steps_map"].get("lod_generation", {}).get("enabled", True):
-            self._mark_lod_step_skipped(record_context, status="skipped_disabled")
-            return {"success": True, "status": "completed", "outputs": {}}
         if lod_policy == "disabled":
             self._mark_lod_step_skipped(record_context, status="skipped_disabled")
             return {"success": True, "status": "completed", "outputs": {}}
@@ -4973,7 +4978,7 @@ class NativePipelineSystemService:
         )
         allow_placeholder_thumbnail = not renderer_enabled
         modality = legacy._infer_lod_modality(record_context["filename"], record_context["file_zenodo_metadata"])
-        lod_row = execution_context["msf_rows_by_filename"].get(record_context["filename"].lower())
+        lod_row = execution_context["msf_rows_by_filename"].get(execution_context.get("lod_source_paths", {}).get(os.path.normpath(record_context["file_path"])) or record_context["filename"])
         thumbnail_mapping_keys = {
             "lod_thumbnail_mode",
             "lod_thumbnail_pattern",
@@ -5010,206 +5015,47 @@ class NativePipelineSystemService:
             )
             return legacy._merge_non_empty_metadata(base_metadata, mapped_values)
 
-        try:
-            if lod_options.get("generate_edm", True):
-                step_started = time.time()
-                edm_metadata = build_lod_metadata("edm")
-                edm_generation = current_app.edm_service.generate_edm_xml_with_report(
-                    edm_metadata,
-                    zenodo_resp,
-                    None,
-                    main_file_key=main_file_key,
-                    validate=False,
-                    additional_files=additional_files_for_lod,
-                    allow_placeholder_thumbnail=allow_placeholder_thumbnail,
-                )
-                edm_content = edm_generation["content"]
-                edm_validation = current_app.edm_service.validate_edm_document(
-                    edm_content,
-                    metadata=edm_metadata,
-                    include_remote=current_app.config.get(
-                        "LOCAL_EDM_VALIDATOR_REQUIRED",
-                        False,
-                    ) or current_app.config.get(
-                        "ENABLE_LOCAL_EDM_VALIDATION",
-                        current_app.config.get("ENABLE_METIS_VALIDATION", True),
-                    ),
-                )
-                edm_path = os.path.join(record_context["specific_output_dir"], "edm.xml")
-                with open(edm_path, "w", encoding="utf-8") as handle:
-                    handle.write(edm_content)
-                edm_validation_report_path = os.path.join(
-                    record_context["specific_output_dir"],
-                    "edm.validation.json",
-                )
-                with open(edm_validation_report_path, "w", encoding="utf-8") as handle:
-                    json.dump(edm_validation, handle, indent=2, sort_keys=True)
-                self._register_record_files(
-                    execution_context,
-                    record_context["record_id"],
-                    [edm_path, edm_validation_report_path],
-                    "lod_generation",
-                    "xml_generator",
-                    validation_reports={edm_path: edm_validation},
-                )
-                legacy._append_unique_paths(
-                    record_context["generated_files"],
-                    [edm_path, edm_validation_report_path],
-                )
-                if not edm_validation.get("valid", True):
-                    validation_errors = edm_validation.get("errors") or ["Local EDM Validator rejected generated EDM"]
-                    raise ValueError(f"EDM validation failed: {validation_errors[0]}")
-                self._set_lod_status(
-                    record_context,
-                    "edm",
-                    success=True,
-                    status="generated",
-                    path=edm_path,
-                    validation_report_path=edm_validation_report_path,
-                    validation=edm_validation,
-                    minimum_viable_applied=edm_generation["minimum_viable_applied"],
-                    lod_policy=lod_policy,
-                )
-                generated_outputs["edm"] = edm_path
-                add_timing("edm_generation", time.time() - step_started)
-            else:
-                self._set_lod_status(
-                    record_context,
-                    "edm",
-                    success=True,
-                    status="skipped_disabled",
-                    lod_policy=lod_policy,
-                )
-
-            if lod_options.get("generate_iiif", True):
-                step_started = time.time()
-                iiif_metadata = build_lod_metadata("iiif")
-                iiif_generation = current_app.iiif_service.generate_iiif_manifest_with_report(
-                    iiif_metadata,
-                    zenodo_resp,
-                    None,
-                    main_file_key=main_file_key,
-                    allow_placeholder_thumbnail=allow_placeholder_thumbnail,
-                    additional_files=additional_files_for_lod,
-                )
-                iiif_content = iiif_generation["content"]
-                iiif_validation = iiif_generation["validation"] or current_app.iiif_service.validate_iiif_manifest(iiif_content)
-                iiif_path = os.path.join(record_context["specific_output_dir"], "iiif.json")
-                with open(iiif_path, "w", encoding="utf-8") as handle:
-                    handle.write(iiif_content)
-                self._register_record_files(
-                    execution_context,
-                    record_context["record_id"],
-                    [iiif_path],
-                    "lod_generation",
-                    "iiif_manifest_generator",
-                )
-                legacy._append_unique_paths(record_context["generated_files"], [iiif_path])
-                if not iiif_validation.get("valid", True):
-                    validation_errors = iiif_validation.get("errors") or ["IIIF validation rejected generated manifest"]
-                    raise ValueError(f"IIIF validation failed: {validation_errors[0]}")
-                self._set_lod_status(
-                    record_context,
-                    "iiif",
-                    success=True,
-                    status="generated",
-                    path=iiif_path,
-                    validation=iiif_validation,
-                    minimum_viable_applied=iiif_generation["minimum_viable_applied"],
-                    lod_policy=lod_policy,
-                )
-                generated_outputs["iiif"] = iiif_path
-                add_timing("iiif_generation", time.time() - step_started)
-            else:
-                self._set_lod_status(
-                    record_context,
-                    "iiif",
-                    success=True,
-                    status="skipped_disabled",
-                    lod_policy=lod_policy,
-                )
-
-            if lod_options.get("generate_mets", True):
-                step_started = time.time()
-                mets_metadata = build_lod_metadata("mets")
-                mets_generation = current_app.mets_service.generate_mets_xml_with_report(
-                    mets_metadata,
-                    zenodo_resp,
-                    None,
-                    main_file_key=main_file_key,
-                    validate=True,
-                    allow_placeholder_thumbnail=allow_placeholder_thumbnail,
-                    additional_files=additional_files_for_lod,
-                )
-                mets_content = mets_generation["content"]
-                mets_validation = mets_generation["validation"] or current_app.mets_service.validate_mets_xml(mets_content)
-                mets_path = os.path.join(record_context["specific_output_dir"], "mets.xml")
-                with open(mets_path, "w", encoding="utf-8") as handle:
-                    handle.write(mets_content)
-                self._register_record_files(
-                    execution_context,
-                    record_context["record_id"],
-                    [mets_path],
-                    "lod_generation",
-                    "mets_mods_generator",
-                )
-                legacy._append_unique_paths(record_context["generated_files"], [mets_path])
-                if not mets_validation.get("valid", True):
-                    validation_errors = mets_validation.get("errors") or ["METS/MODS validation rejected generated document"]
-                    raise ValueError(f"METS/MODS validation failed: {validation_errors[0]}")
-                self._set_lod_status(
-                    record_context,
-                    "mets",
-                    success=True,
-                    status="generated",
-                    path=mets_path,
-                    validation=mets_validation,
-                    minimum_viable_applied=mets_generation["minimum_viable_applied"],
-                    lod_policy=lod_policy,
-                )
-                generated_outputs["mets"] = mets_path
-                add_timing("mets_generation", time.time() - step_started)
-            else:
-                self._set_lod_status(
-                    record_context,
-                    "mets",
-                    success=True,
-                    status="skipped_disabled",
-                    lod_policy=lod_policy,
-                )
-            from services.linked_data_service import generate_linked_data
-
-            linked_outputs = generate_linked_data(
-                build_lod_metadata("cidoc_crm"), zenodo_resp,
-                main_file_key=main_file_key, additional_files=additional_files_for_lod,
-            )
-            for standard_id, (filename, content) in linked_outputs.items():
-                path = os.path.join(record_context["specific_output_dir"], filename)
-                with open(path, "w", encoding="utf-8") as handle:
-                    handle.write(content)
-                self._register_record_files(execution_context, record_context["record_id"], [path], "lod_generation", "xml_generator")
-                legacy._append_unique_paths(record_context["generated_files"], [path])
-                self._set_lod_status(record_context, standard_id, success=True, status="generated", path=path, lod_policy=lod_policy)
-                generated_outputs[standard_id] = path
-        except Exception as exc:
-            current_app.logger.error("LOD generation failed for %s: %s", record_context["filename"], exc)
-            failure_message = f"LOD generation failed for {record_context['filename']}: {exc}"
-            failure_status = "failed_required" if lod_policy == "required" else "failed_optional"
-            for standard_id in ("edm", "iiif", "mets", "cidoc_crm", "jsonld"):
-                status_value = (record_context["record_status"].get(standard_id) or {}).get("status")
-                if status_value in {"generated", "skipped_disabled", "skipped_missing_draft"}:
-                    continue
-                self._set_lod_status(
-                    record_context,
-                    standard_id,
-                    success=False,
-                    status=failure_status,
-                    error=str(exc),
-                    lod_policy=lod_policy,
-                )
-            record_context["record_status"]["warnings"].append(failure_message)
-            if lod_policy == "required":
-                record_context["record_status"]["error"] = failure_message
+        from services.lod_artifact_service import generate_artifacts, suspend_previous_artifacts
+        from services.lod_reliability import FORMATS
+        from services.edm_service import EdmService
+        url_service = EdmService()
+        specification = {
+            "options": lod_options,
+            "template_ids": {standard: record_context["file_zenodo_metadata"].get(f"{standard}_template_id") or execution_context.get("shared_zenodo_metadata", {}).get(f"{standard}_template_id") for standard in ("edm", "iiif", "mets")},
+            "record": {"id": zenodo_resp.get("id"), "doi": zenodo_resp.get("doi"),
+                       "links": {"html": url_service.get_record_html_url(zenodo_resp if zenodo_resp.get("links", {}).get("html") else {**zenodo_resp, "links": {"html": "https://sandbox.zenodo.org" if execution_context.get("is_sandbox") else "https://zenodo.org"}})},
+                       "metadata": {"prereserve_doi": (zenodo_resp.get("metadata") or {}).get("prereserve_doi", {})},
+                       "files": [{"key": f.get("key") or f.get("filename"), "size": f.get("size", 0)} for f in url_service._normalize_zenodo_files(zenodo_resp)]},
+            "metadata": {standard: build_lod_metadata("cidoc_crm" if standard == "jsonld" else standard) for standard in FORMATS},
+            "main_file_key": main_file_key,
+            "additional_files": additional_files_for_lod,
+            "allow_placeholder_thumbnail": allow_placeholder_thumbnail,
+            "templates": execution_context.get("lod_templates"),
+        }
+        def register(path, validation):
+            self._register_record_files(execution_context, record_context["record_id"], [path], "lod_generation", "metadata_generator", validation_reports={path: validation})
+        def progress(standard, index, count):
+            legacy._emit_progress(progress_callback, {
+                "current_stage": "generating_lod_metadata",
+                "status_message": "Metadata generation complete" if index == count else f"Validating {standard.upper()} ({index + 1}/{count})",
+                "current_file_name": record_context["filename"],
+                "current_index": record_context["index"], "total_files": record_context["total_records"],
+                "processed_count": execution_context.get("processed_count", 0),
+                "failed_count": execution_context.get("failed_count", 0),
+                "lod_format": standard, "lod_completed": index, "lod_total": count,
+            })
+        suspend_previous_artifacts(execution_context["hdpc_path"], record_context["record_id"])
+        generated_outputs, manifest = generate_artifacts(record_context["specific_output_dir"], specification, register, progress)
+        for standard, result in manifest["formats"].items():
+            result = dict(result)
+            if result["status"] == "failed":
+                result["status"] = "failed_required" if lod_policy == "required" else "failed_optional"
+                failure = f"LOD generation failed ({standard.upper()}): {result['error']}"
+                record_context["record_status"]["warnings"].append(failure)
+                if lod_policy == "required":
+                    record_context["record_status"]["error"] = failure
+            self._set_lod_status(record_context, standard, **result, lod_policy=lod_policy)
+        legacy._append_unique_paths(record_context["generated_files"], list(generated_outputs.values()))
 
         record_context["record_timings"]["steps"]["lod_generation"] = time.time() - start_step
         add_timing("full_step", record_context["record_timings"]["steps"]["lod_generation"])

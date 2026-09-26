@@ -1,14 +1,16 @@
+"""Manual smoke checks against an explicitly configured development server."""
+import os
 import requests
 import json
 import yaml
 
-BASE_URL = "http://localhost:8080/api/v1"
+BASE_URL = os.environ.get("WEBHDP_TEST_API_URL", "http://localhost:8080/api/v1")
 AUTH_URL = f"{BASE_URL}/auth/login"
 EXPORT_URL = f"{BASE_URL}/edm/mapping/export"
 IMPORT_URL = f"{BASE_URL}/edm/mapping/import"
 
-USERNAME = "admin@hdp.com"
-PASSWORD = "test123+#"
+USERNAME = os.environ.get("WEBHDP_TEST_EMAIL", "")
+PASSWORD = os.environ.get("WEBHDP_TEST_PASSWORD", "")
 
 def get_token():
     try:

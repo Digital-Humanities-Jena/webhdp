@@ -161,6 +161,29 @@
           </div>
         </section>
 
+        <section class="bg-white rounded-xl border border-slate-200 p-5" aria-labelledby="lod-recovery-title">
+          <h2 id="lod-recovery-title" class="font-semibold text-slate-900">Metadata exports</h2>
+          <p class="mt-1 text-sm text-slate-600">Each format is validated before upload. Retry uses the saved settings, reuses this draft, and keeps unchanged successful exports. To apply edited mappings or templates, start a new pipeline run.</p>
+          <p v-if="lodError" role="alert" class="mt-2 text-red-700">{{ lodError }}</p>
+          <p v-if="lodBusy" role="status" class="mt-3 text-sm text-slate-600">Generating and validating metadata. This can take a minute…</p>
+          <progress v-if="lodBusy" aria-label="Metadata validation in progress" class="mt-2 w-full" />
+          <ul v-if="lodReport?.available" class="mt-3 space-y-3">
+            <li v-for="(item, standard) in lodReport.formats" :key="standard" class="rounded-lg border p-3">
+              <span class="font-medium">{{ standard.toUpperCase() }}</span>
+              <span class="ml-2 text-sm" :class="item.success ? 'text-green-700' : 'text-red-700'">{{ item.status === 'generated' ? 'Validated' : item.status === 'skipped_disabled' ? 'Disabled' : 'Needs attention' }}</span>
+              <button v-if="item.status === 'generated'" type="button" :disabled="lodBusy" class="ml-3 text-sm text-indigo-700 underline" @click="downloadLod(standard)">Download {{ standard.toUpperCase() }}</button>
+              <p v-if="item.error" class="mt-1 text-sm text-red-700">{{ item.error }}</p>
+              <p v-if="item.minimum_viable_applied" class="mt-1 text-sm text-amber-700">Required fields were completed using record data or defaults. Review the export before sharing.</p>
+              <details v-if="item.validation" class="mt-2 text-sm"><summary class="cursor-pointer">Validation report</summary><pre class="mt-2 overflow-auto whitespace-pre-wrap">{{ JSON.stringify(item.validation, null, 2) }}</pre></details>
+            </li>
+          </ul>
+          <p v-else-if="!lodError && !lodBusy" class="mt-3 text-sm text-slate-500">No metadata generation report is available yet.</p>
+          <div class="mt-3 flex gap-3">
+            <button type="button" :disabled="lodBusy" class="text-sm text-indigo-700 underline disabled:opacity-50" @click="loadLod(false)">Refresh report</button>
+            <button v-if="lodReport?.available && Object.values(lodReport.formats).some(item => !item.success)" type="button" :disabled="lodBusy" class="text-sm text-indigo-700 underline disabled:opacity-50" @click="loadLod(true)">Retry failed formats</button>
+            <button v-if="lodReport?.available" type="button" class="text-sm text-indigo-700 underline" @click="downloadLodReport">Download report</button>
+          </div>
+        </section>
         <div class="grid grid-cols-1 xl:grid-cols-2 gap-5">
           <section class="bg-white rounded-xl border border-slate-200 p-5">
             <h3 class="text-sm font-semibold text-slate-900">Zenodo Status</h3>
@@ -370,6 +393,7 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import api from '@/services/api'
 import submissionService from '@/services/submission.service.js'
 import LoadingSpinner from '@/components/ui/LoadingSpinner.vue'
 import Alert from '@/components/ui/Alert.vue'
@@ -384,6 +408,40 @@ const detail = ref(null)
 const error = ref('')
 const versioning = ref(false)
 const previewLoaded = ref(false)
+const lodReport = ref(null)
+const lodError = ref('')
+const lodBusy = ref(false)
+async function loadLod(retry = false) {
+  if (lodBusy.value) return
+  const url = `/sessions/${Number(route.params.sessionId)}/records/${Number(route.params.recordId)}/lod`
+  lodBusy.value = true
+  lodError.value = ''
+  try {
+    const response = retry ? await api.post(url, {}, { timeout: 300000 }) : await api.get(url, { suppressGlobalError: true })
+    lodReport.value = response.data
+  } catch (err) {
+    lodError.value = err?.error?.message || err?.message || 'Metadata report is unavailable. Refresh to reconnect.'
+  } finally { lodBusy.value = false }
+}
+async function downloadLod(standard) {
+  try {
+    const blob = await api.get(`/sessions/${Number(route.params.sessionId)}/records/${Number(route.params.recordId)}/lod`, { params: { format: standard }, responseType: 'blob' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = ({ edm: 'edm.xml', iiif: 'iiif.json', mets: 'mets.xml', cidoc_crm: 'cidoc-crm.xml', jsonld: 'metadata.jsonld' })[standard]
+    link.click()
+    URL.revokeObjectURL(url)
+  } catch { lodError.value = 'The export could not be downloaded. Refresh the report or retry generation if the file changed.' }
+}
+function downloadLodReport() {
+  const url = URL.createObjectURL(new Blob([JSON.stringify(lodReport.value, null, 2)], { type: 'application/json' }))
+  const link = document.createElement('a')
+  link.href = url
+  link.download = 'metadata-validation.json'
+  link.click()
+  URL.revokeObjectURL(url)
+}
 const showError = computed(() => !!error.value)
 
 const record = computed(() => detail.value?.record || null)
@@ -500,6 +558,7 @@ const loadDetail = async () => {
   const recordId = Number(route.params.recordId)
   const detailResponse = await submissionService.getSessionRecordDetail(sessionId, recordId)
   detail.value = detailResponse.data
+  await loadLod(false)
 }
 
 const createVersion = async () => {

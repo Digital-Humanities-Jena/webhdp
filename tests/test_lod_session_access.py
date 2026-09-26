@@ -156,3 +156,17 @@ def test_iiif_mapping_route_uses_session_permissions(lod_access_app):
         json={"session_id": session_id, "row_index": 0},
     )
     assert outsider_response.status_code == 404
+
+
+def test_lod_mapping_cannot_read_another_sessions_file_or_a_symlink(lod_access_app, tmp_path):
+    client = lod_access_app['client']
+    outside = tmp_path / 'private.csv'
+    outside.write_text('secret,value\nprivate,data\n')
+    payload = {'session_id': lod_access_app['session_id'], 'row_index': 0, 'msf_path': str(outside)}
+    assert client.post('/api/v1/iiif/test-mapping', headers=lod_access_app['viewer_headers'], json=payload).status_code == 400
+    link = tmp_path / 'session' / 'uploads' / 'linked.csv'
+    link.symlink_to(outside)
+    payload['msf_path'] = str(link)
+    assert client.post('/api/v1/iiif/test-mapping', headers=lod_access_app['viewer_headers'], json=payload).status_code == 400
+    payload.pop('session_id')
+    assert client.post('/api/v1/iiif/test-mapping', headers=lod_access_app['viewer_headers'], json=payload).status_code == 400

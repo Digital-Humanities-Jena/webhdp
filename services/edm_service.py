@@ -249,7 +249,8 @@ class EdmService:
             ET.register_namespace(prefix, uri)
 
         # URI counter for generating unique identifiers
-        self._uri_counters = {}
+        from contextvars import ContextVar
+        self._uri_counter_context = ContextVar("edm_uri_counters", default=None)
 
         # Cache for compiled Jinja environments
         self._template_cache = {}
@@ -577,18 +578,22 @@ class EdmService:
         """
         if identifier:
             # Sanitize identifier for URI use
-            safe_id = re.sub(r'[^a-zA-Z0-9_-]', '_', str(identifier).lower())
+            from urllib.parse import quote
+            import unicodedata
+            safe_id = quote(unicodedata.normalize('NFC', str(identifier)), safe='-_')
             return f"#{prefix}_{safe_id}"
         else:
             # Auto-increment counter
-            if prefix not in self._uri_counters:
-                self._uri_counters[prefix] = 0
-            self._uri_counters[prefix] += 1
-            return f"#{prefix}{self._uri_counters[prefix]}"
+            counters = dict(self._uri_counter_context.get() or {})
+            if prefix not in counters:
+                counters[prefix] = 0
+            counters[prefix] += 1
+            self._uri_counter_context.set(counters)
+            return f"#{prefix}{counters[prefix]}"
 
     def reset_uri_counters(self):
         """Reset URI counters for a new document generation."""
-        self._uri_counters = {}
+        self._uri_counter_context.set({})
 
     def generate_content_url(self, record_id: str, filename: str, is_sandbox: Optional[bool] = None) -> str:
         """
@@ -612,15 +617,19 @@ class EdmService:
         if not isinstance(zenodo_record, dict):
             return "https://zenodo.org/records/unknown"
 
-        links = zenodo_record.get("links")
-        if isinstance(links, dict):
-            html_url = str(links.get("html") or "").strip()
-            if html_url:
-                return html_url.replace("/deposit/", "/records/")
-
-        record_id = str(zenodo_record.get("id") or zenodo_record.get("record_id") or "unknown").strip()
-        base = "https://sandbox.zenodo.org" if "sandbox.zenodo.org" in str(links or "") else "https://zenodo.org"
-        return f"{base}/records/{record_id}"
+        from urllib.parse import urlsplit, quote
+        links = zenodo_record.get("links") or {}
+        html_url = str(links.get("html") or "")
+        try:
+            host = urlsplit(html_url).hostname
+        except ValueError:
+            host = None
+        record_id = zenodo_record.get("id") or zenodo_record.get("record_id")
+        if not record_id:
+            match = re.search(r"/(?:records?|deposit)/(\d+)", html_url)
+            record_id = match.group(1) if match else "unknown"
+        domain = "sandbox.zenodo.org" if host == "sandbox.zenodo.org" else "zenodo.org"
+        return f"https://{domain}/records/{quote(str(record_id), safe='')}"
 
     def get_file_content_url(
         self,
@@ -630,20 +639,21 @@ class EdmService:
         is_sandbox: Optional[bool] = None,
     ) -> str:
         """Resolve a direct file URL from Zenodo metadata, preferring authoritative links.content."""
+        from services.lod_reliability import public_url
         if isinstance(file_obj, dict):
             existing = str(file_obj.get("content_url") or "").strip()
-            if existing:
+            if existing and public_url(existing):
                 return existing
 
             links = file_obj.get("links")
             if isinstance(links, dict):
                 for key in ("content", "download"):
                     direct_url = str(links.get(key) or "").strip()
-                    if direct_url:
+                    if direct_url and public_url(direct_url):
                         return direct_url
 
                 self_url = str(links.get("self") or "").strip()
-                if self_url:
+                if self_url and public_url(self_url):
                     if "/api/records/" in self_url and not self_url.endswith("/content"):
                         return self_url.rstrip("/") + "/content"
                     if self_url.endswith("/content"):
@@ -1187,7 +1197,8 @@ class EdmService:
                 result['valid'] = False
                 result['errors'].append(f"XML Parse Error: {str(e)}")
         except Exception as e:
-            result['warnings'].append(f"Validation warning: {str(e)}")
+            result['valid'] = False
+            result['errors'].append(f"Validation could not complete: {str(e)}")
 
         return result
 
@@ -1280,6 +1291,7 @@ class EdmService:
         *,
         remote_status: Any = "unknown",
     ) -> Dict[str, Any]:
+        data = data if isinstance(data, dict) else {}
         result = {
             "valid": True,
             "errors": [],
@@ -1290,7 +1302,7 @@ class EdmService:
             "validator": "local-edm-validator",
             "validation_results": [],
             "problem_patterns": [],
-            "step_timings": data.get("stepTimings") or [],
+            "step_timings": data.get("stepTimings") if isinstance(data.get("stepTimings"), list) else [],
             "total_duration_millis": data.get("totalDurationMillis"),
             "raw": data,
         }
@@ -1301,26 +1313,36 @@ class EdmService:
                 step = str(timing.get("step") or "")
                 timings_by_step[step] = timing.get("durationMillis")
 
-        for step_result in data.get("validationResults", []) or []:
+        steps = data.get("validationResults")
+        if not isinstance(steps, list) or not steps:
+            result.update(valid=False, status="unavailable")
+            result["errors"].append("Validator returned no completed validation checks. Retry validation.")
+            return result
+        for step_result in steps:
             if not isinstance(step_result, dict):
+                result["valid"] = False
+                result["errors"].append("Validator returned a malformed check")
                 continue
             step = str(step_result.get("step") or "UNKNOWN")
             status = str(step_result.get("status") or "UNKNOWN").upper()
-            normalized_messages = [
-                self._normalize_validator_message(message)
-                for message in (step_result.get("messages") or [])
-            ]
+            messages = step_result.get("messages") or []
+            if not isinstance(messages, list):
+                result["valid"] = False
+                result["errors"].append(f"[{step}] Validator returned malformed messages")
+                messages = []
+            normalized_messages = [self._normalize_validator_message(message) for message in messages]
             normalized_step = {
                 "step": step,
                 "status": status,
-                "valid": status != "FAILED",
+                "valid": status == "PASSED" and step != "UNKNOWN" and not any(message["type"] == "ERROR" for message in normalized_messages),
                 "messages": normalized_messages,
                 "duration_millis": timings_by_step.get(step),
             }
             result["validation_results"].append(normalized_step)
 
-            if status == "FAILED":
+            if status != "PASSED" or step == "UNKNOWN":
                 result["valid"] = False
+                result["errors"].append(f"[{step}] Validation did not pass ({status}).")
 
             for message in normalized_messages:
                 text = message.get("message") or ""
@@ -1337,10 +1359,19 @@ class EdmService:
                 else:
                     self._append_unique(result["infos"], prefixed)
 
-        for problem in data.get("problemPatternList", []) or []:
+        reported_steps = {step["step"] for step in result["validation_results"]}
+        missing_steps = {"VALIDATE_EXTERNAL", "VALIDATE_INTERNAL"} - reported_steps
+        if missing_steps:
+            result["valid"] = False
+            result["errors"].append("Validator omitted required checks: " + ", ".join(sorted(missing_steps)))
+
+        problems = data.get("problemPatternList")
+        for problem in problems if isinstance(problems, list) else []:
             if not isinstance(problem, dict):
                 continue
             description = problem.get("problemPatternDescription") or {}
+            if not isinstance(description, dict):
+                description = {}
             pattern_id = (
                 description.get("problemPatternId")
                 or problem.get("problemPatternId")
@@ -1400,7 +1431,7 @@ class EdmService:
                 ),
             )
             result = self._normalize_local_validator_report(data, remote_status=200)
-        except LocalEdmValidatorClientError as e:
+        except (LocalEdmValidatorClientError, TypeError, ValueError, AttributeError) as e:
             logger.error("Local EDM validation failed: %s", e)
             result = {
                 "valid": False,
@@ -1456,12 +1487,15 @@ class EdmService:
             if prefixed not in all_warnings:
                 all_warnings.append(prefixed)
 
+        for name, check in (("XSD", xsd_result), ("Schematron", schematron_result)):
+            if check.get("skipped"):
+                all_warnings.append(f"{name} was not run: {check.get('message') or 'check disabled'}")
         remote_result = None
         valid = (
-            basic_result.get("valid", True)
-            and xsd_result.get("valid", True)
-            and schematron_result.get("valid", True)
-            and business_result.get("valid", True)
+            basic_result.get("valid") is True
+            and xsd_result.get("valid") is True
+            and schematron_result.get("valid") is True
+            and business_result.get("valid") is True
         )
 
         if include_remote:
@@ -1474,7 +1508,7 @@ class EdmService:
                 prefixed = f"[Local EDM Validator] {warn}"
                 if prefixed not in all_warnings:
                     all_warnings.append(prefixed)
-            valid = valid and remote_result.get("valid", True)
+            valid = valid and remote_result.get("valid") is True
 
         return {
             "valid": valid,
@@ -2129,11 +2163,14 @@ class EdmService:
         from database.models import LodTemplate
         from flask import current_app
 
+        from services.lod_reliability import normalize_record
+        zenodo_record = normalize_record(zenodo_record)
         try:
             # Reset URI counters for each render
             self.reset_uri_counters()
 
-            template = db.session.get(LodTemplate, template_id)
+            from services.lod_reliability import resolve_template
+            template = resolve_template("edm", template_id)
             if not template:
                 logger.error(f"LodTemplate {template_id} not found.")
                 return None
@@ -2216,15 +2253,6 @@ class EdmService:
 
             # Enriched List (for template iteration if needed)
             enriched_files = [self._enrich_file_metadata(f, metadata) for f in files]
-
-            # 5. Smart Template Switching
-            # If we have a 3D main file, ensure we use the 3D template regardless of the initial selection.
-            if main_file.get('is_3d') and template.name != "3D Model":
-                 logger.info(f"Smart Switch: Detected 3D content ({main_file.get('filename')}). Switching to 3D Model Template.")
-                 from database.models import LodTemplate
-                 template_3d = LodTemplate.query.filter_by(name="3D Model").first()
-                 if template_3d:
-                     template = template_3d
 
             if isinstance(metadata, DotDict):
                 metadata = dict(metadata)
@@ -2402,18 +2430,8 @@ class EdmService:
         from database.database import db
         from database.models import LodTemplate
 
-        if not template_id:
-            # Use default template
-            default = LodTemplate.query.filter_by(is_default=True, standard="edm").first()
-            if default:
-                template_id = default.id
-            else:
-                # Fallback to first available
-                first = LodTemplate.query.filter_by(standard="edm").first()
-                if first:
-                    template_id = first.id
-                else:
-                    raise ValueError("No EDM templates found in database")
+        from services.lod_reliability import resolve_template
+        template_id = resolve_template("edm", template_id).id
 
         # Render
         rendered = self.render_template(
@@ -2430,6 +2448,8 @@ class EdmService:
             rendered,
             metadata if isinstance(metadata, dict) else dict(metadata),
         )
+        from services.lod_reliability import assert_public_document
+        assert_public_document(repaired)
         minimum_viable_applied = repaired != rendered
 
         # Optional validation
@@ -2447,12 +2467,8 @@ class EdmService:
                     current_app.config.get("ENABLE_METIS_VALIDATION", True),
                 ),
             )
-            if not validation.get("valid", True):
-                logger.warning(
-                    "Generated EDM XML failed validation for record %s: %s",
-                    zenodo_record.get("id"),
-                    validation.get("errors", [])[:3],
-                )
+            if validation.get("valid") is not True:
+                raise ValueError("EDM validation failed: " + "; ".join(validation.get("errors") or ["Validation was not completed"]))
 
         return {
             "content": repaired,

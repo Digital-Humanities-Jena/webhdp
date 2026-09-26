@@ -74,3 +74,19 @@ def build_pipeline_aligned_lod_metadata(
         include_defaults=False,
     )
     return merge_non_empty_metadata(normalized_base, mapped_values)
+
+
+def record_for_metadata_row(row, profile, record):
+    """Preview the selected source's modality instead of a fixed example model."""
+    column = (profile or {}).get('filename_column') or 'filename'
+    value = str(row.get(column, '') or '').strip().replace('\\', '/')
+    if not value or value.lower() == 'nan':
+        raise ValueError('The selected metadata row needs a source filename')
+    name = os.path.basename(value)
+    from services.edm_service import EdmService
+    record = dict(record or {})
+    files = EdmService()._normalize_zenodo_files(record)
+    if not any((file.get('key') or file.get('filename')) == name for file in files):
+        files = [{'key': name, 'filename': name}]
+    record['files'] = files
+    return record, name

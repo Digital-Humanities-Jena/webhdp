@@ -9,7 +9,7 @@ from database.models import Session as DBSession, UserMetadata
 from routes.access_helpers import get_session_with_permission
 from services.edm_service import EdmService
 from services.msf_service import MSFService
-from .lod_mapping_helpers import build_pipeline_aligned_lod_metadata
+from .lod_mapping_helpers import build_pipeline_aligned_lod_metadata, record_for_metadata_row
 import yaml
 from schemas.mapping_schemas import MappingConfig, MappingExportRequest
 from flask import send_file
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 edm_bp = Blueprint("edm", __name__)
 edm_service = EdmService()
 msf_service = MSFService()
-LOD_STANDARD_ORDER = ("zenodo", "edm", "iiif", "mets")
+LOD_STANDARD_ORDER = ("zenodo", "edm", "iiif", "mets", "cidoc_crm", "jsonld")
 
 
 def _get_session_msf_profile(session_row: DBSession | None) -> Dict[str, Any]:
@@ -61,12 +61,14 @@ def _normalize_mapping_structure(mapping: dict) -> dict:
         if standard_id not in normalized:
             normalized[standard_id] = node if isinstance(node, dict) else {}
 
+    normalized["cidoc_crm"] = normalized["cidoc_crm"] or normalized["jsonld"]
+    normalized["jsonld"] = normalized["cidoc_crm"]
     return normalized
 
 
 def _resolve_authorized_session(session_id: Any) -> tuple[DBSession | None, tuple | None]:
     if session_id in (None, ""):
-        return None, None
+        return None, APIResponse.validation_error("A session is required to read metadata files")
     try:
         sid = int(session_id)
     except (TypeError, ValueError):
@@ -76,32 +78,23 @@ def _resolve_authorized_session(session_id: Any) -> tuple[DBSession | None, tupl
 
 
 def _resolve_msf_path(msf_path: str, session_row: DBSession | None) -> str:
-    if msf_path and os.path.exists(msf_path):
-        return msf_path
-
+    from services.lod_reliability import session_metadata_path
     if not session_row:
-        return msf_path
-
-    profile = _get_session_msf_profile(session_row)
-    profile_path = profile.get("file_path")
-    if isinstance(profile_path, str) and os.path.exists(profile_path):
-        return profile_path
-
-    candidate_dirs = []
-    if session_row.session_dir:
-        candidate_dirs.append(os.path.join(session_row.session_dir, "uploads"))
-    if session_row.hdpc_path:
-        candidate_dirs.append(os.path.join(os.path.dirname(session_row.hdpc_path), "uploads"))
-
-    for base_dir in candidate_dirs:
-        if not base_dir or not os.path.isdir(base_dir):
+        return None
+    if msf_path and os.path.exists(msf_path):
+        return session_metadata_path(msf_path, session_row)
+    profile_path = _get_session_msf_profile(session_row).get("file_path")
+    if profile_path and os.path.exists(profile_path):
+        return session_metadata_path(profile_path, session_row)
+    roots = [session_row.session_dir, os.path.dirname(session_row.hdpc_path or "")]
+    for root in roots:
+        if not root:
             continue
-        for ext in (".xlsx", ".xls", ".csv"):
-            candidate = os.path.join(base_dir, f"upload.msf{ext}")
-            if os.path.exists(candidate):
+        for extension in (".xlsx", ".xls", ".csv"):
+            candidate = session_metadata_path(os.path.join(root, "uploads", f"upload.msf{extension}"), session_row)
+            if candidate:
                 return candidate
-
-    return msf_path
+    return None
 
 
 def _resolve_msf_parse_options(payload: Dict[str, Any], session_row: DBSession | None) -> Dict[str, Any]:
@@ -169,6 +162,7 @@ def test_mapping():
              return APIResponse.validation_error(f"Row index {row_index} out of bounds")
 
         row = df.iloc[row_index]
+        zenodo_record, main_file_key = record_for_metadata_row(row, msf_profile, zenodo_record)
 
         # 2. Apply Mapping (pipeline-aligned merge semantics)
         metadata = build_pipeline_aligned_lod_metadata(
@@ -183,6 +177,7 @@ def test_mapping():
         generation = edm_service.generate_edm_xml_with_report(
             metadata=metadata,
             zenodo_record=zenodo_record,
+            main_file_key=main_file_key,
             template_id=template_id,
             validate=False,
         )
@@ -350,3 +345,38 @@ def import_mapping():
     except Exception as e:
         logger.error(f"Import failed: {e}")
         return APIResponse.server_error(f"Import failed: {e}")
+
+
+@edm_bp.route('/test-linked-mapping', methods=['POST'])
+@jwt_required()
+def test_linked_mapping():
+    from services.linked_data_service import generate_linked_data, validate_linked_data
+    data = request.get_json() or {}
+    standard = data.get('standard')
+    if standard not in ('cidoc_crm', 'jsonld'):
+        return APIResponse.validation_error('Choose CIDOC-CRM or JSON-LD')
+    session_row, error = _resolve_authorized_session(data.get('session_id'))
+    if error:
+        return error
+    if session_row is None:
+        return APIResponse.validation_error('A session is required')
+    try:
+        path = _resolve_msf_path(data.get('msf_path'), session_row)
+        roots = [session_row.session_dir, os.path.dirname(session_row.hdpc_path or '')]
+        if not path or not any(root and os.path.commonpath([os.path.realpath(path), os.path.realpath(root)]) == os.path.realpath(root) for root in roots):
+            return APIResponse.validation_error('The MSF must belong to this session')
+        df, profile = msf_service.parse_msf_file_with_profile(path, parse_options=_resolve_msf_parse_options(data, session_row))
+        index = int(data.get('row_index', 0))
+        if index < 0 or index >= len(df):
+            return APIResponse.validation_error('Choose an existing sample row')
+        row = df.iloc[index]
+        record = data.get('zenodo_record') or {}
+        metadata = build_pipeline_aligned_lod_metadata(msf_service=msf_service, row=row, zenodo_record=record, mapping_config=data.get('mapping_config') or {}, msf_profile=profile)
+        name = str(row.get(profile.get('filename_column'), '')).strip()
+        if not name:
+            return APIResponse.validation_error('The sample row needs a source filename')
+        record = {**record, 'files': [{'key': name}]}
+        content = generate_linked_data(metadata, record, main_file_key=name)[standard][1]
+        return APIResponse.success(data={'json' if standard == 'jsonld' else 'xml': content, 'metadata': metadata, 'row_index_used': index, 'validation': validate_linked_data(content, standard)})
+    except (ValueError, OSError) as exc:
+        return APIResponse.validation_error(str(exc))

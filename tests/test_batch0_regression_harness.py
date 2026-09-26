@@ -525,7 +525,7 @@ def _run_lod_msf_resolution_case(extension: str) -> tuple[list[str], str]:
             "run_id": f"run-lod-{extension}",
         }
 
-        def _parse_msf_file(path):
+        def _parse_msf_file(path, parse_options=None):
             parsed_paths.append(path)
             return pd.DataFrame([{"filename": "model.glb", "title": "Mapped title"}]), {}
 

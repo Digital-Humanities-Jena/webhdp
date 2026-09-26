@@ -83,6 +83,7 @@
                 <LodMapper
                   :msf-path="workflowStore.msfPath"
                   :template-id="selectedTemplate.id"
+                  :initial-mapping="workflowStore.submissionMetadata?.lod_mapping"
                   @update:mapping="handleMappingUpdate"
                 />
             </div>
@@ -296,7 +297,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed, watch } from 'vue'
+import { ref, onMounted, onBeforeUnmount, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useWorkflowStore } from '@/stores/workflow'
 import api from '@/services/api'
@@ -356,8 +357,7 @@ function formatValidationStep(step) {
 }
 
 function validationDetailPassed(detail) {
-    if (!detail) return true
-    return detail.valid !== false
+    return detail?.valid === true && !detail.skipped
 }
 
 // Get uploaded assets from workflow store
@@ -480,7 +480,12 @@ function handleMappingUpdate(mapping) {
   lodMapping.value = mapping
 }
 
+let previewEpoch = 0
+onBeforeUnmount(() => { previewEpoch++ })
 async function refreshPreview() {
+    const epoch = ++previewEpoch
+    previewContent.value = ''
+    validationResult.value = null
     if (!selectedTemplate.value) return
 
     previewLoading.value = true
@@ -513,9 +518,9 @@ async function refreshPreview() {
 
         // Mock zenodo record for preview purposes
         const zenodoMock = {
-            id: 0,
+            id: 12345,
             metadata: { prereserve_doi: { doi: "10.5072/example-doi" } },
-            links: { html: "http://zenodo.org/record/example" }
+            links: { html: "https://sandbox.zenodo.org/records/12345" }
         }
 
         const res = await api.post('/templates/preview', {
@@ -525,38 +530,39 @@ async function refreshPreview() {
             main_file_key: selectedFile.value ? selectedFile.value.name : null // NEW
         })
 
+        if (epoch !== previewEpoch) return
         if (res.success) {
             previewContent.value = res.data.xml
 
             // Run validation on the generated XML
-            await validatePreview(res.data.xml, metadata)
+            await validatePreview(res.data.xml, metadata, epoch)
         } else {
             previewError.value = "Failed to render preview"
         }
     } catch (e) {
-        previewError.value = e.error?.message || "Preview failed"
+        if (epoch === previewEpoch) previewError.value = e.error?.message || "Preview failed"
     } finally {
-        previewLoading.value = false
+        if (epoch === previewEpoch) previewLoading.value = false
     }
 }
 
-async function validatePreview(xmlContent, metadata = {}) {
+async function validatePreview(xmlContent, metadata = {}, epoch = previewEpoch) {
     try {
         const res = await api.post('/templates/validate', {
             xml: xmlContent,
             metadata
         })
 
-        if (res.success) {
-            validationResult.value = res.data
-        }
+        if (epoch !== previewEpoch) return
+        if (!res.success || typeof res.data?.valid !== 'boolean') throw new Error("Validation returned no result")
+        validationResult.value = res.data
     } catch (e) {
-        console.error("Validation failed:", e)
-        // Don't block UI for validation failure
+        if (epoch !== previewEpoch) return
         validationResult.value = {
-            valid: true,
-            errors: [],
-            warnings: ["Validation service unavailable"]
+            valid: false,
+            status: "unavailable",
+            errors: ["Validation is unavailable. Refresh the preview to retry; this document has not passed validation."],
+            warnings: []
         }
     }
 }
@@ -575,6 +581,8 @@ function handleBack() {
 }
 
 async function handleNext() {
+    if (isSaving.value) return
+    isSaving.value = true
     // Save selection to draft metadata (we need to inject it)
     try {
         // We need to update the draft with the selected template ID.

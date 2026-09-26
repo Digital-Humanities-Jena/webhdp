@@ -1246,7 +1246,7 @@ def upload_files_for_deposition(
 
         pending_rows = cursor.execute(
             """
-            SELECT rfm.file_id, sf.absolute_path, sf.filename
+            SELECT rfm.file_id, sf.absolute_path, sf.filename, sf.pipeline_source, sf.validation_report_json
             FROM record_files_map rfm
             JOIN source_files sf ON sf.file_id = rfm.file_id
             WHERE rfm.record_id = ? AND rfm.upload_status IN ('pending', 'upload_error')
@@ -1283,6 +1283,16 @@ def upload_files_for_deposition(
             file_path = Path(str(file_row["absolute_path"]))
             try:
                 with open(file_path, "rb") as handle:
+                    if file_row["pipeline_source"] == "lod_generation":
+                        from services.lod_reliability import digest
+                        report = _json_loads(file_row["validation_report_json"], {})
+                        if report.get("valid") is not True or report.get("sha256") != digest(handle.read()):
+                            raise ValueError("Metadata upload blocked: validation is missing, failed, or the file changed. Regenerate this format.")
+                        from flask import current_app, has_app_context
+                        if has_app_context() and current_app.config.get("LOCAL_EDM_VALIDATOR_REQUIRED") and (report.get("standard") == "edm" or file_path.name == "edm.xml"):
+                            if ((report.get("details") or {}).get("remote") or {}).get("valid") is not True:
+                                raise ValueError("Metadata upload blocked: required Local EDM Validator checks are missing. Retry generation.")
+                        handle.seek(0)
                     response = http.put(
                         f"{bucket_url}/{quote(file_path.name, safe='')}",
                         params={"access_token": token},

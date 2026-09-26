@@ -633,7 +633,7 @@ class TestSubmissionPipelineNativeHdpcContext(unittest.TestCase):
             "details": [{"record_id": 1}],
             "run_id": "run-native-msf-csv",
         }
-        self.app.msf_service.parse_msf_file.return_value = (MagicMock(iterrows=lambda: iter([])), {})
+        self.app.msf_service.parse_msf_file.return_value = (MagicMock(iterrows=lambda: iter([(0, {"filename": "model.glb"})])), {})
         self.app.msf_service.detect_filename_column.return_value = ("filename", 1.0)
 
         with self.app.app_context():
@@ -660,7 +660,7 @@ class TestSubmissionPipelineNativeHdpcContext(unittest.TestCase):
                 is_sandbox=True,
             )
 
-        self.app.msf_service.parse_msf_file.assert_called_once_with(candidate_path)
+        self.app.msf_service.parse_msf_file.assert_called_once_with(candidate_path, parse_options={})
 
     def test_execute_submission_pipeline_requires_resolvable_msf_when_lod_mapping_is_configured(self):
         self.app.native_pipeline_service.get_pipeline.return_value = {"config": {"steps": []}}
