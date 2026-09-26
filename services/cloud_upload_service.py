@@ -110,10 +110,8 @@ class CloudUploadService:
                 oauth2_refresh_token=refresh_token
             )
 
-            # Quick check - get account info
-            # account = dbx.users_get_current_account()
-            # return True, f"Connected as {account.name.display_name}"
-            # Privacy: Don't show name
+            # Constructing the SDK client does not authenticate it.
+            dbx.users_get_current_account()
             return True, "Connected"
 
         except ImportError:
@@ -290,13 +288,9 @@ class CloudUploadService:
                             )
                             cursor.offset = f.tell()
 
-            # Create shared link for the file
-            try:
-                shared_link = dbx.sharing_create_shared_link_with_settings(remote_path)
-                result["remote_url"] = shared_link.url
-            except Exception as link_err:
-                logger.warning(f"Could not create shared link: {link_err}")
-                result["remote_url"] = f"dropbox://{remote_path}"
+            # Keep stored artifacts private. Authorized download routes request
+            # temporary links when needed instead of publishing a shared link.
+            result["remote_url"] = f"dropbox://{remote_path}"
 
             result["success"] = True
             result["file_id"] = metadata.id
@@ -590,13 +584,9 @@ class CloudUploadService:
                     bytes_uploaded += len(chunk)
                     logger.info(f"Streaming upload progress: {bytes_uploaded / file_size * 100:.1f}%")
 
-            # Create shared link
-            try:
-                shared_link = dbx.sharing_create_shared_link_with_settings(remote_path)
-                result["remote_url"] = shared_link.url
-            except Exception as link_err:
-                logger.warning(f"Could not create shared link: {link_err}")
-                result["remote_url"] = f"dropbox://{remote_path}"
+            # Keep stored artifacts private. Authorized download routes request
+            # temporary links when needed instead of publishing a shared link.
+            result["remote_url"] = f"dropbox://{remote_path}"
 
             result["success"] = True
             result["file_id"] = metadata.id
