@@ -144,3 +144,65 @@ test('shows a lost progress connection and recovers without submitting again', a
   await expect(page.getByText('Progress updates are temporarily unavailable.', { exact: false })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Confirm & Process', exact: false })).toHaveCount(0)
 })
+
+test('guides a first upload and provides a usable batch spreadsheet example', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 375, height: 900 })
+  await openUpload(page)
+  await expect(page.getByRole('navigation', { name: 'Workflow progress' })).toContainText('Step 1 of 6')
+  await page.getByText('Help with this step', { exact: true }).click()
+  await expect(page.getByText('Use one self-contained model', { exact: false })).toBeVisible()
+  await page.getByTestId('upload-path-batch').click()
+  await expect(page.getByRole('navigation', { name: 'Workflow progress' })).toContainText('Step 1 of 7')
+  await page.getByText('How to prepare a batch', { exact: true }).click()
+  const example = page.getByRole('link', { name: 'Download example CSV' })
+  const response = await page.request.get(await example.getAttribute('href') || '')
+  expect(response.ok()).toBe(true)
+  expect(await response.text()).toContain('filename,title,description\nmodel.obj,')
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+  await page.screenshot({ path: testInfo.outputPath('batch-help-mobile.png'), fullPage: true })
+  await page.getByTestId('upload-path-manual').click()
+  await expect(page.getByText('How to prepare a batch', { exact: true })).toHaveCount(0)
+  await expect(page.getByRole('navigation', { name: 'Workflow progress' })).toContainText('Step 1 of 6')
+})
+
+test('distinguishes a dashboard loading failure from an empty workspace and allows recovery', async ({ page }) => {
+  await openUpload(page)
+  await mockCurrentUser(page)
+  let offline = true
+  await page.route(apiV1('/sessions'), route => offline
+    ? fulfillJson(route, { error: { message: 'Unavailable' } }, 503)
+    : fulfillJson(route, { data: { sessions: [] } }))
+  await page.goto('/dashboard')
+  await expect(page.locator('main').getByRole('alert')).toContainText('Could not load your sessions')
+  await expect(page.getByRole('heading', { name: 'Start your first session' })).toHaveCount(0)
+  offline = false
+  await page.getByRole('button', { name: 'Try again', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Start your first session' })).toBeVisible()
+  await page.getByRole('link', { name: 'Upload files', exact: true }).click()
+  await expect(page).toHaveURL(/\/workflow\/upload$/)
+})
+
+test('selects linked metadata templates with the keyboard and updates the preview', async ({ page }, testInfo) => {
+  await seedReview(page)
+  const templates = [
+    { id: 1, name: 'Default template', standard: 'edm', is_default: true },
+    { id: 2, name: 'Collection template', standard: 'edm', is_default: false },
+  ]
+  await page.route(apiV1('/templates'), route => fulfillJson(route, { success: true, data: { templates } }))
+  let previewTemplate = 0
+  await page.route(apiV1('/templates/preview'), async route => {
+    previewTemplate = (await route.request().postDataJSON()).template_id
+    await fulfillJson(route, { success: true, data: { xml: '<example />' } })
+  })
+  await page.route(apiV1('/templates/validate'), route => fulfillJson(route, { success: true, data: { valid: true } }))
+  await page.goto('/workflow/edm-selection')
+  await expect(page.getByRole('radio', { name: 'Default template', exact: true })).toBeChecked()
+  await page.getByRole('radio', { name: 'Collection template', exact: true }).focus()
+  await page.keyboard.press('Space')
+  await expect(page.getByRole('radio', { name: 'Collection template', exact: true })).toBeChecked()
+  await expect.poll(() => previewTemplate).toBe(2)
+  await expect(page.getByRole('navigation', { name: 'Workflow progress' })).toContainText('Step 4 of 6')
+  await page.getByText('Help with this step', { exact: true }).click()
+  await expect(page.getByText('EDM means Europeana Data Model.', { exact: false })).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('linked-metadata.png'), fullPage: true })
+})

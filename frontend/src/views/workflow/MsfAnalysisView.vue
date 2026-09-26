@@ -3,12 +3,12 @@
     <div class="max-w-7xl mx-auto px-4">
       <div class="mb-8">
         <h1 class="text-3xl font-bold text-gray-900">MSF Analysis</h1>
-        <p class="mt-2 text-gray-600">Step 2 of 7: Investigate MSF quality, LOD impact, and direct repair options.</p>
+        <p class="mt-2 text-gray-600">Check your metadata spreadsheet, review proposed repairs and choose how records will be created.</p>
       </div>
 
       <StepIndicator
         :current-step="2"
-        current-label="Resolve blockers or confirm the minimum-viable fallback policy"
+        current-label="Check the spreadsheet before processing"
         :current-hint="analysisStepHint"
       />
 

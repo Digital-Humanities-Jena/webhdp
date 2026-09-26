@@ -3,10 +3,10 @@
     <div class="max-w-4xl mx-auto px-4">
       <div class="mb-8">
         <h1 class="text-3xl font-bold text-gray-900">Submit for Processing</h1>
-        <p class="mt-2 text-gray-600">Step 7 of 7: Review your submission and start processing</p>
+        <p class="mt-2 text-gray-600">Review your files, processing tasks and Zenodo destination.</p>
       </div>
 
-      <StepIndicator :current-step="7" />
+      <StepIndicator :batch-mode="workflowStore.isBatchMode" :current-step="7" />
 
       <div class="bg-white shadow rounded-lg p-6">
 
@@ -344,7 +344,7 @@
           <p class="text-gray-600 mb-8">
             {{ hasAnyWarnings
               ? 'Pipeline finished, but one or more processing steps reported warnings or incomplete output.'
-              : `Your files have been successfully processed and submitted to Zenodo ${effectiveExecutionEnvironmentIsSandbox ? '(Sandbox)' : ''}.` }}
+              : `Processing finished. Review the generated files and Zenodo record status ${effectiveExecutionEnvironmentIsSandbox ? '(Sandbox)' : ''}.` }}
           </p>
 
           <div v-if="hasConverterWarnings" class="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6 text-left">
@@ -444,10 +444,10 @@
 
           <div class="flex flex-col sm:flex-row justify-center space-y-3 sm:space-y-0 sm:space-x-4">
             <button
-              @click="router.push('/dashboard')"
+              @click="router.push(`/sessions/${workflowStore.sessionId}/records`)"
               class="px-8 py-2 bg-indigo-600 text-white rounded-md font-medium hover:bg-indigo-700 transition-colors shadow-sm"
             >
-              Go to Dashboard
+              View records and results
             </button>
             <button
               @click="startNewWorkflow"

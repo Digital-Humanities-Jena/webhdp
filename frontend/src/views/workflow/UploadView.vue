@@ -10,35 +10,10 @@
 
       <StepIndicator
         :current-step="1"
+        :batch-mode="uploadMode === 'directory'"
         current-label="Choose your files"
         :current-hint="uploadStepHint"
       />
-
-      <div v-if="showHpcResourcePanel" class="mb-6 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-        <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div>
-            <h2 class="text-base font-semibold text-slate-900">HPC-Link resources</h2>
-            <p class="mt-1 text-sm text-slate-600">
-              {{ hpcStatusMessage }}
-            </p>
-            <p v-if="hpcAllocation" class="mt-2 text-xs text-slate-500">
-              Allocation {{ hpcAllocation.allocation_id }} · {{ hpcAllocation.status }}
-              <span v-if="hpcAllocation.node_name"> · {{ hpcAllocation.node_name }}</span>
-            </p>
-            <p v-if="hpcAllocationError" class="mt-2 text-sm text-rose-700">
-              {{ hpcAllocationError }}
-            </p>
-          </div>
-          <button
-            type="button"
-            class="rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-            :disabled="hpcAllocationLoading || !hpcStatus?.available || !hpcStatus?.can_allocate"
-            @click="requestHpcResources"
-          >
-            {{ hpcAllocationButtonLabel }}
-          </button>
-        </div>
-      </div>
 
       <div class="bg-white shadow rounded-lg p-4 sm:p-6 mb-6">
         <fieldset :disabled="uploading || validatingMsf" class="min-w-0">
@@ -68,7 +43,7 @@
                   Direct file upload
                 </p>
                 <p class="mt-1 text-sm" :class="uploadMode === 'file' ? 'text-indigo-900' : 'text-gray-600'">
-                  One model or image. Add its metadata in the next steps.
+                  One self-contained model or image, such as a GLB or JPG. Add its description in the next steps.
                 </p>
                 <p class="mt-3 text-xs uppercase tracking-wide" :class="uploadMode === 'file' ? 'text-indigo-700' : 'text-gray-500'">
                   Input: one file
@@ -76,7 +51,7 @@
               </div>
               <span class="rounded-full px-2.5 py-1 text-xs font-semibold"
                 :class="uploadMode === 'file' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-700'">
-                Manual
+                Single file
               </span>
             </div>
           </button>
@@ -94,7 +69,7 @@
             <div class="flex items-start justify-between gap-4">
               <div>
                 <p class="text-base font-semibold" :class="uploadMode === 'directory' ? 'text-indigo-950' : 'text-gray-900'">
-                  MSF-driven batch workflow
+                  Batch upload with spreadsheet
                 </p>
                 <p class="mt-1 text-sm" :class="uploadMode === 'directory' ? 'text-indigo-900' : 'text-gray-600'">
                   Multiple models or files with textures. Include a metadata spreadsheet (MSF) to describe each model.
@@ -131,6 +106,56 @@
             </span>
           </div>
         </div>
+
+        <details v-if="uploadMode === 'directory'" class="mb-6 rounded-xl border border-indigo-100 bg-indigo-50 p-4">
+          <summary class="cursor-pointer text-sm font-semibold text-indigo-900">How to prepare a batch</summary>
+          <div class="mt-3 space-y-3 text-sm text-gray-700">
+            <p>Keep each model with its materials and textures. Use unique model filenames so spreadsheet rows match unambiguously.</p>
+            <div class="grid gap-4 sm:grid-cols-2">
+              <div>
+                <p class="font-semibold">Example ZIP contents</p>
+                <pre class="mt-2 overflow-x-auto rounded bg-white p-3 text-xs">model.obj
+model.mtl
+textures/albedo.jpg</pre>
+              </div>
+              <div>
+                <p class="font-semibold">Example spreadsheet row</p>
+                <p class="mt-2"><code>filename</code>: <code>model.obj</code><br /><code>title</code>: Example model</p>
+                <p class="mt-2">Add one row per main model. Textures and materials do not need their own records.</p>
+              </div>
+            </div>
+            <a href="/examples/batch-metadata.csv" download="batch-metadata.csv" class="inline-block font-medium text-indigo-700 underline">Download example CSV</a>
+            <p>Replace the example filename and descriptions with your own. This is a starting layout; the next steps check required metadata and let you repair missing values.</p>
+          </div>
+        </details>
+
+      <details v-if="showHpcResourcePanel" :open="Boolean(hpcAllocation || hpcAllocationError)" class="mb-6 rounded-lg border border-slate-200 bg-white p-4">
+        <summary class="cursor-pointer text-sm font-semibold text-slate-900">Rendering resources (HPC) · {{ hpcAllocation ? hpcAllocation.status : 'Prepare when needed' }}</summary>
+        <div class="mt-3 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <p class="mt-1 text-sm text-slate-600">
+              {{ hpcStatusMessage }}
+            </p>
+            <p class="mt-2 text-sm text-slate-600">You can upload and review files before requesting resources. Rendering needs a ready compute allocation; a queued request is still waiting for a machine.</p>
+            <router-link v-if="hpcStatus && !hpcStatus.can_allocate" to="/hpc-resources" class="mt-2 inline-block text-sm font-medium text-indigo-700 underline">Check or request HPC access</router-link>
+            <p v-if="hpcAllocation" class="mt-2 text-xs text-slate-500">
+              Allocation {{ hpcAllocation.allocation_id }} · {{ hpcAllocation.status }}
+              <span v-if="hpcAllocation.node_name"> · {{ hpcAllocation.node_name }}</span>
+            </p>
+            <p v-if="hpcAllocationError" class="mt-2 text-sm text-rose-700">
+              {{ hpcAllocationError }}
+            </p>
+          </div>
+          <button
+            type="button"
+            class="rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+            :disabled="hpcAllocationLoading || !hpcStatus?.available || !hpcStatus?.can_allocate"
+            @click="requestHpcResources"
+          >
+            {{ hpcAllocationButtonLabel }}
+          </button>
+        </div>
+      </details>
 
         <details class="mb-6 rounded-xl border border-gray-200 bg-white p-4">
           <summary class="cursor-pointer text-sm font-semibold text-gray-900">
@@ -497,7 +522,7 @@
 
               <div>
                 <label class="block text-sm font-medium text-gray-700 mb-2">
-                  Select Model Search File (MSF) from {{ localScanLabel }} <span class="text-red-500">*</span>
+                  Select metadata source file (MSF) from {{ localScanLabel }} <span class="text-red-500">*</span>
                 </label>
                 <div v-if="loadingLocalMsf" class="flex items-center space-x-2 text-sm text-gray-500">
                   <svg class="animate-spin h-4 w-4 text-indigo-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -1171,9 +1196,9 @@ const hpcStatusMessage = computed(() => {
     return hpcStatus.value.permission_reason || 'Your account is not allowed to allocate HPC resources.'
   }
   if (!workflowStore.sessionId) {
-    return 'HPC-Link is available. Request resources before uploading to stage cloud inputs directly on the HPC.'
+    return 'HPC-Link connects WebHDP to a remote compute cluster for rendering. Request resources here when you are ready to use them.'
   }
-  return 'Request a reusable HPC allocation for this workflow session before running HDP Component steps.'
+  return 'Request compute time for this session before running the renderer. The final review checks that the required services are ready.'
 })
 
 const showHpcResourcePanel = computed(() => {
@@ -1521,7 +1546,7 @@ const uploadPathSummary = computed(() => {
 
 const uploadStepHint = computed(() => {
   if (uploadMode.value === 'file') {
-    return 'Select one file for a manual submission. After upload, the next step is file review.'
+    return 'Choose one file to create a session. Next you will review it and add descriptions. Uploading does not publish anything.'
   }
   if (storageStatus.value?.mode === 'local') {
     const localLabel = isWorkstationLocalDeployment.value ? 'local folder' : 'server/HPC directory'

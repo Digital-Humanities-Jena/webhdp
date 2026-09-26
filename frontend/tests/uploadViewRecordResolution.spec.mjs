@@ -222,7 +222,7 @@ describe('UploadView record-resolution gating', () => {
       },
     })
 
-    const batchButton = wrapper.findAll('button').find((button) => button.text().includes('MSF-driven batch workflow'))
+    const batchButton = wrapper.findAll('button').find((button) => button.text().includes('Batch upload with spreadsheet'))
     await batchButton.trigger('click')
     await flushPromises()
 

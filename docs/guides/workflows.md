@@ -26,7 +26,7 @@ For an exhaustive inventory of UI, API, background job, native pipeline, and ope
 
 ## Publication Workflow
 
-The normal publication path is documented in the [End-to-End User Guide](end_to_end_user_guide.md). It follows the same seven-step sequence shown by the workflow UI:
+The normal publication path is documented in the [End-to-End User Guide](end_to_end_user_guide.md). It follows the stages below. The interface shows six steps for a single file and seven for a batch; spreadsheet checks appear only for a batch:
 
 1. Upload or scan source files.
 2. Complete MSF QA when the session is MSF-driven batch mode.

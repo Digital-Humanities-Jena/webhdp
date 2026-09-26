@@ -6,7 +6,7 @@
           <p class="text-xs font-semibold uppercase tracking-wide text-indigo-700">First Steps</p>
           <h1 class="mt-2 text-2xl font-semibold text-gray-900">Set up your WebHDP workspace</h1>
           <p class="mt-2 max-w-3xl text-sm text-gray-600">
-            Complete the essentials now or skip and return when you are ready.
+            Start by uploading a model, then review files, add descriptions and choose processing. Account details, Zenodo keys and HPC access can be prepared here when you need them.
           </p>
         </div>
 
@@ -19,9 +19,9 @@
               </div>
               <span
                 class="rounded-full px-2.5 py-1 text-xs font-medium"
-                :class="step.complete ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-800'"
+                :class="step.complete ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-700'"
               >
-                {{ step.complete ? 'Done' : 'Open' }}
+                {{ step.status }}
               </span>
             </div>
             <router-link
@@ -48,7 +48,7 @@
             :disabled="saving"
             @click="finish('complete')"
           >
-            {{ saving ? 'Saving...' : 'Finish setup' }}
+            {{ saving ? 'Saving...' : 'Continue to upload' }}
           </button>
         </div>
       </section>
@@ -70,7 +70,7 @@ const saving = ref(false)
 const profileComplete = computed(() => Boolean(authStore.user?.full_name && authStore.user?.affiliation))
 const zenodoComplete = computed(() => Boolean(authStore.user?.zenodo_credentials_configured))
 const hpcSummary = computed(() => authStore.user?.hpc || {})
-const hpcComplete = computed(() => Boolean(hpcSummary.value.has_access || hpcSummary.value.latest_request))
+const hpcComplete = computed(() => Boolean(hpcSummary.value.has_access))
 
 const steps = computed(() => [
   {
@@ -80,22 +80,25 @@ const steps = computed(() => [
     action: profileComplete.value ? 'Review account' : 'Add profile details',
     to: '/account/configuration',
     complete: profileComplete.value,
+    status: profileComplete.value ? 'Ready' : 'Optional',
   },
   {
     id: 'zenodo',
     title: 'Zenodo key',
-    body: 'Connect or accept a Zenodo key when you are ready to publish records.',
+    body: 'Needed when a pipeline creates or uploads Zenodo drafts. Sandbox and Production use separate keys; your institution may provide access.',
     action: 'Open Zenodo keys',
     to: '/account/configuration',
     complete: zenodoComplete.value,
+    status: zenodoComplete.value ? 'Configured' : 'Before processing',
   },
   {
     id: 'hpc',
     title: 'HPC resources',
-    body: hpcSummary.value.has_access ? 'HPC access is enabled for this account.' : (hpcSummary.value.latest_request ? 'Your HPC request has been submitted.' : 'Request HPC access for larger processing workflows.'),
+    body: hpcSummary.value.has_access ? 'HPC access is enabled for this account.' : (hpcSummary.value.latest_request?.status === 'pending' ? 'Your request is awaiting approval. You can prepare files and metadata while you wait.' : 'Request access to remote computing for rendering. Approval lets you request compute time; it does not start a rendering job.'),
     action: 'Open HPC access',
     to: '/hpc-resources',
     complete: hpcComplete.value,
+    status: hpcComplete.value ? 'Access enabled' : hpcSummary.value.latest_request?.status === 'pending' ? 'Awaiting approval' : hpcSummary.value.latest_request?.status === 'rejected' ? 'Not approved' : 'For rendering',
   },
 ])
 

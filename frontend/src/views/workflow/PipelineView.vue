@@ -3,10 +3,10 @@
     <div class="max-w-4xl mx-auto px-4">
       <div class="mb-8">
         <h1 class="text-3xl font-bold text-gray-900">Select Pipeline</h1>
-        <p class="mt-2 text-gray-600">Step 6 of 7: Choose a processing pipeline</p>
+        <p class="mt-2 text-gray-600">Choose whether to render previews or prepare metadata only.</p>
       </div>
 
-      <StepIndicator :current-step="6" />
+      <StepIndicator :batch-mode="workflowStore.isBatchMode" :current-step="6" />
 
       <div class="bg-white shadow rounded-lg p-6">
 

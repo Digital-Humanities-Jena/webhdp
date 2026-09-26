@@ -6,7 +6,7 @@
         <div class="px-6 py-4 border-b border-gray-200 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 class="text-lg font-medium text-gray-900">Your Sessions</h2>
-            <p class="text-sm text-gray-500 mt-1">Switch between personal and institution workspaces without leaving the dashboard.</p>
+            <p class="text-sm text-gray-500 mt-1">A session groups your uploaded files, descriptions and processing choices. Resume a session to continue where you left off.</p>
           </div>
           <div class="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-1">
             <button
@@ -23,16 +23,24 @@
         </div>
 
         <div v-if="loading" class="p-6 text-center">
-          <p class="text-gray-500">Loading sessions...</p>
+          <LoadingSpinner text="Loading sessions…" />
+        </div>
+
+        <div v-else-if="loadError" role="alert" class="p-6 text-center">
+          <p class="text-red-700">{{ loadError }}</p>
+          <button type="button" class="mt-3 rounded-md border border-indigo-200 px-4 py-2 text-sm font-medium text-indigo-700" @click="loadSessions">Try again</button>
         </div>
 
         <div v-else-if="sessions.length === 0" class="p-6 text-center">
-          <p class="text-gray-500">No sessions yet. Start by uploading files!</p>
+          <h3 class="text-lg font-semibold text-gray-900">{{ currentScope === 'all' ? 'Start your first session' : 'No sessions in this workspace' }}</h3>
+          <p class="mx-auto mt-2 max-w-xl text-sm text-gray-600">Upload a self-contained model to try the workflow, or a ZIP and metadata spreadsheet for a batch. You will review everything before processing starts.</p>
+          <router-link to="/workflow/upload" class="mt-4 inline-flex rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700">Upload files</router-link>
+          <button v-if="currentScope !== 'all'" type="button" class="ml-3 mt-4 text-sm font-medium text-indigo-700 underline" @click="changeScope('all')">Show all sessions</button>
         </div>
 
         <ul v-else class="divide-y divide-gray-200">
           <li v-for="session in sessions" :key="session.id" class="px-6 py-4 hover:bg-gray-50">
-            <div class="flex items-center justify-between">
+            <div class="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
               <div>
                 <p class="text-sm font-medium text-gray-900">Session #{{ session.id }}</p>
                 <p class="text-sm text-gray-500">{{ formatDate(session.created_at) }}</p>
@@ -85,7 +93,7 @@
                   {{ session.workflow_hint.target_directory }}
                 </p>
               </div>
-              <div class="flex items-center space-x-3">
+              <div class="flex flex-wrap items-center gap-3 xl:justify-end">
                 <span
                   :class="[
                     'px-3 py-1 text-xs font-medium rounded-full',
@@ -175,6 +183,7 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 
 import SessionGovernanceDrawer from '@/components/dashboard/SessionGovernanceDrawer.vue'
+import LoadingSpinner from '@/components/ui/LoadingSpinner.vue'
 import { useWorkflowStore } from '@/stores/workflow'
 import fileService from '@/services/file.service'
 import { useToast } from '@/composables/useToast'
@@ -186,6 +195,7 @@ const toast = useToast()
 
 const sessions = ref([])
 const loading = ref(true)
+const loadError = ref('')
 const currentScope = ref('all')
 const governanceOpen = ref(false)
 const selectedGovernanceSession = ref(null)
@@ -223,11 +233,14 @@ const formatCredentialSource = (source) => {
 }
 
 const loadSessions = async () => {
+  loading.value = true
+  loadError.value = ''
   try {
     const response = await fileService.listSessions({ scope: currentScope.value })
     sessions.value = response.data.sessions || []
   } catch (err) {
     console.error('Failed to load sessions:', err)
+    loadError.value = 'Could not load your sessions. Check your connection and try again.'
   } finally {
     loading.value = false
   }

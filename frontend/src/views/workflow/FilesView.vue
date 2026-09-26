@@ -4,11 +4,11 @@
       <!-- Header -->
       <div class="mb-8">
         <h1 class="text-3xl font-bold text-gray-900">Review Files</h1>
-        <p class="mt-2 text-gray-600">Step 3 of 7: Review and select files for processing</p>
+        <p class="mt-2 text-gray-600">Review your uploaded files and select the models you want to process.</p>
       </div>
 
       <!-- Progress Indicator -->
-      <StepIndicator :current-step="3" />
+      <StepIndicator :batch-mode="workflowStore.isBatchMode" :current-step="3" />
 
       <div class="bg-white shadow rounded-lg p-6">
         <div class="mb-5 rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-4">
@@ -87,7 +87,7 @@
               v-if="workflowStore.isBatchMode"
               class="mt-1 text-sm text-amber-700"
             >
-              Batch mode no longer auto-selects bundles. Review the scan results and choose the bundles explicitly.
+              Select at least one model to continue. Expand a file group to check its textures and supporting files.
             </p>
           </div>
           <div class="flex flex-wrap items-center gap-2">

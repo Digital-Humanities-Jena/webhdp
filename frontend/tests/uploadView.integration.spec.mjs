@@ -128,7 +128,7 @@ describe('UploadView MSW integration', () => {
       },
     })
 
-    const batchButton = wrapper.findAll('button').find((button) => button.text().includes('MSF-driven batch workflow'))
+    const batchButton = wrapper.findAll('button').find((button) => button.text().includes('Batch upload with spreadsheet'))
     await batchButton.trigger('click')
     await flushPromises()
 
@@ -198,11 +198,11 @@ describe('UploadView MSW integration', () => {
     })
 
     await flushPromises()
-    const batchButton = wrapper.findAll('button').find((button) => button.text().includes('MSF-driven batch workflow'))
+    const batchButton = wrapper.findAll('button').find((button) => button.text().includes('Batch upload with spreadsheet'))
     await batchButton.trigger('click')
     await flushPromises()
 
-    expect(wrapper.text()).not.toContain('HPC-Link resources')
+    expect(wrapper.text()).not.toContain('Rendering resources (HPC)')
     expect(wrapper.text()).toContain('Local folder scan path')
     expect(wrapper.text()).toContain('Local Workstation')
     expect(wrapper.text()).toContain('Local Folder Storage')
@@ -250,11 +250,11 @@ describe('UploadView MSW integration', () => {
     })
 
     await flushPromises()
-    const batchButton = wrapper.findAll('button').find((button) => button.text().includes('MSF-driven batch workflow'))
+    const batchButton = wrapper.findAll('button').find((button) => button.text().includes('Batch upload with spreadsheet'))
     await batchButton.trigger('click')
     await flushPromises()
 
-    expect(wrapper.text()).toContain('HPC-Link resources')
+    expect(wrapper.text()).toContain('Rendering resources (HPC)')
     expect(wrapper.text()).toContain('Server/VPS deployments require HPC-Link')
     expect(wrapper.text()).toContain('Server/HPC directory scan path')
     expect(wrapper.text()).toContain('Server/HPC Filesystem')

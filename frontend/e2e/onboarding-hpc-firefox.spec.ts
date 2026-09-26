@@ -196,7 +196,7 @@ test.describe('Firefox onboarding and HPC access request flow', () => {
 
     await expect(page).toHaveURL(/\/onboarding$/)
     await expect(page.getByRole('heading', { name: 'Set up your WebHDP workspace' })).toBeVisible()
-    await expect(page.getByText('Request HPC access for larger processing workflows.')).toBeVisible()
+    await expect(page.getByText('Request access to remote computing for rendering.', { exact: false })).toBeVisible()
 
     await page.getByRole('link', { name: 'Open HPC access' }).click()
     await expect(page).toHaveURL(/\/hpc-resources$/)
@@ -231,7 +231,7 @@ test.describe('Firefox onboarding and HPC access request flow', () => {
 
     await expect(page).toHaveURL(/\/onboarding$/)
     await expect(page.getByText('HPC access is enabled for this account.')).toBeVisible()
-    await page.getByRole('button', { name: 'Finish setup' }).click()
+    await page.getByRole('button', { name: 'Continue to upload' }).click()
     await expect(page).toHaveURL(/\/workflow\/upload$/)
     await page.getByRole('link', { name: 'HPC Access' }).click()
     await expect(page.getByText('Access: Enabled')).toBeVisible()

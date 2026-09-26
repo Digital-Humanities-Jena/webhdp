@@ -69,7 +69,7 @@ describe('FilesView', () => {
 
     await flushPromises()
 
-    expect(wrapper.text()).toContain('Batch mode no longer auto-selects bundles.')
+    expect(wrapper.text()).toContain('Select at least one model to continue.')
     expect(workflowStore.selectedFiles).toHaveLength(0)
 
     const selectAllButton = wrapper.findAll('button').find((button) => button.text() === 'Select all scanned bundles')

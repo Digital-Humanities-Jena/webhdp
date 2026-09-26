@@ -3,10 +3,10 @@
     <div class="max-w-4xl mx-auto px-4">
       <div class="mb-8">
         <h1 class="text-3xl font-bold text-gray-900">Submission Metadata</h1>
-        <p class="mt-2 text-gray-600">Step 4 of 7: Provide submission metadata</p>
+        <p class="mt-2 text-gray-600">Describe your records, or review the descriptions from your batch spreadsheet.</p>
       </div>
 
-      <StepIndicator :current-step="4" />
+      <StepIndicator :batch-mode="workflowStore.isBatchMode" :current-step="4" />
 
       <div class="bg-white shadow rounded-lg p-6">
 

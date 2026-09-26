@@ -3,11 +3,11 @@
   <div class="min-h-screen bg-gray-50 py-8">
     <div class="max-w-5xl mx-auto px-4">
       <div class="mb-8">
-        <h1 class="text-3xl font-bold text-gray-900">EDM Generation</h1>
-        <p class="mt-2 text-gray-600">Step 5 of 7: Select an EDM Template for your submission.</p>
+        <h1 class="text-3xl font-bold text-gray-900">Linked Metadata</h1>
+        <p class="mt-2 text-gray-600">Choose how your descriptions become linked metadata for reuse.</p>
       </div>
 
-      <StepIndicator :current-step="5" />
+      <StepIndicator :batch-mode="workflowStore.isBatchMode" :current-step="5" />
 
       <div class="bg-white shadow rounded-lg p-6">
 
@@ -49,11 +49,11 @@
                     </p>
                 </div>
 
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div
+                <fieldset class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <legend class="sr-only">EDM template</legend>
+                    <label
                         v-for="tpl in edmTemplates"
                         :key="tpl.id"
-                        @click="selectTemplate(tpl)"
                         :class="[
                           'border rounded-lg p-4 cursor-pointer transition-all',
                           selectedTemplate?.id === tpl.id
@@ -62,7 +62,10 @@
                         ]"
                     >
                         <div class="flex justify-between items-start">
-                            <h3 class="font-medium text-gray-900">{{ tpl.name }}</h3>
+                            <span class="flex items-start gap-2">
+                              <input type="radio" name="edm-template" :value="tpl.id" :checked="selectedTemplate?.id === tpl.id" :aria-label="tpl.name" class="mt-1 text-indigo-600 focus:ring-indigo-500" @change="selectTemplate(tpl)" />
+                              <span class="font-medium text-gray-900">{{ tpl.name }}</span>
+                            </span>
                             <span
                               v-if="tpl.is_default"
                               class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800"
@@ -71,8 +74,8 @@
                             </span>
                         </div>
                         <p class="text-sm text-gray-500 mt-2 line-clamp-2">{{ tpl.description || 'No description' }}</p>
-                    </div>
-                </div>
+                    </label>
+                </fieldset>
             </div>
 
             <!-- Batch Mode LOD-Mapper -->

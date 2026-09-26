@@ -30,6 +30,19 @@ describe('Workflow feedback', () => {
     expect(wrapper.text()).not.toContain('completed')
   })
 
+  it('renumbers the single-file path without changing saved workflow step IDs', async () => {
+    const wrapper = mount(StepIndicator, { props: { currentStep: 3, batchMode: false } })
+    expect(wrapper.text()).toContain('Step 2 of 6')
+    expect(wrapper.text()).not.toContain('Check spreadsheet')
+    expect(wrapper.get('[aria-current="step"]').text()).toContain('Review Files')
+    await wrapper.setProps({ currentStep: 7 })
+    expect(wrapper.text()).toContain('Step 6 of 6')
+    expect(wrapper.get('[aria-current="step"]').text()).toContain('Review & start')
+    await wrapper.setProps({ batchMode: true })
+    expect(wrapper.text()).toContain('Step 7 of 7')
+    expect(wrapper.text()).toContain('Check spreadsheet')
+  })
+
   it('names a spinner even when no visual label was requested', () => {
     const wrapper = mount(LoadingSpinner)
     expect(wrapper.get('[role="status"]').text()).toBe('Loading…')
