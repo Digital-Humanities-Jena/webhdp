@@ -221,7 +221,7 @@
           <span :class="['px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider', testResult.validation.valid ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700']">
             {{ testResult.validation.valid ? `Valid ${activeStandardLabel}` : 'Validation Failed' }}
           </span>
-          <h3 class="text-sm font-bold text-gray-900">Preview Render (Row {{ testResult.row_index_used ?? selectedRowIndex }}) - {{ activeStandard.toUpperCase() }}</h3>
+          <h3 class="text-sm font-bold text-gray-900">Preview (row {{ testResult.row_index_used ?? selectedRowIndex }}) - {{ activeStandard.toUpperCase() }}</h3>
         </div>
         <button aria-label="Close preview" @click="testResult = null" class="text-gray-400 hover:text-gray-600 transition-colors">
           <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -267,7 +267,8 @@ const workflowStore = useWorkflowStore()
 const props = defineProps({
   msfPath: { type: String, required: true },
   templateId: { type: Number, required: true },
-  initialMapping: { type: Object, default: null }
+  initialMapping: { type: Object, default: null },
+  provider: { type: String, default: "WebHDP" }
 })
 
 const emit = defineEmits(['update:mapping'])
@@ -712,21 +713,12 @@ async function testMapping() {
       session_id: workflowStore.sessionId,
       row_index: safeRowIndex,
       mapping_config: config,
+      zenodo_mapping: mapping.zenodo?.[activeModality.value] || {},
       zenodo_record: {
         id: 12345,
-        metadata: {
-          upload_type: "dataset",
-          publication_date: "2024-01-01",
-          title: "Sample Zenodo Title",
-          description: "This is a sample description from Zenodo.",
-          creators: [{ name: "Sample Creator" }],
-          access_right: "open",
-          license: "cc-by-4.0",
-          keywords: ["3d", "cultural-heritage"],
-          prereserve_doi: { doi: "10.5072/example" }
-        },
-        links: { html: "https://zenodo.org/record/12345" },
-        files: [{ key: "sample_model.glb", filename: "sample_model.glb", size: 5000000 }]
+        metadata: { ...workflowStore.submissionMetadata, edm_provider: props.provider },
+        links: { html: "https://sandbox.zenodo.org/records/12345" },
+        files: []
       }
     }
     if (Object.keys(msfParseOptions.value || {}).length > 0) {
@@ -817,7 +809,7 @@ async function importMapping(event) {
   }
 }
 
-watch([mapping, activeStandard, activeModality, selectedRowIndex, () => props.templateId, () => props.msfPath, () => workflowStore.sessionId, msfParseOptions], () => {
+watch([mapping, activeStandard, activeModality, selectedRowIndex, () => props.templateId, () => props.provider, () => workflowStore.submissionMetadata, () => props.msfPath, () => workflowStore.sessionId, msfParseOptions], () => {
   testEpoch++
   testing.value = false
   testResult.value = null

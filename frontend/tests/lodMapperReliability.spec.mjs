@@ -51,4 +51,21 @@ describe('LOD preview reliability', () => {
     expect(wrapper.text()).toContain('same digital dataset')
     wrapper.unmount()
   })
+  it('previews current metadata and provider, then invalidates the result when provider changes', async () => {
+    useWorkflowStore().submissionMetadata = { title: 'Actual record', creators: [{ name: 'Museum' }] }
+    await wrapper.setProps({ provider: 'Museum provider' })
+    await button('EDM-XML').trigger('click')
+    api.post.mockResolvedValue({ success: true, data: { xml: '<rdf/>', validation: { valid: true } } })
+    await button('Test Mapping').trigger('click')
+    await flushPromises()
+    const payload = api.post.mock.calls.at(-1)[1]
+    expect(payload.zenodo_record.metadata).toMatchObject({ title: 'Actual record', edm_provider: 'Museum provider' })
+    expect(payload.zenodo_record.files).toEqual([])
+    expect(payload.zenodo_mapping).toBeDefined()
+    expect(wrapper.text()).toContain('<rdf/>')
+    await wrapper.setProps({ provider: 'Another provider' })
+    expect(wrapper.text()).not.toContain('<rdf/>')
+    wrapper.unmount()
+  })
+
 })

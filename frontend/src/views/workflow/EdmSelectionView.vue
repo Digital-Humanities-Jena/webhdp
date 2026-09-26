@@ -12,7 +12,7 @@
       <div class="bg-white shadow rounded-lg p-6">
 
         <!-- Error Alert -->
-        <Alert v-if="saveError" variant="error" title="Action Failed" class="mb-6" @close="saveError = null">
+        <Alert v-if="saveError" :model-value="true" variant="error" title="Could not save selection" class="mb-6" @update:model-value="saveError = null">
             {{ saveError }}
         </Alert>
 
@@ -22,7 +22,7 @@
 
         <div v-else>
             <div v-if="templateLoadError" class="mb-6">
-                <Alert variant="error" title="Template Loading Failed">
+                <Alert :model-value="true" :dismissible="false" variant="error" title="Template Loading Failed">
                     {{ templateLoadError }}
                 </Alert>
             </div>
@@ -78,18 +78,32 @@
                 </fieldset>
             </div>
 
+                <!-- EDM Provider Input -->
+                <div class="mb-6">
+                    <label for="edm-provider" class="block text-sm font-medium text-gray-700 mb-1">EDM Provider</label>
+                    <input
+                        id="edm-provider" v-model="edmProvider"
+                        type="text"
+                        class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm p-2 border"
+                        placeholder="WebHDP"
+                    >
+                    <p class="text-xs text-gray-400 mt-1">The organization providing the data (edm:provider, edm:dataProvider fallbacks).</p>
+                </div>
+
+
             <!-- Batch Mode LOD-Mapper -->
             <div v-if="workflowStore.isBatchMode && selectedTemplate" class="mb-8 space-y-6">
                 <LodMapper
                   :msf-path="workflowStore.msfPath"
                   :template-id="selectedTemplate.id"
                   :initial-mapping="workflowStore.submissionMetadata?.lod_mapping"
+                  :provider="edmProvider"
                   @update:mapping="handleMappingUpdate"
                 />
             </div>
 
             <!-- Preview & Validation Area -->
-            <div v-if="selectedTemplate" class="border-t border-gray-200 pt-6">
+            <div v-if="selectedTemplate && !workflowStore.isBatchMode" class="border-t border-gray-200 pt-6">
 
                 <!-- Asset Thumbnails (Hide in batch mode) -->
                 <div v-if="!workflowStore.isBatchMode && uploadedAssets.length > 0" class="mb-6">
@@ -125,18 +139,6 @@
                         </div>
                     </div>
                     <p class="text-xs text-gray-400 mt-2">The selected file will be used as the primary object (edm:ProvidedCHO, ore:Aggregation) in the XML.</p>
-                </div>
-
-                <!-- EDM Provider Input -->
-                <div class="mb-6">
-                    <label class="block text-sm font-medium text-gray-700 mb-1">EDM Provider</label>
-                    <input
-                        v-model="edmProvider"
-                        type="text"
-                        class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm p-2 border"
-                        placeholder="WebHDP"
-                    >
-                    <p class="text-xs text-gray-400 mt-1">The organization providing the data (edm:provider, edm:dataProvider fallbacks).</p>
                 </div>
 
                 <!-- Data Source Toggle -->
@@ -284,10 +286,10 @@
           </button>
           <button
             @click="handleNext"
-            :disabled="!selectedTemplate"
+            :disabled="!selectedTemplate || isSaving"
             class="px-6 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:opacity-50 transition-colors"
           >
-            Continue to Pipeline →
+            {{ isSaving ? 'Saving selection…' : 'Continue to Pipeline →' }}
           </button>
         </div>
 
@@ -319,7 +321,7 @@ const templateLoadError = ref('')
 const templates = ref([])
 const selectedTemplate = ref(null)
 const selectedFile = ref(null) // NEW: Selected main file
-const edmProvider = ref("WebHDP") // NEW: Customizable Provider
+const edmProvider = ref(workflowStore.submissionMetadata?.edm_provider ?? "WebHDP")
 const lodMapping = ref(null) // NEW: LOD mapping configuration
 
 
@@ -459,6 +461,7 @@ onMounted(async () => {
         })) {
           await restoreWorkflowContext(workflowStore, resumeSessionId)
         }
+        edmProvider.value = workflowStore.submissionMetadata?.edm_provider ?? "WebHDP"
         await Promise.all([
             fetchTemplates(),
             fetchHealthConfig()
@@ -486,7 +489,7 @@ async function refreshPreview() {
     const epoch = ++previewEpoch
     previewContent.value = ''
     validationResult.value = null
-    if (!selectedTemplate.value) return
+    if (!selectedTemplate.value || workflowStore.isBatchMode) return
 
     previewLoading.value = true
     previewError.value = null
@@ -583,20 +586,20 @@ function handleBack() {
 async function handleNext() {
     if (isSaving.value) return
     isSaving.value = true
+    saveError.value = null
     // Save selection to draft metadata (we need to inject it)
     try {
         // We need to update the draft with the selected template ID.
         // We'll append it to the metadata payload.
-        const currentMeta = workflowStore.submissionMetadata || {}
+        const currentMeta = JSON.parse(JSON.stringify(workflowStore.submissionMetadata || {}))
 
         if (selectedTemplate.value) {
             currentMeta.edm_template_id = selectedTemplate.value.id
         }
 
-        // In Batch Mode, we might not have a single 'selectedFile'.
-        // If one is selected for preview, we can use it, but otherwise default to null or first file.
-        // However, the backend might expect specific structure.
-        if (selectedFile.value) {
+        if (workflowStore.isBatchMode) {
+          delete currentMeta.edm_main_file_key
+        } else if (selectedFile.value) {
           currentMeta.edm_main_file_key = selectedFile.value.name
         }
 
@@ -620,13 +623,13 @@ async function handleNext() {
         workflowStore.setSubmissionMetadata(currentMeta)
 
 
-        workflowStore.nextStep()
         await persistWorkflowState(workflowStore, 'pipeline')
+        workflowStore.nextStep()
         router.push('/workflow/pipeline')
     } catch (e) {
         console.error("Save selection error:", e)
         // api.js interceptor returns the data object directly on error
-        const errMsg = e.error || e.message || (e.response?.data?.error) || "Unknown error"
+        const errMsg = e.error?.message || e.message || e.response?.data?.error?.message || "Please retry saving your selection."
         saveError.value = "Failed to save selection: " + errMsg
     } finally {
         isSaving.value = false

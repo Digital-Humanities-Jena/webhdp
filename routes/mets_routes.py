@@ -121,6 +121,8 @@ def test_mapping():
             zenodo_record=zenodo_record,
             mapping_config=mapping_config,
             msf_profile=msf_profile,
+            session_id=session_row.id if session_row else None,
+            zenodo_mapping=data.get("zenodo_mapping"),
         )
 
         # 3. Render Template
@@ -150,6 +152,8 @@ def test_mapping():
             message="METS mapping test completed"
         )
 
+    except ValueError as e:
+        return APIResponse.validation_error(str(e))
     except Exception as e:
         logger.error(f"METS mapping test failed: {e}", exc_info=True)
         return APIResponse.server_error(f"Failed to test mapping: {e}")

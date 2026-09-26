@@ -1,4 +1,5 @@
 import os
+import json
 from typing import Any, Dict
 
 from services.zenodo_metadata_normalizer import normalize_zenodo_metadata
@@ -48,6 +49,8 @@ def build_pipeline_aligned_lod_metadata(
     zenodo_record: Dict[str, Any],
     mapping_config: Dict[str, Any],
     msf_profile: Dict[str, Any],
+    zenodo_mapping: Dict[str, Any] | None = None,
+    session_id: int | None = None,
 ) -> Dict[str, Any]:
     """
     Build LOD metadata in the same spirit as pipeline execution:
@@ -61,12 +64,40 @@ def build_pipeline_aligned_lod_metadata(
         if isinstance(candidate, dict):
             zenodo_metadata = dict(candidate)
 
+    item_defaults = {}
+    source_name = str(row.get((msf_profile or {}).get('filename_column') or 'filename', '') or '').strip().replace('\\', '/')
+    if session_id is not None:
+        from database.models import BatchFileMetadata
+        from services.lod_reliability import MetadataRows
+        from services.submission_pipeline_service import _split_batch_shared_zenodo_metadata
+        entries = BatchFileMetadata.query.filter_by(session_id=session_id).all()
+        rows = MetadataRows([(entry.filename, json.loads(entry.metadata_json)) for entry in entries], [entry.filename for entry in entries])
+        shared, item_defaults = _split_batch_shared_zenodo_metadata(zenodo_metadata)
+        zenodo_metadata = merge_non_empty_metadata(shared, rows.get(source_name) or {})
+        zenodo_record = {**zenodo_record, 'metadata': zenodo_metadata}
+
+    if zenodo_mapping:
+        zenodo_metadata = merge_non_empty_metadata(zenodo_metadata, msf_service.apply_lod_mapping(
+            row, zenodo_record, zenodo_mapping, include_defaults=False))
+        zenodo_record = {**zenodo_record, "metadata": zenodo_metadata}
+
     fallback_title = infer_row_fallback_title(row, msf_profile)
+    fallback_options = {}
+    if session_id is not None:
+        from services.submission_pipeline_service import _derive_batch_fallback_title, _derive_batch_fallback_creators, NEUTRAL_ITEM_DESCRIPTION
+        fallback_title = _derive_batch_fallback_title(zenodo_metadata, source_name)
+        fallback_options = {'fallback_description': NEUTRAL_ITEM_DESCRIPTION,
+                            'fallback_creators': _derive_batch_fallback_creators(zenodo_metadata, item_defaults)}
     normalized_base = normalize_zenodo_metadata(
         zenodo_metadata,
         apply_defaults=True,
         fallback_title=fallback_title,
+        **fallback_options,
     )
+    # Keep LOD-only settings (such as the provider) which the Zenodo normalizer
+    # intentionally excludes from API metadata, just as submission does.
+    normalized_base = merge_non_empty_metadata(zenodo_metadata, normalized_base)
+    zenodo_record = {**zenodo_record, 'metadata': normalized_base}
     mapped_values = msf_service.apply_lod_mapping(
         row,
         zenodo_record,

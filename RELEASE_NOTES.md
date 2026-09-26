@@ -9,6 +9,8 @@
 - HPC-Link service accounts renew bearer tokens automatically. Allocation owners can download their own output artifacts without general filesystem access.
 - The renderer honors the configured Blender executable and supports the Blender 4.x STL importer and multiple OBJ material libraries. Missing libraries and unreadable textures produce explicit errors.
 - Reruns reuse unpublished Zenodo drafts, restore missing originals, and replace changed artifacts. Concurrent mutations of one session are rejected, while independent sessions can proceed. Expired HPC allocations release queue capacity and can be replaced in one request.
+- Guided submission retains its operation identity across lost responses and reconnects even if saving workflow state fails. Metadata selections preserve saved providers and avoid advancing after failed saves.
+- Batch previews no longer override other records' file identities. Interrupted metadata retries remain recoverable, unchanged uploaded exports stay uploaded, and record actions exclude validation-blocked files. Current file readiness is shown separately from historical pipeline failures.
 - METS identifiers remain valid for Unicode, spaces, and punctuation, including images used as their own previews. Uploaded filenames and content URLs preserve reserved characters.
 - ZIP preflight rejects traversal, ambiguous paths, symlinks, encrypted files, unsupported compression, and oversized expansion before queueing work. Windows-style separators are normalized consistently.
 - Production draft workflows support individual uploads as well as named dataset directories, while retaining duplicate-record checks.

@@ -468,6 +468,8 @@ def _split_batch_shared_zenodo_metadata(shared_metadata: Dict[str, Any]) -> Tupl
     item_defaults: Dict[str, Any] = {}
 
     for key, value in (shared_metadata or {}).items():
+        if key == "edm_main_file_key":
+            continue  # A batch preview selection is never a shared record identity.
         if key in ITEM_SPECIFIC_ZENODO_FIELDS:
             item_defaults[key] = value
         else:
@@ -1030,6 +1032,8 @@ def execute_submission_pipeline(
                 )
                 zenodo_metadata = _merge_non_empty_metadata(zenodo_metadata, mapped_zenodo_values)
 
+        if uses_per_file_metadata:
+            zenodo_metadata["edm_main_file_key"] = os.path.basename(effective_file_path)
         zenodo_metadata = publishing_context_service.apply_community_policy(db_session, zenodo_metadata)
         raw_submission_metadata = {
             k: v

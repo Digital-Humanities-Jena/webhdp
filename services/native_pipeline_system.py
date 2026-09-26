@@ -4960,6 +4960,12 @@ class NativePipelineSystemService:
         generated_outputs: Dict[str, Any] = {}
         zenodo_resp = record_context["draft_result"].get("zenodo_response", record_context["draft_result"])
         main_file_key = record_context["file_zenodo_metadata"].get("edm_main_file_key") or record_context["filename"]
+        from services.hdpc_local_service import read_hdpc_record_files
+        record_files = read_hdpc_record_files(execution_context["hdpc_path"], record_context["record_id"])
+        allowed_file_keys = {item.get('filename') or os.path.basename(item.get('absolute_path') or '') for item in record_files}
+        allowed_file_keys.add(record_context["filename"])
+        if main_file_key not in allowed_file_keys:
+            raise FileProcessingError('The selected main file does not belong to this record. Select a file from this record and retry.')
         additional_files_for_lod = [
             {"key": os.path.basename(path), "size": os.path.getsize(path)}
             for path in record_context["generated_files"]
@@ -5020,6 +5026,7 @@ class NativePipelineSystemService:
         from services.edm_service import EdmService
         url_service = EdmService()
         specification = {
+            "lod_policy": lod_policy,
             "options": lod_options,
             "template_ids": {standard: record_context["file_zenodo_metadata"].get(f"{standard}_template_id") or execution_context.get("shared_zenodo_metadata", {}).get(f"{standard}_template_id") for standard in ("edm", "iiif", "mets")},
             "record": {"id": zenodo_resp.get("id"), "doi": zenodo_resp.get("doi"),

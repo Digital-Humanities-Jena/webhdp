@@ -5,10 +5,53 @@ operation does not create a remote draft or execute a renderer or upload.
 """
 import json
 import os
+from pathlib import Path
 from flask import current_app
 from services.lod_reliability import FORMATS, assert_public_document, atomic_write, digest, pinned_templates
 
 FILENAMES = dict(edm='edm.xml', iiif='iiif.json', mets='mets.xml', cidoc_crm='cidoc-crm.xml', jsonld='metadata.jsonld')
+
+
+def complete_format_states(manifest):
+    """Unattempted formats remain visible and retryable after an interruption."""
+    formats = manifest.setdefault('formats', {})
+    for standard in FORMATS:
+        if standard not in formats:
+            enabled = (manifest.get('request', {}).get('options') or {}).get(f'generate_{standard}', True)
+            formats[standard] = {'status': 'pending' if enabled else 'skipped_disabled', 'success': not enabled}
+    return manifest
+
+
+def record_lod_readiness(hdpc_path, record_id):
+    """Current artifact readiness, independent of historical pipeline results."""
+    from services.hdpc_schema_service import connect_hdpc
+    root = Path(hdpc_path).resolve().parent / 'outputs' / f'record-{int(record_id)}'
+    paths = list(root.glob('*/lod-generation.json'))
+    blocked_formats = []
+    if paths:
+        try:
+            if len(paths) != 1 or not paths[0].resolve().is_relative_to(root):
+                raise ValueError('Ambiguous metadata report')
+            manifest = complete_format_states(json.loads(paths[0].read_text(encoding='utf-8')))
+            for standard, status in manifest['formats'].items():
+                if status.get('status') == 'skipped_disabled':
+                    continue
+                intact = False
+                if standard in FILENAMES and status.get('success') and (status.get('validation') or {}).get('valid') is True:
+                    artifact = paths[0].parent / FILENAMES[standard]
+                    intact = artifact.resolve().is_relative_to(root) and artifact.is_file() and digest(artifact.read_bytes()) == status.get('sha256')
+                if not intact and manifest.get('request', {}).get('lod_policy', 'required') == 'required':
+                    blocked_formats.append(standard)
+        except (OSError, ValueError, TypeError, AttributeError):
+            blocked_formats.append('metadata report')
+    with connect_hdpc(hdpc_path) as conn:
+        rows = conn.execute('SELECT upload_status FROM record_files_map WHERE record_id = ?', (int(record_id),)).fetchall()
+    blocked_files = sum(str(row[0]).startswith('validation_pending') for row in rows)
+    pending_files = sum(row[0] in ('pending', 'upload_error') for row in rows)
+    ready = not blocked_formats and not blocked_files
+    return {'available': bool(paths), 'ready': ready, 'blocked_formats': blocked_formats,
+            'blocked_file_count': blocked_files, 'pending_upload_count': pending_files,
+            'state': 'blocked' if not ready else 'upload_required' if pending_files else 'uploaded'}
 
 
 def generate_artifacts(output_dir, specification, register, progress=None):
@@ -20,14 +63,20 @@ def generate_artifacts(output_dir, specification, register, progress=None):
             previous = json.load(stream)
     except (OSError, ValueError):
         previous = {}
-    manifest = {'version': 1, 'fingerprint': fingerprint, 'request': specification, 'formats': {}}
+    previous_formats = dict(previous.get('previous_formats') or {}) if previous.get('fingerprint') == fingerprint else {}
+    previous_formats.update({key: value for key, value in (previous.get('formats') or {}).items() if value.get('success')})
+    manifest = complete_format_states({'version': 1, 'fingerprint': fingerprint, 'request': specification, 'formats': {},
+                                      'previous_formats': previous_formats if previous.get('fingerprint') == fingerprint else {}})
     atomic_write(manifest_path, json.dumps(manifest, indent=2, default=str))
     outputs = {}
     options = specification['options']
     with pinned_templates(specification.get('templates')):
         for index, standard in enumerate(FORMATS):
             if progress:
-                progress(standard, index, len(FORMATS))
+                try:
+                    progress(standard, index, len(FORMATS))
+                except Exception:
+                    current_app.logger.warning('Metadata progress update unavailable')
             status = {'status': 'pending', 'success': False}
             manifest['formats'][standard] = status
             if not options.get(f'generate_{standard}', True):
@@ -35,7 +84,7 @@ def generate_artifacts(output_dir, specification, register, progress=None):
             else:
                 path = os.path.join(output_dir, FILENAMES[standard])
                 try:
-                    old = (previous.get('formats') or {}).get(standard) or {}
+                    old = previous_formats.get(standard) or {}
                     if previous.get('fingerprint') == fingerprint and old.get('success') and (old.get('validation') or {}).get('valid') is True and old.get('sha256') and old.get('sha256') == old['validation'].get('sha256') and os.path.isfile(path):
                         with open(path, 'rb') as stream:
                             unchanged = digest(stream.read()) == old['sha256']
@@ -43,6 +92,7 @@ def generate_artifacts(output_dir, specification, register, progress=None):
                             register(path, old['validation'])
                             status.update(old, reused=True)
                             outputs[standard] = path
+                            atomic_write(manifest_path, json.dumps(manifest, indent=2, default=str))
                             continue
                     metadata = specification['metadata'][standard]
                     kwargs = dict(main_file_key=specification['main_file_key'], additional_files=specification['additional_files'])
@@ -79,10 +129,13 @@ def generate_artifacts(output_dir, specification, register, progress=None):
                 except Exception as exc:
                     status.update(status='failed', error=str(exc))
             atomic_write(manifest_path, json.dumps(manifest, indent=2, default=str))
-    # Also persist cached entries whose loop iteration continued early.
+    # Final snapshot includes every requested format.
     atomic_write(manifest_path, json.dumps(manifest, indent=2, default=str))
     if progress:
-        progress(None, len(FORMATS), len(FORMATS))
+        try:
+            progress(None, len(FORMATS), len(FORMATS))
+        except Exception:
+            current_app.logger.warning('Metadata progress update unavailable')
     return outputs, manifest
 
 
@@ -90,6 +143,8 @@ def suspend_previous_artifacts(hdpc_path, record_id):
     """Old outputs cannot remain pending while their replacement is unverified."""
     from services.hdpc_schema_service import connect_hdpc
     with connect_hdpc(hdpc_path) as conn:
-        conn.execute("""UPDATE record_files_map SET upload_status = 'validation_pending'
+        conn.execute("""UPDATE record_files_map SET upload_status = CASE
+                        WHEN upload_status IN ('uploaded', 'validation_pending_uploaded') THEN 'validation_pending_uploaded'
+                        ELSE 'validation_pending' END
                         WHERE record_id = ? AND file_id IN
                         (SELECT file_id FROM source_files WHERE pipeline_source = 'lod_generation')""", (int(record_id),))

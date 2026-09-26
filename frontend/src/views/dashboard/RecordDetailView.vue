@@ -178,9 +178,14 @@
             </li>
           </ul>
           <p v-else-if="!lodError && !lodBusy" class="mt-3 text-sm text-slate-500">No metadata generation report is available yet.</p>
-          <div class="mt-3 flex gap-3">
+          <p v-if="lodReport?.readiness?.state === 'blocked'" role="status" class="mt-3 text-sm text-amber-800">Metadata needs attention before this record can be uploaded. Retry incomplete formats below.</p>
+          <p v-else-if="lodReport?.readiness?.state === 'upload_required'" role="status" class="mt-3 text-sm text-slate-700">Required metadata checks passed. {{ lodReport.readiness.pending_upload_count }} file(s) still need uploading.
+            <router-link :to="`/sessions/${route.params.sessionId}/records`" class="text-indigo-700 underline">Open record actions</router-link>
+          </p>
+          <p v-else-if="lodReport?.readiness?.state === 'uploaded'" role="status" class="mt-3 text-sm text-emerald-700">Required metadata checks passed and the local file set is marked uploaded.</p>
+          <div class="mt-3 flex flex-wrap gap-3">
             <button type="button" :disabled="lodBusy" class="text-sm text-indigo-700 underline disabled:opacity-50" @click="loadLod(false)">Refresh report</button>
-            <button v-if="lodReport?.available && Object.values(lodReport.formats).some(item => !item.success)" type="button" :disabled="lodBusy" class="text-sm text-indigo-700 underline disabled:opacity-50" @click="loadLod(true)">Retry failed formats</button>
+            <button v-if="lodReport?.available && (lodReport.readiness?.state === 'blocked' || !Object.keys(lodReport.formats || {}).length || Object.values(lodReport.formats).some(item => !item.success))" type="button" :disabled="lodBusy" class="text-sm text-indigo-700 underline disabled:opacity-50" @click="loadLod(true)">Retry incomplete formats</button>
             <button v-if="lodReport?.available" type="button" class="text-sm text-indigo-700 underline" @click="downloadLodReport">Download report</button>
           </div>
         </section>
@@ -264,7 +269,7 @@
                     </p>
                   </div>
                   <div class="text-right text-xs text-slate-500">
-                    <p>{{ file.upload_status || file.status || 'pending' }}</p>
+                    <p>{{ recordFileStatusLabel(file.upload_status || file.status || 'pending') }}</p>
                     <p v-if="file.pipeline_source || file.step_source">{{ file.pipeline_source || 'unknown' }} / {{ file.step_source || 'unknown' }}</p>
                   </div>
                 </div>
@@ -280,7 +285,7 @@
                 <li>{{ yesNo(health.has_doi) }} DOI</li>
                 <li>{{ yesNo(health.has_source_file) }} Source file</li>
                 <li>{{ yesNo(health.has_mapped_metadata) }} Mapped metadata</li>
-                <li>{{ yesNo(!health.has_processing_error) }} No processing error</li>
+                <li v-if="lodReport?.readiness">{{ yesNo(lodReport.readiness.ready) }} Current metadata ready</li>
                 <li v-if="health.is_3d_record">{{ yesNo(!health.missing_uploaded_thumbnails) }} Uploaded thumbnails present</li>
                 <li v-if="health.is_3d_record">Local rendered thumbnails: {{ health.local_rendered_thumbnail_count || 0 }}</li>
                 <li v-if="health.is_3d_record">Uploaded thumbnails: {{ health.uploaded_thumbnail_count || 0 }}</li>
@@ -289,7 +294,8 @@
             </div>
 
             <div>
-              <h3 class="text-sm font-semibold text-slate-900">Pipeline Status</h3>
+              <h3 class="text-sm font-semibold text-slate-900">Last Pipeline Run</h3>
+              <p class="mt-1 text-xs text-slate-500">Historical result. Local metadata retries update the report and file readiness above.</p>
               <ul class="mt-2 text-sm text-slate-700 space-y-1">
                 <li>Render: {{ record?.processing?.render_status || 'n/a' }}</li>
                 <li>USDZ: {{ record?.processing?.usdz_status || 'n/a' }}</li>
@@ -297,7 +303,7 @@
                 <li>IIIF: {{ record?.processing?.iiif_status || 'n/a' }}</li>
                 <li>METS: {{ record?.processing?.mets_status || 'n/a' }}</li>
               </ul>
-              <p v-if="record?.processing?.error" class="mt-2 text-xs text-rose-700">Error: {{ record.processing.error }}</p>
+              <p v-if="record?.processing?.error" class="mt-2 text-xs text-rose-700">Run error: {{ record.processing.error }}</p>
             </div>
 
             <div v-if="record?.provenance?.pipeline_lineage?.length">
@@ -398,6 +404,7 @@ import submissionService from '@/services/submission.service.js'
 import LoadingSpinner from '@/components/ui/LoadingSpinner.vue'
 import Alert from '@/components/ui/Alert.vue'
 import { useToast } from '@/composables/useToast'
+import { recordFileStatusLabel } from '@/utils/workflowState'
 import PlaygroundModelViewer from '@/components/tools/playground/PlaygroundModelViewer.vue'
 
 const route = useRoute()
@@ -411,7 +418,7 @@ const previewLoaded = ref(false)
 const lodReport = ref(null)
 const lodError = ref('')
 const lodBusy = ref(false)
-async function loadLod(retry = false) {
+async function loadLod(retry = false, refreshDetail = true) {
   if (lodBusy.value) return
   const url = `/sessions/${Number(route.params.sessionId)}/records/${Number(route.params.recordId)}/lod`
   lodBusy.value = true
@@ -419,6 +426,14 @@ async function loadLod(retry = false) {
   try {
     const response = retry ? await api.post(url, {}, { timeout: 300000 }) : await api.get(url, { suppressGlobalError: true })
     lodReport.value = response.data
+    if (refreshDetail) {
+      try {
+        const refreshed = await submissionService.getSessionRecordDetail(Number(route.params.sessionId), Number(route.params.recordId))
+        detail.value = refreshed.data
+      } catch {
+        lodError.value = 'The metadata report is available, but record details could not be refreshed. Refresh the report to reconnect.'
+      }
+    }
   } catch (err) {
     lodError.value = err?.error?.message || err?.message || 'Metadata report is unavailable. Refresh to reconnect.'
   } finally { lodBusy.value = false }
@@ -558,7 +573,7 @@ const loadDetail = async () => {
   const recordId = Number(route.params.recordId)
   const detailResponse = await submissionService.getSessionRecordDetail(sessionId, recordId)
   detail.value = detailResponse.data
-  await loadLod(false)
+  await loadLod(false, false)
 }
 
 const createVersion = async () => {

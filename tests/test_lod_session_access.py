@@ -170,3 +170,15 @@ def test_lod_mapping_cannot_read_another_sessions_file_or_a_symlink(lod_access_a
     assert client.post('/api/v1/iiif/test-mapping', headers=lod_access_app['viewer_headers'], json=payload).status_code == 400
     payload.pop('session_id')
     assert client.post('/api/v1/iiif/test-mapping', headers=lod_access_app['viewer_headers'], json=payload).status_code == 400
+
+
+def test_ambiguous_preview_source_is_an_actionable_validation_error(lod_access_app, monkeypatch):
+    def ambiguous(**kwargs):
+        raise ValueError('Ambiguous filename model.glb. Use the exact relative source path.')
+    monkeypatch.setattr(iiif_routes, 'build_pipeline_aligned_lod_metadata', ambiguous)
+    response = lod_access_app['client'].post(
+        '/api/v1/iiif/test-mapping', headers=lod_access_app['viewer_headers'],
+        json={'session_id': lod_access_app['session_id'], 'row_index': 0},
+    )
+    assert response.status_code == 400
+    assert 'exact relative source path' in response.get_json()['error']['message']

@@ -97,6 +97,14 @@ export const getNodeResumeKey = (node) => {
   return String(node.file_id || node.absolute_path || node.path || node.relative_path || node.name || '').trim()
 }
 
+export const recordFileStatusLabel = (status) => ({
+  validation_pending: 'Validation required',
+  validation_pending_uploaded: 'Uploaded; revalidation required',
+  pending: 'Pending upload',
+  uploaded: 'Uploaded',
+  upload_error: 'Upload failed',
+}[status] || String(status || 'pending').replaceAll('_', ' '))
+
 const hasObjectKeys = (value) => value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length > 0
 
 const flattenNodes = (nodes = []) => {

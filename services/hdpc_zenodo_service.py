@@ -1100,6 +1100,10 @@ def publish_record(
 ) -> Dict[str, Any]:
     if os.environ.get("ZENODO_PUBLISH_ENABLED", "true").lower() not in {"true", "1", "yes", "on"}:
         return {"success": False, "error": "Zenodo publication is disabled by this deployment"}
+    from services.lod_artifact_service import record_lod_readiness
+    readiness = record_lod_readiness(hdpc_path, local_record_id)
+    if not readiness['ready']:
+        return {'success': False, 'error': 'Metadata validation is incomplete. Retry metadata generation before publishing.', 'readiness': readiness}
     conn = connect_hdpc(hdpc_path, timeout=30, row_factory=sqlite3.Row)
     try:
         project_id = ensure_hdpc_schema(conn, hdpc_path)
@@ -1211,6 +1215,11 @@ def upload_files_for_deposition(
         ).fetchone()
         if not row:
             return {"success": False, "error": f"Record {local_record_id} not found"}
+        from services.lod_artifact_service import record_lod_readiness
+        readiness = record_lod_readiness(hdpc_path, local_record_id)
+        if not readiness['ready']:
+            return {'success': False, 'error': 'Metadata validation is incomplete. Retry metadata generation before uploading.',
+                    'readiness': readiness, 'uploaded_file_count': 0, 'failed_upload_count': 0}
         is_sandbox = bool(row["is_sandbox"])
         token = _resolved_access_token(cursor, project_id, is_sandbox, access_token)
         payload = _json_loads(row["record_metadata_json"], {})

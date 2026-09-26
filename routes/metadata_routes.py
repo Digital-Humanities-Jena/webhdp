@@ -364,6 +364,7 @@ def test_zenodo_mapping():
             zenodo_record=zenodo_record,
             mapping_config=mapping_config,
             msf_profile=msf_profile,
+            session_id=session_row.id if session_row else None,
         )
         mapped_metadata = normalize_zenodo_metadata(mapped_metadata)
         community_cfg = ZenodoConfigService.get_community_override_config()
@@ -396,6 +397,8 @@ def test_zenodo_mapping():
             },
             message="Zenodo mapping test completed",
         )
+    except ValueError as exc:
+        return APIResponse.validation_error(str(exc))
     except Exception as exc:
         logger.error(f"Zenodo mapping test failed: {exc}", exc_info=True)
         return APIResponse.server_error(f"Failed to test Zenodo mapping: {exc}")

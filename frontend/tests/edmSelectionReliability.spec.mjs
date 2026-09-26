@@ -1,8 +1,10 @@
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, expect, it, vi } from 'vitest'
+import { useWorkflowStore } from '../src/stores/workflow'
+import { persistWorkflowState } from '../src/utils/workflowState'
 import EdmSelectionView from '../src/views/workflow/EdmSelectionView.vue'
-const api = vi.hoisted(() => ({ post: vi.fn(), get: vi.fn() }))
+const api = vi.hoisted(() => ({ post: vi.fn(), get: vi.fn(), put: vi.fn() }))
 vi.mock('@/services/api', () => ({ default: api }))
 vi.mock('vue-router', () => ({ useRoute: () => ({ query: {} }), useRouter: () => ({ push: vi.fn() }) }))
 vi.mock('@/utils/workflowState', () => ({ persistWorkflowState: vi.fn(), restoreWorkflowContext: vi.fn(), shouldRestoreWorkflowContext: () => false }))
@@ -34,5 +36,55 @@ it('ignores a validation response for a previously selected template', async () 
   await flushPromises()
   expect(wrapper.text()).toContain('Second template needs attention')
   expect(wrapper.text()).not.toContain('Available checks passed')
+  wrapper.unmount()
+})
+
+const mountSelection = () => mount(EdmSelectionView, { global: { stubs: { StepIndicator: true, LoadingSpinner: true, LodMapper: true } } })
+it('preserves provider and keeps the batch preview out of shared file identity', async () => {
+  const store = useWorkflowStore()
+  store.sessionId = 42
+  store.isBatchMode = true
+  store.uploadedFiles = [{ name: 'sample-A.glb', size: 100 }]
+  store.submissionMetadata = { edm_provider: 'Museum provider', edm_main_file_key: 'sample-A.glb', edm_template_id: 2 }
+  const wrapper = mountSelection()
+  await flushPromises()
+  expect(wrapper.get('#edm-provider').element.value).toBe('Museum provider')
+  expect(wrapper.text()).toContain('Selected: Second')
+  expect(wrapper.text()).not.toContain('Preview (Live)')
+  expect(api.post).not.toHaveBeenCalled()
+  await wrapper.findAll('button').find(button => button.text().includes('Continue to Pipeline')).trigger('click')
+  await flushPromises()
+  expect(api.put.mock.calls[0][1].edm_provider).toBe('Museum provider')
+  expect(api.put.mock.calls[0][1].edm_main_file_key).toBeUndefined()
+  wrapper.unmount()
+})
+it('keeps edits separate from saved metadata when saving is rejected', async () => {
+  const store = useWorkflowStore()
+  store.sessionId = 42
+  store.submissionMetadata = { edm_provider: 'Museum provider' }
+  api.put.mockRejectedValue({ error: { message: 'Connection lost' } })
+  const wrapper = mountSelection()
+  await flushPromises()
+  const step = store.currentStep
+  await wrapper.get('#edm-provider').setValue('Revised museum')
+  await wrapper.findAll('button').find(button => button.text().includes('Continue to Pipeline')).trigger('click')
+  await flushPromises()
+  expect(store.submissionMetadata.edm_provider).toBe('Museum provider')
+  expect(store.currentStep).toBe(step)
+  expect(wrapper.get('#edm-provider').element.value).toBe('Revised museum')
+  expect(wrapper.text()).toContain('Connection lost')
+  wrapper.unmount()
+})
+it('does not advance the step when workflow-state saving fails', async () => {
+  const store = useWorkflowStore()
+  store.sessionId = 42
+  const wrapper = mountSelection()
+  await flushPromises()
+  const step = store.currentStep
+  vi.mocked(persistWorkflowState).mockRejectedValueOnce(new Error('State unavailable'))
+  await wrapper.findAll('button').find(button => button.text().includes('Continue to Pipeline')).trigger('click')
+  await flushPromises()
+  expect(store.currentStep).toBe(step)
+  expect(wrapper.text()).toContain('State unavailable')
   wrapper.unmount()
 })

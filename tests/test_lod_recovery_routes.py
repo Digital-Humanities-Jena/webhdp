@@ -76,3 +76,17 @@ def test_download_checks_validation_and_file_integrity(recovery):
     path.write_text('tampered')
     assert client.get('/sessions/42/records/1/lod?format=jsonld', headers=headers).status_code == 400
     assert client.get('/sessions/42/records/1/lod?format=../../secret', headers=headers).status_code == 400
+
+
+def test_legacy_interrupted_report_exposes_unattempted_formats(recovery):
+    from pathlib import Path
+    app, _, headers, hdpc = recovery
+    path = Path(hdpc).parent / 'outputs/record-1/model/lod-generation.json'
+    report = json.loads(path.read_text())
+    report['formats'] = {}
+    path.write_text(json.dumps(report))
+    response = app.test_client().get('/sessions/42/records/1/lod', headers=headers)
+    assert response.status_code == 200
+    assert len(response.json['data']['formats']) == 5
+    assert all(value['status'] == 'pending' for value in response.json['data']['formats'].values())
+    assert response.json['data']['readiness']['state'] == 'blocked'

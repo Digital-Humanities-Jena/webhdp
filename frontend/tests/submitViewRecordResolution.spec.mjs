@@ -111,6 +111,9 @@ const baseRecordResolutionCandidate = {
 
 describe('SubmitView record-resolution plan', () => {
   beforeEach(() => {
+    sessionStorage.clear()
+    mocked.workflowState.persistWorkflowState.mockReset().mockResolvedValue(undefined)
+    mocked.route.query = {}
     Object.values(mocked.router).forEach((fn) => fn.mockReset())
     Object.values(mocked.toast).forEach((fn) => fn.mockReset())
     Object.values(mocked.fileService).forEach((fn) => fn.mockReset())
@@ -250,6 +253,7 @@ describe('SubmitView record-resolution plan', () => {
       {
         asyncExecution: true,
         abortOnCriticalError: false,
+        requestId: expect.any(String),
       }
     )
   })
@@ -325,7 +329,85 @@ describe('SubmitView record-resolution plan', () => {
       {
         asyncExecution: true,
         abortOnCriticalError: false,
+        requestId: expect.any(String),
       },
     )
   })
+  function readySubmission() {
+    mocked.submissionService.getSessionRecordResolution.mockResolvedValue({ data: {
+      summary: { can_continue: true, unresolved_count: 0 },
+      candidates: [{ ...baseRecordResolutionCandidate, resolved: true }],
+    } })
+    mocked.pipelineService.getPipelineRun.mockResolvedValue({ data: { run: { run_id: 'accepted-run', status: 'running' } } })
+  }
+  const mountSubmit = () => mount(SubmitView, { global: { stubs: { StepIndicator: true, LoadingSpinner: true } } })
+  it('monitors an accepted run when saving workflow state fails', async () => {
+    readySubmission()
+    mocked.pipelineService.executePipelineWithPlan.mockResolvedValue({ data: { run_id: 'accepted-run' } })
+    const wrapper = mountSubmit()
+    await flushPromises()
+    mocked.workflowState.persistWorkflowState.mockRejectedValue(new Error('Save unavailable'))
+    await wrapper.get('[data-testid="submit-confirm"]').trigger('click')
+    await flushPromises()
+    expect(mocked.pipelineService.getPipelineRun).toHaveBeenCalledWith('accepted-run')
+    expect(wrapper.text()).toContain('saving your resume state failed')
+    expect(mocked.toast.error).not.toHaveBeenCalled()
+    expect(JSON.parse(sessionStorage.getItem('guided-pipeline-run:42')).runId).toBe('accepted-run')
+    wrapper.unmount()
+  })
+  it('retries a lost acknowledgement using the same saved request after remount', async () => {
+    readySubmission()
+    mocked.pipelineService.getPipelineRun.mockRejectedValue({ status: 404 })
+    mocked.pipelineService.executePipelineWithPlan.mockRejectedValueOnce(new Error('Network lost'))
+    let wrapper = mountSubmit()
+    await flushPromises()
+    await wrapper.get('[data-testid="submit-confirm"]').trigger('click')
+    await flushPromises()
+    const firstRequest = mocked.pipelineService.executePipelineWithPlan.mock.calls[0]
+    expect(firstRequest.at(-1).requestId).toMatch(/^[a-f0-9-]{36}$/)
+    expect(wrapper.text()).toContain('Retry this request')
+    wrapper.unmount()
+    wrapper = mountSubmit()
+    await flushPromises()
+    mocked.pipelineService.executePipelineWithPlan.mockResolvedValueOnce({ data: { run_id: firstRequest.at(-1).requestId } })
+    await wrapper.findAll('button').find(button => button.text() === 'Retry this request').trigger('click')
+    await flushPromises()
+    expect(mocked.pipelineService.executePipelineWithPlan.mock.calls[1]).toEqual(firstRequest)
+    wrapper.unmount()
+  })
+  it('reconnects to a server-reported existing run', async () => {
+    readySubmission()
+    mocked.pipelineService.executePipelineWithPlan.mockRejectedValue({ error: { code: 'OPERATION_CONFLICT', details: { run_id: 'existing-run' } } })
+    const wrapper = mountSubmit()
+    await flushPromises()
+    await wrapper.get('[data-testid="submit-confirm"]').trigger('click')
+    await flushPromises()
+    expect(mocked.pipelineService.getPipelineRun).toHaveBeenCalledWith('existing-run')
+    expect(mocked.toast.error).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+  it('releases a definitively rejected request so corrected settings can be submitted', async () => {
+    readySubmission()
+    mocked.pipelineService.executePipelineWithPlan.mockRejectedValue({ error: { code: 'VALIDATION_ERROR', message: 'Fix metadata' } })
+    const wrapper = mountSubmit()
+    await flushPromises()
+    await wrapper.get('[data-testid="submit-confirm"]').trigger('click')
+    await flushPromises()
+    expect(sessionStorage.getItem('guided-pipeline-run:42')).toBeNull()
+    expect(wrapper.text()).toContain('Fix metadata')
+    wrapper.unmount()
+  })
+
+  it('reconnects a saved run even when submission configuration is unavailable', async () => {
+    readySubmission()
+    sessionStorage.setItem('guided-pipeline-run:42', JSON.stringify({ runId: 'accepted-run', confirmed: true }))
+    mocked.pipelineService.listPipelines.mockRejectedValue(new Error('Configuration offline'))
+    const wrapper = mountSubmit()
+    await flushPromises()
+    expect(mocked.pipelineService.getPipelineRun).toHaveBeenCalledWith('accepted-run')
+    expect(mocked.pipelineService.listPipelines).not.toHaveBeenCalled()
+    expect(wrapper.text()).not.toContain('Configuration offline')
+    wrapper.unmount()
+  })
+
 })

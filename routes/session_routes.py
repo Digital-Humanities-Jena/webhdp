@@ -4785,7 +4785,7 @@ def record_lod_recovery(session_id, local_record_id):
     """Inspect or retry local metadata generation without remote side effects."""
     from pathlib import Path
     from contextlib import nullcontext
-    from services.lod_artifact_service import generate_artifacts, suspend_previous_artifacts, FILENAMES
+    from services.lod_artifact_service import generate_artifacts, suspend_previous_artifacts, FILENAMES, complete_format_states, record_lod_readiness
     from services.lod_reliability import digest
     from flask import send_file
     import io
@@ -4805,7 +4805,7 @@ def record_lod_recovery(session_id, local_record_id):
         return APIResponse.validation_error('Ambiguous metadata recovery state')
     with session_pipeline_lock(session.hdpc_path) if request.method == 'POST' else nullcontext():
         with paths[0].open(encoding='utf-8') as stream:
-            manifest = json.load(stream)
+            manifest = complete_format_states(json.load(stream))
         requested_format = request.args.get('format')
         if request.method == 'GET' and requested_format:
             status = (manifest.get('formats') or {}).get(requested_format) or {}
@@ -4845,4 +4845,4 @@ def record_lod_recovery(session_id, local_record_id):
                 status['validation'] = {'valid': False, 'errors': ['Stored artifact integrity check failed']}
     # Do not expose the private request or local paths in the report.
     formats = {key: {field: value for field, value in status.items() if field not in ('path',)} for key, status in manifest['formats'].items()}
-    return APIResponse.success(data={'formats': formats, 'available': True})
+    return APIResponse.success(data={'formats': formats, 'available': True, 'readiness': record_lod_readiness(session.hdpc_path, local_record_id)})

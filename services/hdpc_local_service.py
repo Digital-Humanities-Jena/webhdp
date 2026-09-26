@@ -769,6 +769,8 @@ def read_hdpc_published_records(hdpc_path: str, *, canonical_only: bool = False)
 
 
 def _is_recordable_source_row(row: dict[str, Any]) -> bool:
+    if row.get("file_type") == "generated" or row.get("pipeline_source") == "lod_generation":
+        return False
     if row.get("parent_file_id") is None:
         return True
     return bool(row.get("is_primary_source"))
@@ -948,11 +950,23 @@ def read_hdpc_uploadable_files(
         include_scan_settings=False,
         canonical_records_only=True,
     )
-    return _build_uploadable_files(
+    items = _build_uploadable_files(
         snapshot["source_rows_dicts"],
         snapshot["zenodo_records"],
         is_sandbox_for_drafts=is_sandbox_for_drafts,
     )
+    from services.lod_artifact_service import record_lod_readiness
+    readiness = {}
+    eligible = []
+    for item in items:
+        if item.get('required_action') == 'action_upload_file':
+            record_id = item['local_record_db_id']
+            if record_id not in readiness:
+                readiness[record_id] = record_lod_readiness(hdpc_path, record_id)['ready']
+            if not readiness[record_id]:
+                continue
+        eligible.append(item)
+    return eligible
 
 
 def read_hdpc_uploads_by_tab(
@@ -1539,7 +1553,10 @@ def read_hdpc_record_context(hdpc_path: str, record_id: int) -> dict[str, Any] |
             {},
         )
         link_map = {item.get("link_rel"): item.get("link_url") for item in links if item.get("link_rel")}
+        from services.lod_artifact_service import record_lod_readiness
+        lod_readiness = record_lod_readiness(hdpc_path, record_id)
         zenodo_status = {
+            "lod_readiness": lod_readiness,
             "record": traceability["record"],
             "links": link_map,
             "upload_status_counts": dict(upload_status_counts),
@@ -1547,10 +1564,10 @@ def read_hdpc_record_context(hdpc_path: str, record_id: int) -> dict[str, Any] |
             "actions": {
                 "can_create_draft": str(record.get("record_status") or "").lower() == "prepared" and not str(record.get("zenodo_record_id") or "").strip(),
                 "can_discard_draft": str(record.get("record_status") or "").lower() == "draft",
-                "can_upload_files": str(record.get("record_status") or "").lower() == "draft" and any(
+                "can_upload_files": lod_readiness["ready"] and str(record.get("record_status") or "").lower() == "draft" and any(
                     _upload_requires_retry(item.get("upload_status")) for item in normalized_files
                 ),
-                "can_publish": str(record.get("record_status") or "").lower() == "draft" and all(
+                "can_publish": lod_readiness["ready"] and str(record.get("record_status") or "").lower() == "draft" and all(
                     not _upload_requires_retry(item.get("upload_status")) for item in normalized_files
                 ),
             },
@@ -1732,9 +1749,12 @@ def read_hdpc_operations_summary(
     )
     upload_record_items: list[dict[str, Any]] = []
     publish_record_items: list[dict[str, Any]] = []
+    from services.lod_artifact_service import record_lod_readiness
     for item in drafts:
         record_id = int(item.get("local_record_db_id") or 0)
         if not record_id:
+            continue
+        if not record_lod_readiness(hdpc_path, record_id)['ready']:
             continue
         uploaded = int(item.get("uploaded_files_in_record") or 0)
         total = int(item.get("total_files_in_record") or 0)
@@ -2262,7 +2282,10 @@ def add_local_source_files(
                     DO UPDATE SET
                         file_path = excluded.file_path,
                         file_purpose = excluded.file_purpose,
-                        upload_status = CASE WHEN record_files_map.upload_status = 'validation_pending' THEN 'pending' ELSE record_files_map.upload_status END
+                        upload_status = CASE
+                            WHEN record_files_map.upload_status = 'validation_pending_uploaded' THEN 'uploaded'
+                            WHEN record_files_map.upload_status = 'validation_pending' THEN 'pending'
+                            ELSE record_files_map.upload_status END
                     """,
                     (
                         int(record_id_to_associate),

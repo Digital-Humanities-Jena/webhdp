@@ -472,7 +472,7 @@
                         </p>
                       </div>
                       <div class="text-right text-xs text-slate-500">
-                        <p>{{ file.upload_status || file.status || 'pending' }}</p>
+                        <p>{{ recordFileStatusLabel(file.upload_status || file.status || 'pending') }}</p>
                         <p v-if="file.pipeline_source || file.step_source" class="mt-1">
                           {{ file.pipeline_source || 'unknown' }} / {{ file.step_source || 'unknown' }}
                         </p>
@@ -558,6 +558,7 @@ import SessionGovernanceDrawer from '@/components/dashboard/SessionGovernanceDra
 import LoadingSpinner from '@/components/ui/LoadingSpinner.vue'
 import Alert from '@/components/ui/Alert.vue'
 import { useToast } from '@/composables/useToast'
+import { recordFileStatusLabel } from '@/utils/workflowState'
 import { buildDatasetRoute } from '@/utils/datasetKey.js'
 
 const route = useRoute()

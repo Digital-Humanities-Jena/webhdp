@@ -286,6 +286,11 @@
           <div v-if="monitorUnavailable" role="status" class="max-w-md mx-auto mb-6 rounded-lg border border-amber-200 bg-amber-50 p-4 text-left text-sm text-amber-900">
             Progress updates are temporarily unavailable. Processing may still be running. Reconnecting automatically; you do not need to submit again.
           </div>
+          <div v-if="pendingRun && !pendingRun.confirmed" class="mb-4">
+            <button type="button" :disabled="submitting" class="text-indigo-700 underline disabled:opacity-50" @click="retryPendingRun">Retry this request</button>
+            <p class="text-sm text-slate-600">This uses the same operation ID and will reconnect if processing has already started.</p>
+          </div>
+          <p v-if="workflowSaveWarning" role="status" class="max-w-md mx-auto mb-4 text-sm text-amber-800">{{ workflowSaveWarning }}</p>
           <ProgressBar class="max-w-md mx-auto mb-6" :percentage="processingProgress?.percent" label="Processing progress" />
 
           <div v-if="processingProgress" class="max-w-md mx-auto mb-6 text-left bg-indigo-50 border border-indigo-100 rounded-lg p-4">
@@ -550,6 +555,71 @@ const recordResolutionLoading = ref(false)
 const hpcPreflightState = ref('idle')
 const hpcPreflightMessage = ref('HDP Component runtimes will be checked before processing starts.')
 const monitorUnavailable = ref(false)
+const pendingRun = ref(null)
+let disposed = false
+let nativePollInFlight = false
+const workflowSaveWarning = ref('')
+const pendingRunKey = () => `guided-pipeline-run:${workflowStore.sessionId}`
+function rememberPendingRun() {
+  try {
+    if (pendingRun.value) sessionStorage.setItem(pendingRunKey(), JSON.stringify(pendingRun.value))
+    else sessionStorage.removeItem(pendingRunKey())
+  } catch { /* The current page still retains the operation identity. */ }
+}
+function clearPendingRun() { pendingRun.value = null; rememberPendingRun() }
+function saveProcessingState() {
+  if (disposed) return Promise.resolve()
+  return persistWorkflowState(workflowStore, 'processing', { pipelineRunId: pipelineRunId.value, submissionId: submissionId.value })
+    .then(() => { workflowSaveWarning.value = '' })
+    .catch(() => { workflowSaveWarning.value = 'Processing is being monitored, but saving your resume state failed. Keep this page open or reconnect to this run.' })
+}
+async function submitPendingRun() {
+  const pending = pendingRun.value
+  if (!pending?.request) return
+  const request = pending.request
+  const options = { ...request.options, requestId: pending.runId }
+  try {
+    const response = request.kind === 'plan'
+      ? await pipelineService.executePipelineWithPlan(request.sessionId, request.identifier, request.targets, request.isSandbox, options)
+      : request.kind === 'records'
+        ? await pipelineService.executePipeline(request.sessionId, request.identifier, request.targets, request.isSandbox, options)
+        : await pipelineService.executePipelineOnFiles(request.sessionId, request.targets, request.isSandbox, request.identifier, options)
+    const runId = String(response.data?.run_id || '').trim()
+    if (!runId) throw new Error('Submission acknowledgement is unavailable.')
+    pending.runId = runId
+    pending.confirmed = true
+  } catch (err) {
+    const existing = err?.error?.details?.run_id || err?.details?.run_id || err?.response?.data?.error?.details?.run_id
+    if (existing) {
+      pending.runId = existing
+      pending.confirmed = true
+    } else {
+      const code = err?.error?.code || err?.response?.data?.error?.code
+      const status = err?.status || err?.response?.status
+      if (['VALIDATION_ERROR', 'OPERATION_CONFLICT', 'SECURITY_ERROR', 'FORBIDDEN'].includes(code) || [400, 401, 403, 404, 409, 422].includes(status)) {
+        clearPendingRun()
+        throw err
+      }
+      monitorUnavailable.value = true
+      statusMessage.value = 'Submission could not be confirmed. Reconnect or retry the same request below.'
+    }
+  }
+  rememberPendingRun()
+  pipelineRunId.value = pending.runId
+  processing.value = true
+  startProgressPolling()
+  await saveProcessingState()
+}
+async function retryPendingRun() {
+  if (submitting.value) return
+  submitting.value = true
+  try { await submitPendingRun() }
+  catch (err) {
+    stopProgressPolling()
+    processing.value = false
+    error.value = err?.error?.message || err?.message || 'Submission was rejected. Review the settings and try again.'
+  } finally { submitting.value = false }
+}
 const hpcAllocation = ref(null)
 const componentRuntimeStatus = ref({})
 
@@ -1184,6 +1254,7 @@ const refreshSubmissionPlan = async (sessionId, selectedFiles) => {
 
 const handleCompletedProcessingPayload = (payload) => {
   stopProgressPolling()
+  clearPendingRun()
   executionTimings.value = payload?.timings || null
   currentStepIndex.value = activeSteps.value.length
   processing.value = false
@@ -1212,6 +1283,7 @@ const handleCompletedProcessingPayload = (payload) => {
 
 const handleFailedSubmissionPayload = (payload) => {
   stopProgressPolling()
+  clearPendingRun()
   processing.value = false
   success.value = false
   executionTimings.value = payload?.timings || null
@@ -1282,12 +1354,19 @@ const pollSubmissionProgress = async () => {
 }
 
 const pollNativeRunProgress = async () => {
-  if (!pipelineRunId.value || !processing.value) return
+  if (!pipelineRunId.value || !processing.value || disposed || nativePollInFlight) return
+  nativePollInFlight = true
+  const requestedRunId = pipelineRunId.value
 
   try {
     const response = await pipelineService.getPipelineRun(pipelineRunId.value)
+    if (disposed || requestedRunId !== pipelineRunId.value) return
     monitorUnavailable.value = false
     const runPayload = response.data?.run || {}
+    if (runPayload.run_id && pendingRun.value) {
+      pendingRun.value.confirmed = true
+      rememberPendingRun()
+    }
     const resultPayload = runPayload.result || {}
 
     if (resultPayload.progress) {
@@ -1324,13 +1403,17 @@ const pollNativeRunProgress = async () => {
       })
     }
   } catch (pollErr) {
+    if (disposed || requestedRunId !== pipelineRunId.value) return
     monitorUnavailable.value = true
     console.warn('Native pipeline run poll failed:', pollErr)
+  } finally {
+    nativePollInFlight = false
   }
 }
 
 const startProgressPolling = () => {
   stopProgressPolling()
+  if (disposed) return
   const poller = pipelineRunId.value ? pollNativeRunProgress : pollSubmissionProgress
   poller()
   progressPollTimer.value = setInterval(() => {
@@ -1342,6 +1425,20 @@ onMounted(async () => {
   loadingPipeline.value = true
   try {
     const resumeSessionId = Number.parseInt(route.query.sessionId, 10)
+    if (workflowStore.sessionId && (!resumeSessionId || resumeSessionId === workflowStore.sessionId)) {
+      try { pendingRun.value = JSON.parse(sessionStorage.getItem(pendingRunKey()) || 'null') } catch { pendingRun.value = null }
+      const savedRunId = String(route.query.runId || pendingRun.value?.runId || '').trim()
+      if (savedRunId) {
+        if (pendingRun.value?.runId !== savedRunId) pendingRun.value = null
+        pipelineRunId.value = savedRunId
+        processing.value = true
+        statusMessage.value = 'Reconnecting to native pipeline execution...'
+        startProgressPolling()
+        await saveProcessingState()
+        return
+      }
+      pendingRun.value = null
+    }
     let restoredWorkflowState = null
     if (shouldRestoreWorkflowContext(workflowStore, resumeSessionId, {
       force: route.query.resume === 'workflow',
@@ -1433,7 +1530,9 @@ onMounted(async () => {
         pipelineConfig.value = fullPipeline
     }
 
-    const resumeRunId = String(route.query.runId || restoredWorkflowState?.pipeline_run_id || '').trim()
+    try { pendingRun.value = JSON.parse(sessionStorage.getItem(pendingRunKey()) || 'null') } catch { pendingRun.value = null }
+    const resumeRunId = String(route.query.runId || pendingRun.value?.runId || restoredWorkflowState?.pipeline_run_id || '').trim()
+    if (pendingRun.value && pendingRun.value.runId !== resumeRunId) pendingRun.value = null
     const resumeSubmissionId = Number.parseInt(
       route.query.submissionId ?? restoredWorkflowState?.submission_id,
       10
@@ -1446,11 +1545,8 @@ onMounted(async () => {
       success.value = false
       error.value = ''
       statusMessage.value = 'Reconnecting to native pipeline execution...'
-      await persistWorkflowState(workflowStore, 'processing', {
-        submissionId: submissionId.value,
-        pipelineRunId: resumeRunId
-      })
       startProgressPolling()
+      await saveProcessingState()
     } else if (Number.isInteger(resumeSubmissionId) && resumeSubmissionId > 0) {
       submissionId.value = resumeSubmissionId
       pipelineRunId.value = null
@@ -1458,8 +1554,8 @@ onMounted(async () => {
       success.value = false
       error.value = ''
       statusMessage.value = 'Reconnecting to submission processing...'
-      await persistWorkflowState(workflowStore, 'processing', { submissionId: resumeSubmissionId })
       startProgressPolling()
+      await saveProcessingState()
     } else if (workflowStore.sessionId) {
       await persistWorkflowState(workflowStore, 'submit')
     }
@@ -1701,7 +1797,8 @@ const ensureHpcAllocationAndPreflight = async (sessionId) => {
 }
 
 const handleSubmit = async () => {
-  if (loadingPipeline.value || submitting.value) return
+  if (loadingPipeline.value || submitting.value || processing.value) return
+  if (pendingRun.value) { await retryPendingRun(); return }
   submitting.value = true
   processing.value = true
   success.value = false
@@ -1758,57 +1855,18 @@ const handleSubmit = async () => {
         : `Processing ${filePaths.length} files...`
     }
 
-    const response = shouldUseExecutionPlan
-      ? await pipelineService.executePipelineWithPlan(
-        sessionId,
-        pipelineIdentifier,
-        executionPlan.executionItems,
-        effectiveExecutionEnvironmentIsSandbox.value,
-        {
-          asyncExecution: true,
-          abortOnCriticalError: abortOnCriticalError.value
-        }
-      )
-      : shouldUseRecordRerun
-        ? await pipelineService.executePipeline(
-          sessionId,
-          pipelineIdentifier,
-          rerunRecordIds,
-          effectiveExecutionEnvironmentIsSandbox.value,
-          {
-            asyncExecution: true,
-            abortOnCriticalError: abortOnCriticalError.value
-          }
-        )
-        : await pipelineService.executePipelineOnFiles(
-          sessionId,
-          filePaths,
-          effectiveExecutionEnvironmentIsSandbox.value,
-          pipelineIdentifier,
-          {
-            asyncExecution: true,
-            abortOnCriticalError: abortOnCriticalError.value
-          }
-        )
-
-    const createdRunId = String(response.data?.run_id || '').trim()
-    if (!createdRunId) {
-      throw new Error('No pipeline run ID returned by the native execution endpoint.')
+    pendingRun.value = {
+      runId: crypto.randomUUID(), confirmed: false,
+      request: JSON.parse(JSON.stringify({
+        kind: shouldUseExecutionPlan ? 'plan' : shouldUseRecordRerun ? 'records' : 'files',
+        sessionId, identifier: pipelineIdentifier,
+        targets: shouldUseExecutionPlan ? executionPlan.executionItems : shouldUseRecordRerun ? rerunRecordIds : filePaths,
+        isSandbox: effectiveExecutionEnvironmentIsSandbox.value,
+        options: { asyncExecution: true, abortOnCriticalError: abortOnCriticalError.value }
+      }))
     }
-
-    pipelineRunId.value = createdRunId
-    submissionId.value = null
-    if (shouldUseExecutionPlan) {
-      statusMessage.value = `Executing record plan for ${selectedFiles.length} bundle${selectedFiles.length === 1 ? '' : 's'}...`
-    } else {
-      statusMessage.value = shouldUseRecordRerun
-        ? `Reprocessing ${rerunRecordIds.length} records...`
-        : `Processing ${filePaths.length} files...`
-    }
-    await persistWorkflowState(workflowStore, 'processing', {
-      pipelineRunId: createdRunId
-    })
-    startProgressPolling()
+    rememberPendingRun()
+    await submitPendingRun()
 
   } catch (err) {
     console.error('Pipeline execution failed:', err)
@@ -1827,11 +1885,13 @@ const handleSubmit = async () => {
 
 const startNewWorkflow = () => {
   stopProgressPolling()
+  clearPendingRun()
   workflowStore.resetWorkflow()
   router.push('/workflow/upload')
 }
 
 onBeforeUnmount(() => {
+  disposed = true
   stopProgressPolling()
 })
 </script>

@@ -171,6 +171,8 @@ def test_mapping():
             zenodo_record=zenodo_record,
             mapping_config=mapping_config,
             msf_profile=msf_profile,
+            session_id=session_row.id if session_row else None,
+            zenodo_mapping=data.get("zenodo_mapping"),
         )
 
         # 3. Render Template & Validate
@@ -210,6 +212,8 @@ def test_mapping():
             message="Mapping test completed"
         )
 
+    except ValueError as e:
+        return APIResponse.validation_error(str(e))
     except Exception as e:
         logger.error(f"LOD mapping test failed: {e}", exc_info=True)
         return APIResponse.server_error(f"Failed to test mapping: {e}")
@@ -371,11 +375,8 @@ def test_linked_mapping():
             return APIResponse.validation_error('Choose an existing sample row')
         row = df.iloc[index]
         record = data.get('zenodo_record') or {}
-        metadata = build_pipeline_aligned_lod_metadata(msf_service=msf_service, row=row, zenodo_record=record, mapping_config=data.get('mapping_config') or {}, msf_profile=profile)
-        name = str(row.get(profile.get('filename_column'), '')).strip()
-        if not name:
-            return APIResponse.validation_error('The sample row needs a source filename')
-        record = {**record, 'files': [{'key': name}]}
+        metadata = build_pipeline_aligned_lod_metadata(msf_service=msf_service, row=row, zenodo_record=record, mapping_config=data.get('mapping_config') or {}, msf_profile=profile, zenodo_mapping=data.get('zenodo_mapping'), session_id=session_row.id)
+        record, name = record_for_metadata_row(row, profile, record)
         content = generate_linked_data(metadata, record, main_file_key=name)[standard][1]
         return APIResponse.success(data={'json' if standard == 'jsonld' else 'xml': content, 'metadata': metadata, 'row_index_used': index, 'validation': validate_linked_data(content, standard)})
     except (ValueError, OSError) as exc:
