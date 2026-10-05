@@ -43,6 +43,6 @@ export const workflowGuidance = {
   7: {
     title: 'Check the destination before starting',
     hint: 'Sandbox is the Zenodo test repository. Production is the live repository. Each needs a key for that environment.',
-    detail: 'Confirm & Process starts the selected tasks and may create or update Zenodo drafts. A completed processing job is not proof of publication. Afterwards, inspect the generated files, warnings and record status. Track a submitted job under Submissions if you leave this page.',
+    detail: 'Submission readiness checks every selected source and saved setting automatically. Follow its review links to fix blockers, then Check again. Expand Checks still unverified for runtime requirements. Confirm & Process rechecks before allocating resources and may create or update Zenodo drafts. Afterwards, inspect generated files, warnings and record status; completion alone does not establish publication. Track the run under Submissions if you leave this page.',
   },
 }

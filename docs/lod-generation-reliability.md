@@ -44,6 +44,30 @@ The required LOD policy blocks upload when an enabled format fails, including wh
 
 ## Reproducibility and metadata matching
 
+The guided final review runs a read-only submission readiness check across all
+selected sources. It uses the execution source resolver, metadata validators,
+saved record decisions, component manifests, and the bounded geometric input
+validators. It identifies local blockers with links to the existing files,
+metadata, mapping, or pipeline screen. Only enabled metadata formats require
+valid templates. A preview still validates its selected record rather than an
+entire batch.
+
+Readiness creates no files, records, drafts, uploads, allocations, or jobs, and
+does not contact compute or Zenodo services. Runtime installation, credentials,
+remote acceptance, generated-output validation, and required external validators
+remain explicitly unverified. Disconnected Draco checks must be validated later
+on the connected deployment.
+
+The signed readiness token binds the user, session, source and bundle content
+hashes, metadata and spreadsheet settings, template contents, record decisions,
+pipeline version and parameters, destination, workspace settings, and validation
+policy. It expires after one hour for a new request. Execution without a token
+still performs mandatory local checks. A changed state is rejected before a new
+run is queued. Accepted-request retries reconnect before rechecking sources,
+and workers recheck captured state without imposing the token’s one-hour limit
+on queue time. Workers use the pinned pipeline version and reject changed
+source or spreadsheet contents before registration and draft creation.
+
 Preflight binds the pipeline, user, source selection, shared metadata, MSF content, parser options, batch metadata, and selected template contents. Queued runs retain those settings. A changed MSF is rejected before processing. An explicit EDM template is respected for 3D files; automatic template switching does not override the selection.
 
 MSF rows match normalized relative paths first. Basename and case-insensitive fallback are permitted only when unique. Duplicate rows, ambiguous nested filenames, and missing selected-source rows require correction. Use paths such as `collection-a/model.glb` and `collection-b/model.glb` when names repeat. Saved spreadsheet-sheet and CSV parser choices are used during execution. Preview filenames come from the selected row, so image and document rows are not treated as example 3D models. MSF preview endpoints require session access and reject out-of-session paths and symlinks.

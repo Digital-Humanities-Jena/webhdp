@@ -10,8 +10,15 @@
 
       <div class="bg-white shadow rounded-lg p-6">
 
-        <div v-if="!processing && !success && !error">
+        <div v-if="!processing && !success">
           <h2 class="text-xl font-semibold text-gray-900 mb-6">Submission Summary</h2>
+          <div v-if="error && error !== readinessError" role="alert" class="mb-4 rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
+            <p>{{ error }}</p>
+            <ul v-if="recordFailures.length" class="mt-2 list-inside list-disc space-y-1">
+              <li v-for="(failure, index) in recordFailures" :key="index">{{ failure.message }}</li>
+            </ul>
+            <RouterLink v-if="!pipelineConfig" to="/workflow/pipeline" class="inline-flex min-h-11 items-center font-medium underline">Choose an available pipeline</RouterLink>
+          </div>
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
             <!-- Left: Info Column -->
@@ -243,6 +250,26 @@
             </div>
           </div>
 
+          <section class="mt-6 rounded-lg border border-slate-200 bg-slate-50 p-4" aria-labelledby="readiness-title" data-testid="submission-readiness" :aria-busy="readinessBusy">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <h3 id="readiness-title" class="text-sm font-medium text-gray-900">Submission readiness</h3>
+              <button type="button" class="min-h-11 text-sm text-indigo-700 underline disabled:opacity-50" :disabled="loadingPipeline || !pipelineConfig || readinessBusy || submitting" @click="checkReadiness">Check again</button>
+            </div>
+            <p class="text-sm text-slate-700" role="status" aria-live="polite">{{ readinessBusy ? 'Checking all selected sources and saved settings…' : readinessResult?.ready ? `Local checks passed for ${readinessResult.selected_count} selected source${readinessResult.selected_count === 1 ? '' : 's'}.` : readinessResult?.blockers?.length ? 'Resolve the items below before processing.' : 'Readiness is unverified. Use Check again before processing.' }}</p>
+            <ul v-if="readinessResult?.blockers?.length" class="mt-3 space-y-2 text-sm text-rose-800">
+              <li v-for="(item, index) in readinessResult.blockers" :key="index" class="break-words">
+                <span v-if="item.source" class="font-medium break-all">{{ item.source }}: </span><span v-if="item.step">{{ item.step }} — </span>{{ item.message }}
+                <RouterLink :to="item.route" class="ml-1 inline-flex min-h-11 items-center font-medium underline">Review {{ readinessArea(item.route) }}</RouterLink>
+              </li>
+            </ul>
+            <p v-if="readinessError" class="mt-2 text-sm text-rose-800" role="alert">{{ readinessError }}</p>
+            <details v-if="readinessResult?.unverified?.length" class="mt-3 text-sm text-slate-600">
+              <summary class="cursor-pointer">Checks still unverified</summary>
+              <ul class="mt-2 space-y-2"><li v-for="(item, index) in readinessResult.unverified" :key="index"><span v-if="item.step" class="font-medium">{{ item.step }}: </span>{{ item.message }}</li></ul>
+            </details>
+            <p class="mt-2 text-xs text-slate-500">This check creates no drafts or jobs. Processing rechecks the sources and settings before making changes.</p>
+          </section>
+
           <!-- Warnings Based on Steps -->
           <div v-if="isRendererDisabled" class="mt-6 p-4 bg-amber-50 border-l-4 border-amber-400 rounded-r-lg">
             <div class="flex">
@@ -268,7 +295,7 @@
             </button>
             <button
               @click="handleSubmit"
-              :disabled="loadingPipeline || submitting || Boolean(batchResolutionBlockedReason)"
+              :disabled="loadingPipeline || submitting || readinessBusy || !readinessResult?.ready || Boolean(batchResolutionBlockedReason)"
               data-testid="submit-confirm"
               class="px-6 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:opacity-50 transition-colors shadow-sm"
             >
@@ -473,48 +500,13 @@
           </div>
         </div>
 
-        <div v-else-if="error" role="alert" class="text-center py-8">
-          <div class="flex justify-center">
-            <div class="bg-red-100 rounded-full p-3 mb-4">
-              <svg class="h-12 w-12 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-              </svg>
-            </div>
-          </div>
-          <h3 class="text-xl font-bold text-gray-900 mb-2">Processing Failed</h3>
-          <div class="bg-red-50 border border-red-200 rounded-lg p-4 mb-6 text-left inline-block max-w-lg">
-            <p class="text-sm text-red-700">{{ error }}</p>
-            <ul v-if="recordFailures.length" class="mt-3 space-y-1 text-sm text-red-700 list-disc list-inside">
-              <li v-for="(failure, idx) in recordFailures" :key="`record-failure-${idx}`">
-                {{ failure.message }}
-              </li>
-            </ul>
-          </div>
-
-          <div class="flex flex-col-reverse gap-3 sm:flex-row sm:justify-center">
-            <button
-              @click="handleBack"
-              class="px-6 py-2 border border-gray-300 text-gray-700 rounded-md font-medium hover:bg-gray-50 transition-colors"
-            >
-              ← Go Back
-            </button>
-            <button
-              @click="handleSubmit"
-              :disabled="submitting"
-              class="px-6 py-2 bg-indigo-600 text-white rounded-md font-medium hover:bg-indigo-700 transition-colors shadow-sm"
-            >
-              {{ submitting ? 'Retrying...' : 'Retry Submission' }}
-            </button>
-          </div>
-        </div>
-
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { isPermanentProgressError, progressRetryDelay } from '@/utils/progressMonitoring'
 import { useRoute, useRouter } from 'vue-router'
 import { useWorkflowStore } from '@/stores/workflow'
@@ -633,6 +625,9 @@ async function submitPendingRun() {
       const code = err?.error?.code || err?.response?.data?.error?.code
       const status = err?.status || err?.response?.status
       if (['VALIDATION_ERROR', 'OPERATION_CONFLICT', 'SECURITY_ERROR', 'FORBIDDEN'].includes(code) || [400, 401, 403, 404, 409, 422].includes(status)) {
+        const details = err?.error?.details || err?.response?.data?.error?.details || {}
+        readinessResult.value = details.readiness || null
+        readinessError.value = err?.error?.message || err?.message || 'Review the submission and check readiness again.'
         clearPendingRun()
         throw err
       }
@@ -660,7 +655,72 @@ const hpcAllocation = ref(null)
 const componentRuntimeStatus = ref({})
 
 const pipelineConfig = ref(null)
+const pipelineVersion = ref(null)
 const loadingPipeline = ref(true)
+const readinessResult = ref(null)
+const readinessError = ref('')
+const readinessBusy = ref(false)
+let readinessGeneration = 0
+let readinessTimer
+const readinessArea = (path) => ({ '/workflow/files': 'files and record decisions', '/workflow/metadata': 'metadata', '/workflow/edm-selection': 'metadata mappings', '/workflow/pipeline': 'pipeline', '/workflow/submit': 'run status' }[path?.split('?')[0]] || 'settings')
+const readinessInputs = computed(() => JSON.stringify({
+  session: workflowStore.sessionId,
+  files: workflowStore.selectedFiles, pipeline: workflowStore.selectedPipeline,
+  metadata: workflowStore.submissionMetadata, batch: workflowStore.fileMetadataMap,
+  msf: workflowStore.msfPath, mapping: workflowStore.msfMapping,
+  profile: workflowStore.msfProfile, parser: workflowStore.msfParseOptions,
+  batchMode: workflowStore.isBatchMode, lod: workflowStore.lodMinimumViablePrefs,
+  sandbox: effectiveExecutionEnvironmentIsSandbox.value, abort: abortOnCriticalError.value,
+}))
+
+async function prepareSubmissionRequest() {
+  const selectedFiles = workflowStore.selectedFiles || []
+  const sessionId = workflowStore.sessionId
+  const { rerunRecordIds, executionPlan } = await refreshSubmissionPlan(sessionId, selectedFiles)
+  const usePlan = workflowStore.isBatchMode
+  if (usePlan && (executionPlan.unmatchedSelections.length || executionPlan.unresolvedCandidates.length)) {
+    throw new Error('Review the file selection and resolve every saved record decision before processing.')
+  }
+  const useRecords = !usePlan && rerunRecordIds.length === selectedFiles.length && rerunRecordIds.length > 0
+  return {
+    kind: usePlan ? 'plan' : useRecords ? 'records' : 'files', sessionId,
+    identifier: workflowStore.selectedPipeline?.identifier || PIPELINE_ID,
+    targets: usePlan ? executionPlan.executionItems : useRecords ? rerunRecordIds : selectedFiles.map(file => file.absolute_path || file.path).filter(Boolean),
+    isSandbox: effectiveExecutionEnvironmentIsSandbox.value,
+    options: { asyncExecution: true, abortOnCriticalError: abortOnCriticalError.value, expectedVersion: pipelineVersion.value },
+  }
+}
+
+async function checkReadiness() {
+  const generation = ++readinessGeneration
+  const checkedInputs = readinessInputs.value
+  readinessBusy.value = true
+  readinessResult.value = null
+  readinessError.value = ''
+  try {
+    const prepared = await prepareSubmissionRequest()
+    const response = await pipelineService.checkSubmissionReadiness(prepared.identifier, {
+      session_id: prepared.sessionId, is_sandbox: prepared.isSandbox,
+      abort_on_critical_error: prepared.options.abortOnCriticalError, expected_version: prepared.options.expectedVersion,
+      [prepared.kind === 'plan' ? 'execution_items' : prepared.kind === 'records' ? 'record_ids' : 'local_file_paths']: prepared.targets,
+    })
+    if (disposed || generation !== readinessGeneration || checkedInputs !== readinessInputs.value) return null
+    const result = response.data
+    if (typeof result?.ready !== 'boolean' || !Array.isArray(result.blockers) || (result.ready && !result.readiness_token)) {
+      throw new Error('Readiness could not be confirmed. Check again before processing.')
+    }
+    readinessResult.value = result
+    prepared.options.readinessToken = result.readiness_token
+    return result.ready ? prepared : null
+  } catch (err) {
+    if (!disposed && generation === readinessGeneration) {
+      readinessError.value = err?.error?.message || err?.message || 'Readiness is unavailable. Check your connection and try again.'
+    }
+    return null
+  } finally {
+    if (!disposed && generation === readinessGeneration) readinessBusy.value = false
+  }
+}
 
 const activeSteps = computed(() => {
   if (!pipelineConfig.value?.steps) return []
@@ -1331,6 +1391,8 @@ const handleFailedSubmissionPayload = (payload) => {
   clearPendingRun()
   processing.value = false
   success.value = false
+  readinessResult.value = null
+  readinessError.value = ''
   executionTimings.value = payload?.timings || null
   submissionResult.value = payload?.result || null
   const failures = parseRecordFailuresFromResult(payload?.result)
@@ -1476,6 +1538,16 @@ const startProgressPolling = () => {
   tick()
 }
 
+watch(readinessInputs, () => {
+  readinessGeneration++
+  readinessResult.value = null
+  readinessBusy.value = false
+  clearTimeout(readinessTimer)
+  if (!loadingPipeline.value && !processing.value && !success.value && !pendingRun.value) {
+    readinessTimer = setTimeout(checkReadiness, 250)
+  }
+})
+
 onMounted(async () => {
   loadingPipeline.value = true
   try {
@@ -1532,58 +1604,22 @@ onMounted(async () => {
     ])
     isSandbox.value = (sessionContext.value?.publishing_context?.default_zenodo_environment || 'sandbox') !== 'production'
 
-    let pipelineId = workflowStore.selectedPipeline?.identifier || PIPELINE_ID
+    const pipelineId = workflowStore.selectedPipeline?.identifier || PIPELINE_ID
 
-    // 1. Fetch all available pipelines to validate or fallback
+    // Keep the selected outcome explicit if a pipeline becomes unavailable.
     const pipelinesRes = await pipelineService.listPipelines()
     const availablePipelines = pipelinesRes.data?.pipelines || []
 
-    // 2. Check if primary choice exists
     const match = availablePipelines.find(p => p.identifier === pipelineId)
-
-    if (match) {
-        // We have the config directly from the list usually, or we can fetch details
-        pipelineConfig.value = match
-        // Update store just in case
-        if (!workflowStore.selectedPipeline) {
-           workflowStore.setSelectedPipeline(match)
-        }
-    } else if (availablePipelines.length > 0) {
-        // Fallback: Pick the first available pipeline (e.g. metadata_only)
-        console.warn(`Pipeline '${pipelineId}' not found. Falling back to '${availablePipelines[0].identifier}'`)
-        pipelineId = availablePipelines[0].identifier
-        pipelineConfig.value = availablePipelines[0]
-        workflowStore.setSelectedPipeline(availablePipelines[0])
-
-        toast.info(`Default pipeline unavailable. Switched to '${availablePipelines[0].name}'.`)
-    } else {
-        throw new Error("No processing pipelines are available on the server.")
+    if (!match) {
+      throw new Error('The selected pipeline is unavailable. Choose an available pipeline before processing.')
     }
 
-    // 3. Fetch full details if needed (merged config etc)
     const res = await pipelineService.getPipeline(pipelineId)
+    pipelineVersion.value = res.data.pipeline?.version || res.data.pipeline?.active_version || null
     const fullPipeline = res.data.pipeline?.config || res.data.pipeline
 
-    // 4. SMART SELECTION: If the primary choice has disabled steps (due to low resource),
-    // check if 'metadata_only' is a better fit.
-    const rendererStep = fullPipeline?.steps?.find(s => s.id === 'fast_renderer')
-    const isDisabledBySystem = rendererStep?.disabled_by_system || rendererStep?.description?.includes('DISABLED')
-
-    if (pipelineId === 'render' && isDisabledBySystem) {
-        const metadataOnly = availablePipelines.find(p => p.identifier === 'metadata_only')
-        if (metadataOnly) {
-            console.info("Default 'render' is restricted by system. Switching to 'metadata_only'.")
-            pipelineId = 'metadata_only'
-            const metaRes = await pipelineService.getPipeline(pipelineId)
-            pipelineConfig.value = metaRes.data.pipeline?.config || metaRes.data.pipeline
-            workflowStore.setSelectedPipeline(availablePipelines.find(p => p.identifier === 'metadata_only'))
-            toast.info("Low-resource mode detected: using 'Metadata-Only' pipeline.")
-        } else {
-            pipelineConfig.value = fullPipeline
-        }
-    } else {
-        pipelineConfig.value = fullPipeline
-    }
+    pipelineConfig.value = fullPipeline
 
     try { pendingRun.value = JSON.parse(sessionStorage.getItem(pendingRunKey()) || 'null') } catch { pendingRun.value = null }
     const resumeRunId = String(route.query.runId || pendingRun.value?.runId || restoredWorkflowState?.pipeline_run_id || '').trim()
@@ -1620,6 +1656,7 @@ onMounted(async () => {
     error.value = "Failed to load pipeline configuration. " + (e.message || "")
   } finally {
     loadingPipeline.value = false
+    if (!disposed && !processing.value && !success.value && !error.value) await checkReadiness()
   }
 })
 
@@ -1718,16 +1755,17 @@ const resolveRerunRecordIds = async (sessionId, selectedFiles) => {
     const resolvedRecordIds = []
     const seenRecordIds = new Set()
     for (const selectedFile of selectedFiles) {
-      const candidates = []
-      const seenCandidates = new Set()
-      buildSelectedFileMatchKeys(selectedFile).forEach((key) => {
-        for (const record of recordsByKey.get(key) || []) {
-          const recordId = Number.parseInt(record?.local_record_id, 10)
-          if (!Number.isInteger(recordId) || seenCandidates.has(recordId)) continue
-          seenCandidates.add(recordId)
-          candidates.push(record)
-        }
-      })
+      const keys = buildSelectedFileMatchKeys(selectedFile)
+      const matching = (prefix) => [...new Map(keys.filter(key => key.startsWith(prefix))
+        .flatMap(key => recordsByKey.get(key) || [])
+        .map(record => [record.local_record_id, record])).values()]
+      let candidates = matching('id:')
+      if (!candidates.length) candidates = matching('path:')
+      if (!candidates.length) {
+        candidates = matching('name:')
+        const sourcePaths = new Set(candidates.map(record => normalizeMatchValue(record.source_file_path)))
+        if (sourcePaths.size > 1) throw new Error('Existing records have ambiguous filenames. Review the file selection using exact source paths.')
+      }
 
       const chosenRecord = choosePreferredRerunRecord(candidates)
       const chosenRecordId = Number.parseInt(chosenRecord?.local_record_id, 10)
@@ -1740,8 +1778,8 @@ const resolveRerunRecordIds = async (sessionId, selectedFiles) => {
 
     return resolvedRecordIds
   } catch (err) {
-    console.warn('Failed to resolve canonical rerun records, falling back to file-based submission:', err)
-    return []
+    if (err?.message?.includes('ambiguous filenames')) throw err
+    throw new Error('Could not check existing records. Check your connection and try readiness again.')
   }
 }
 
@@ -1855,7 +1893,7 @@ const handleSubmit = async () => {
   if (loadingPipeline.value || submitting.value || processing.value) return
   if (pendingRun.value) { await retryPendingRun(); return }
   submitting.value = true
-  processing.value = true
+  processing.value = false
   success.value = false
   error.value = ''
   submissionId.value = null
@@ -1873,52 +1911,15 @@ const handleSubmit = async () => {
   statusMessage.value = 'Preparing files for processing...'
 
   try {
-    const selectedFiles = Array.isArray(workflowStore.selectedFiles) ? workflowStore.selectedFiles : []
-    const filePaths = selectedFiles.map(file => file.absolute_path || file.path).filter(Boolean)
-    const sessionId = workflowStore.sessionId
-    const pipelineIdentifier = workflowStore.selectedPipeline?.identifier || PIPELINE_ID
-
-    if (!sessionId) throw new Error("No session ID found.")
-
-    await ensureHpcAllocationAndPreflight(sessionId)
-    const { rerunRecordIds, executionPlan } = await refreshSubmissionPlan(sessionId, selectedFiles)
-    const shouldUseExecutionPlan = workflowStore.isBatchMode
-    const shouldUseRecordRerun = !shouldUseExecutionPlan && rerunRecordIds.length === selectedFiles.length && rerunRecordIds.length > 0
-    if (shouldUseExecutionPlan) {
-      if (executionPlan.unmatchedSelections.length > 0) {
-        throw new Error('At least one selected bundle could not be matched to the saved record-resolution plan.')
-      }
-      if (executionPlan.unresolvedCandidates.length > 0) {
-        throw new Error('At least one selected bundle still requires a record-resolution decision.')
-      }
-      if (executionPlan.executionItems.filter((item) => item.action !== 'skip').length === 0) {
-        throw new Error('All selected bundles are currently marked as skip.')
-      }
-    } else if (!shouldUseRecordRerun && (!filePaths || filePaths.length === 0)) {
-      throw new Error("No file paths found.")
-    }
-
-    if (shouldUseExecutionPlan) {
-      const actionCounts = executionPlan.actionCounts || {}
-      statusMessage.value = `Executing record plan for ${selectedFiles.length} bundle${selectedFiles.length === 1 ? '' : 's'}...`
-      if (actionCounts.create_version > 0) {
-        statusMessage.value = `Creating ${actionCounts.create_version} version draft${actionCounts.create_version === 1 ? '' : 's'} and processing the selected bundle plan...`
-      }
-    } else {
-      statusMessage.value = shouldUseRecordRerun
-        ? `Reprocessing ${rerunRecordIds.length} records...`
-        : `Processing ${filePaths.length} files...`
-    }
-
+    const prepared = await checkReadiness()
+    if (!prepared) return
+    // Local blockers are resolved before any allocation request.
+    await ensureHpcAllocationAndPreflight(prepared.sessionId)
+    processing.value = true
+    statusMessage.value = 'Processing the checked submission…'
     pendingRun.value = {
       runId: crypto.randomUUID(), confirmed: false,
-      request: JSON.parse(JSON.stringify({
-        kind: shouldUseExecutionPlan ? 'plan' : shouldUseRecordRerun ? 'records' : 'files',
-        sessionId, identifier: pipelineIdentifier,
-        targets: shouldUseExecutionPlan ? executionPlan.executionItems : shouldUseRecordRerun ? rerunRecordIds : filePaths,
-        isSandbox: effectiveExecutionEnvironmentIsSandbox.value,
-        options: { asyncExecution: true, abortOnCriticalError: abortOnCriticalError.value }
-      }))
+      request: JSON.parse(JSON.stringify(prepared)),
     }
     rememberPendingRun()
     await submitPendingRun()
@@ -1947,6 +1948,8 @@ const startNewWorkflow = () => {
 
 onBeforeUnmount(() => {
   disposed = true
+  readinessGeneration++
+  clearTimeout(readinessTimer)
   stopProgressPolling()
 })
 </script>

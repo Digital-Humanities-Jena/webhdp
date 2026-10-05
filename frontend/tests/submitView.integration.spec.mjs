@@ -22,6 +22,10 @@ describe('SubmitView MSW integration', () => {
     preflightRequests = 0
 
     server.use(
+      http.post(apiV2Url('/pipelines/render/readiness'), () => jsonResponse({ data: {
+        ready: true, blockers: [], selected_count: 1, readiness_token: 'checked-settings',
+        unverified: [{ message: 'Compute connectivity is unverified until runtime preparation.' }],
+      } })),
       http.get(apiV1Url('/sessions/42'), () => jsonResponse({
         data: {
           session: {
@@ -341,4 +345,101 @@ describe('SubmitView MSW integration', () => {
 
     wrapper.unmount()
   })
+  async function mountReview() {
+    const pinia = activateTestPinia()
+    const store = useWorkflowStore(pinia)
+    store.setSessionId(42)
+    store.setBatchMode(true)
+    const files = [{ file_id: 1, absolute_path: '/tmp/dataset/model-a.glb', filename: 'model-a.glb' }]
+    store.setUploadedFiles(files)
+    store.setSelectedFiles(files)
+    store.setSelectedPipeline({ identifier: 'render', name: 'Render' })
+    store.setSubmissionMetadata({ title: 'Museum collection' })
+    const mounted = await mountWithApp(SubmitView, { pinia, route: '/workflow/submit' })
+    await flushPromises()
+    await flushPromises()
+    return mounted.wrapper
+  }
+
+  it('shows actionable blockers and makes no allocation or execution requests', async () => {
+    server.use(http.post(apiV2Url('/pipelines/render/readiness'), () => jsonResponse({ data: {
+      ready: false, selected_count: 1,
+      blockers: [{ source: 'model-a.glb', message: 'Export a static GLB first.', route: '/workflow/files' }],
+      unverified: [{ message: 'Compute connectivity is unverified.' }],
+    } })))
+    const wrapper = await mountReview()
+    expect(wrapper.get('[data-testid="submit-confirm"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('a[href="/workflow/files"]').text()).toContain('Review files')
+    expect(wrapper.get('[data-testid="submission-readiness"] details').attributes('open')).toBeUndefined()
+    expect(allocationRequests).toBe(0)
+    expect(executeRequest).toBeNull()
+    wrapper.unmount()
+  })
+
+  it('rechecks immediately before submission and stops on newly discovered blockers', async () => {
+    let checks = 0
+    server.use(http.post(apiV2Url('/pipelines/render/readiness'), () => jsonResponse({ data: ++checks === 1 ? {
+      ready: true, blockers: [], selected_count: 1, readiness_token: 'first-check',
+    } : { ready: false, selected_count: 1, blockers: [{ message: 'The spreadsheet row is missing.', route: '/workflow/edm-selection' }] } })))
+    const wrapper = await mountReview()
+    await wrapper.get('[data-testid="submit-confirm"]').trigger('click')
+    await flushPromises()
+    await flushPromises()
+    expect(checks).toBe(2)
+    expect(wrapper.text()).toContain('The spreadsheet row is missing.')
+    expect(allocationRequests).toBe(0)
+    expect(executeRequest).toBeNull()
+    wrapper.unmount()
+  })
+
+  it('keeps an unavailable check unverified and recovers through the inline retry', async () => {
+    let checks = 0
+    server.use(http.post(apiV2Url('/pipelines/render/readiness'), () => ++checks === 1
+      ? jsonResponse({ error: { message: 'Readiness temporarily unavailable' } }, { status: 503 })
+      : jsonResponse({ data: { ready: true, blockers: [], selected_count: 1, readiness_token: 'recovered-check' } })))
+    const wrapper = await mountReview()
+    expect(wrapper.text()).toContain('Readiness is unverified.')
+    expect(wrapper.get('[data-testid="submit-confirm"]').attributes('disabled')).toBeDefined()
+    await wrapper.findAll('button').find(button => button.text() === 'Check again').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Local checks passed for 1 selected source.')
+    expect(wrapper.get('[data-testid="submit-confirm"]').attributes('disabled')).toBeUndefined()
+    expect(allocationRequests).toBe(0)
+    expect(executeRequest).toBeNull()
+    wrapper.unmount()
+  })
+
+  it('requires new readiness after a rejected stale execution', async () => {
+    server.use(http.post(apiV2Url('/pipelines/render/execute'), () => jsonResponse({ error: {
+      code: 'OPERATION_CONFLICT', message: 'The source changed. Check readiness again.', details: { readiness_stale: true },
+    } }, { status: 409 })))
+    const wrapper = await mountReview()
+    await wrapper.get('[data-testid="submit-confirm"]').trigger('click')
+    await flushPromises()
+    await flushPromises()
+    expect(wrapper.text()).toContain('The source changed. Check readiness again.')
+    expect(wrapper.get('[data-testid="submit-confirm"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).not.toContain('Local checks passed')
+    wrapper.unmount()
+  })
+
+  it('keeps failed record details in review and invalidates the earlier readiness', async () => {
+    server.use(http.get(apiV2Url('/runs/run-42'), () => jsonResponse({ data: { run: {
+      run_id: 'run-42', status: 'failed', result: {
+        success: false, error: 'Processing stopped before draft creation.',
+        failed_records: [{ file_path: 'model-a.glb', error: 'Source changed while queued.' }],
+      },
+    } } })))
+    const wrapper = await mountReview()
+    await wrapper.get('[data-testid="submit-confirm"]').trigger('click')
+    await flushPromises()
+    await flushPromises()
+    expect(wrapper.text()).toContain('Processing stopped before draft creation.')
+    expect(wrapper.text()).toContain('model-a.glb: Source changed while queued.')
+    expect(wrapper.get('[data-testid="submit-confirm"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).not.toContain('Local checks passed')
+    expect(executeRequest).not.toBeNull()
+    wrapper.unmount()
+  })
+
 })

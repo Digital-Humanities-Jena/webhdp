@@ -3,17 +3,18 @@ import { apiV1, apiV2, fulfillJson, mockCurrentUser, mockSetupStatus, seedAuthTo
 
 const file = { file_id: 101, name: 'model.glb', filename: 'model.glb', children: [] }
 
-async function seedWorkflow(page: Page, batch = false, files = [file]) {
+async function seedWorkflow(page: Page, batch = false, files = [file], pipeline: { identifier: string, name: string } | null = null) {
   await page.route(/\/api\/v\d\//, route => fulfillJson(route, { data: {} }))
   await mockSetupStatus(page)
   await mockCurrentUser(page)
   await seedAuthToken(page)
-  await page.addInitScript(({ batch, files }) => {
+  await page.addInitScript(({ batch, files, pipeline }) => {
     localStorage.setItem('webhdp_cookie_notice_v1', 'accepted')
-    sessionStorage.setItem('workflowState', JSON.stringify({ sessionId: 42, currentStep: 4,
-      uploadedFiles: files, selectedFiles: files, submissionMetadata: {}, isBatchMode: batch,
+    sessionStorage.setItem('workflowState', JSON.stringify({ sessionId: 42, currentStep: pipeline ? 7 : 4,
+      uploadedFiles: files, selectedFiles: files, selectedPipeline: pipeline,
+      submissionMetadata: pipeline ? { title: 'Museum model' } : {}, isBatchMode: batch,
       msfPath: batch ? '/session/metadata.csv' : null, msfMapping: {}, fileMetadataMap: {} }))
-  }, { batch, files })
+  }, { batch, files, pipeline })
   await page.route(apiV1('/admin/storage-status'), route => fulfillJson(route, {
     data: { active_storage: 'server', config: { storage_mode: 'server_only' } },
   }))
@@ -145,4 +146,138 @@ test('recommends a compatible pipeline and explains its publication outcome', as
   await expect(page.getByText('Uploads files to a Zenodo draft; publication is a separate action')).toBeVisible()
   await page.getByText('Outputs and requirements').last().click()
   await expect(page.getByText('Requires: Zenodo credential for the selected environment.')).toBeVisible()
+})
+
+const localReady = { ready: true, blockers: [], selected_count: 1, pipeline_version: '1.0.0',
+  readiness_token: 'current-settings', unverified: [{ message: 'Compute connectivity and generated outputs still need runtime checks.' }] }
+const blocked = { ...localReady, ready: false, readiness_token: null, blockers: [{
+  source: 'collection/模型.glb', message: 'Supply the required creators.', route: '/workflow/metadata',
+}] }
+
+async function seedSubmission(page: Page, compute = false) {
+  const pipeline = { identifier: 'render', name: 'Prepare model' }
+  await seedWorkflow(page, false, [{ ...file, absolute_path: '/session/uploads/model.glb' }], pipeline)
+  await page.route(apiV1('/sessions/42'), route => fulfillJson(route, { data: { session: {
+    id: 42, publishing_context: { default_zenodo_environment: 'sandbox' },
+  } } }))
+  await page.route(apiV1('/sessions/42/records'), route => fulfillJson(route, { data: { records: [] } }))
+  const config = { name: pipeline.name, steps: [
+    { id: compute ? 'fast_renderer' : 'lod_generation', enabled: true, name: 'Prepare model' },
+    { id: 'zenodo_draft', enabled: true, name: 'Create draft' },
+  ] }
+  await page.route(apiV2('/pipelines'), route => fulfillJson(route, { data: { pipelines: [pipeline] } }))
+  await page.route(apiV2('/pipelines/render'), route => fulfillJson(route, { data: { pipeline: { ...pipeline, version: '1.0.0', config } } }))
+}
+
+for (const width of [320, 1280]) {
+  test(`readiness links corrections and keeps runtime details collapsed at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 1000 })
+    await seedSubmission(page)
+    let corrected = false
+    await page.route(apiV2('/pipelines/render/readiness'), route => fulfillJson(route, { data: corrected ? localReady : blocked }))
+    await page.goto('/workflow/submit')
+    const readiness = page.getByTestId('submission-readiness')
+    await expect(readiness).toContainText('collection/模型.glb')
+    await expect(page.getByRole('link', { name: 'Review metadata', exact: true })).toHaveAttribute('href', '/workflow/metadata')
+    await expect(page.getByTestId('submit-confirm')).toBeDisabled()
+    await expect(readiness.locator('details')).not.toHaveAttribute('open')
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+    await page.screenshot({ path: testInfo.outputPath('submission-readiness.png'), fullPage: true })
+    corrected = true
+    await page.getByRole('button', { name: 'Check again', exact: true }).click()
+    await expect(readiness).toContainText('Local checks passed for 1 selected source.')
+    await expect(page.getByTestId('submit-confirm')).toBeEnabled()
+    await readiness.getByText('Checks still unverified', { exact: true }).click()
+    await expect(readiness.getByText(localReady.unverified[0].message)).toBeVisible()
+  })
+
+  test(`submission rechecks before any allocation or execution at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 1000 })
+    await seedSubmission(page, true)
+    let checks = 0
+    let resourceRequests = 0
+    await page.route(apiV2('/pipelines/render/readiness'), route => fulfillJson(route, { data: ++checks === 1 ? localReady : blocked }))
+    await page.route(apiV1('/hpc-link/status'), route => { resourceRequests++; return fulfillJson(route, { data: {} }) })
+    await page.route(apiV1('/hpc-link/allocations'), route => { resourceRequests++; return fulfillJson(route, { data: {} }) })
+    await page.route(apiV2('/pipelines/render/execute'), route => { resourceRequests++; return fulfillJson(route, { data: {} }) })
+    await page.goto('/workflow/submit')
+    await expect(page.getByTestId('submit-confirm')).toBeEnabled()
+    await page.getByTestId('submit-confirm').click()
+    await expect(page.getByTestId('submission-readiness')).toContainText('Supply the required creators.')
+    await expect(page.getByTestId('submit-confirm')).toBeDisabled()
+    expect(checks).toBe(2)
+    expect(resourceRequests).toBe(0)
+    expect(await page.evaluate(() => sessionStorage.getItem('guided-pipeline-run:42'))).toBeNull()
+  })
+}
+
+test('readiness outages retry inline and rejected stale execution requires another check', async ({ page }) => {
+  await seedSubmission(page)
+  let offline = true
+  await page.route(apiV2('/pipelines/render/readiness'), route => offline
+    ? fulfillJson(route, { error: { message: 'Readiness service unavailable' } }, 503)
+    : fulfillJson(route, { data: localReady }))
+  await page.route(apiV2('/pipelines/render/execute'), route => fulfillJson(route, { error: {
+    code: 'OPERATION_CONFLICT', message: 'The source changed. Check readiness again.', details: { readiness_stale: true },
+  } }, 409))
+  await page.goto('/workflow/submit')
+  await expect(page.getByTestId('submission-readiness').getByRole('alert')).toHaveText('Readiness service unavailable')
+  await expect(page.getByTestId('submit-confirm')).toBeDisabled()
+  offline = false
+  await page.getByRole('button', { name: 'Check again', exact: true }).click()
+  await expect(page.getByTestId('submit-confirm')).toBeEnabled()
+  await page.getByTestId('submit-confirm').click()
+  await expect(page.getByTestId('submission-readiness')).toContainText('The source changed. Check readiness again.')
+  await expect(page.getByTestId('submit-confirm')).toBeDisabled()
+  expect(await page.evaluate(() => sessionStorage.getItem('guided-pipeline-run:42'))).toBeNull()
+})
+
+test('a late readiness response cannot validate a changed destination', async ({ page }) => {
+  await seedSubmission(page)
+  let releaseFirst: (() => void) | undefined
+  const firstResponse = new Promise<void>(resolve => { releaseFirst = resolve })
+  let requests = 0
+  await page.route(apiV2('/pipelines/render/readiness'), async route => {
+    if (++requests === 1) {
+      await firstResponse
+      await fulfillJson(route, { data: localReady })
+    } else {
+      expect(route.request().postDataJSON().is_sandbox).toBe(false)
+      await fulfillJson(route, { data: blocked })
+    }
+  })
+  await page.goto('/workflow/submit')
+  await expect(page.getByTestId('submission-readiness')).toHaveAttribute('aria-busy', 'true')
+  await page.getByRole('radio', { name: /Production/ }).check()
+  await expect(page.getByTestId('submission-readiness')).toContainText('Supply the required creators.')
+  const lateResponse = page.waitForResponse(response => response.url().endsWith('/pipelines/render/readiness'))
+  releaseFirst?.()
+  await lateResponse
+  await expect(page.getByTestId('submission-readiness')).toContainText('Supply the required creators.')
+  await expect(page.getByTestId('submit-confirm')).toBeDisabled()
+})
+
+test('reload reconnects an accepted run without new readiness or submission', async ({ page }) => {
+  await seedSubmission(page)
+  let checks = 0
+  let executions = 0
+  await page.route(apiV2('/pipelines/render/readiness'), route => { checks++; return fulfillJson(route, { data: localReady }) })
+  await page.route(apiV2('/pipelines/render/execute'), route => {
+    executions++
+    expect(route.request().postDataJSON().readiness_token).toBe(localReady.readiness_token)
+    return fulfillJson(route, { data: { run_id: 'accepted-readiness-run' } }, 202)
+  })
+  await page.route(apiV2('/runs/accepted-readiness-run'), route => fulfillJson(route, { data: {
+    run: { public_id: 'accepted-readiness-run', status: 'pending', progress: { status_message: 'Waiting for processing' } },
+  } }))
+  await page.goto('/workflow/submit')
+  await expect(page.getByTestId('submit-confirm')).toBeEnabled()
+  await page.getByTestId('submit-confirm').click()
+  await expect.poll(() => executions).toBe(1)
+  await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem('guided-pipeline-run:42') || '{}').confirmed)).toBe(true)
+  const originalChecks = checks
+  await page.reload()
+  await expect(page.getByTestId('submission-readiness')).toHaveCount(0)
+  expect(executions).toBe(1)
+  expect(checks).toBe(originalChecks)
 })

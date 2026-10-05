@@ -26,6 +26,9 @@ Review the outcome before starting, especially for a custom pipeline.
 5. Choose **Prepare a Zenodo draft** (the metadata-only plan) to upload without an
    HPC allocation. The selected environment still needs a Zenodo credential.
    Confirm the draft/upload/publication outcome in **Review & start**.
+   **Submission readiness** checks all selected sources and saved settings
+   automatically. Follow a blocker’s **Review** link to the existing correction
+   screen, save the change, then return and use **Check again**.
 6. Open the resulting record to inspect attachments and validation reports.
    Publication is a separate action when the pipeline outcome says so.
 
@@ -44,7 +47,11 @@ Review the outcome before starting, especially for a custom pipeline.
 5. Review **Mapped**, **Entered**, **Inferred**, and **Default** labels. A filename
    title or an `Unknown` creator can make an export structurally complete while
    still needing descriptive improvement. Export or preserve reusable mappings.
-6. Select the compatible processing plan and start. Review failed and skipped
+6. Select the compatible processing plan and review **Submission readiness**.
+   This checks each selected spreadsheet match and saved record decision,
+   including rows beyond the preview. Supply actual creators; an automatically
+   filled `Unknown` value does not satisfy submission readiness. Start after
+   local checks pass. Review failed and skipped
    records individually; successful records need no duplicate submission.
 
 ## Inspect or simplify a 3D model
@@ -98,4 +105,25 @@ To apply edited mapping or template contents, start a new pipeline run.
 If processing acknowledgement was lost, reconnect to the saved operation before
 starting another one. Interrupted runs retain their local results. Review those
 results and any outstanding HPC activity before rerunning. See
-[metadata reliability and recovery](../lod-generation-reliability.md).
+  [metadata reliability and recovery](../lod-generation-reliability.md).
+
+## Understand the final readiness check
+
+Local checks cover source availability and contents, model dependencies,
+spreadsheet matching, record decisions, metadata, enabled templates, and known
+component input contracts. The final screen keeps the selected pipeline; if it
+is unavailable, choose an available pipeline and review its outcome again.
+
+**Checks still unverified** lists checks that need processing or a remote
+service: compute connectivity and installation, Zenodo credentials and
+acceptance, generated exports, and required external validators. Local success
+does not verify these. With Draco disconnected, its runtime checks remain
+unverified and require later validation on the connected deployment.
+
+**Confirm & Process** repeats local checks before requesting compute resources.
+The server checks again before accepting a new run and before its worker creates
+bundles, records, or drafts. Changed inputs or settings require another check;
+the saved check expires after one hour for a new request. An accepted queued run
+retains its pipeline version and captured metadata settings, and checks source
+contents again when it starts. Reconnect an accepted run using its existing
+operation ID instead of submitting another request.

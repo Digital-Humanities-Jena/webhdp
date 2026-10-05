@@ -79,6 +79,13 @@ export default {
     })
   },
 
+  checkSubmissionReadiness(identifier, payload) {
+    return requestV2({
+      method: 'post', url: `/pipelines/${identifier}/readiness`, data: payload,
+      timeout: 60000, suppressGlobalError: true,
+    })
+  },
+
   // Execute pipeline on existing record IDs for a specific session.
   executePipeline(
     sessionId,
@@ -98,7 +105,8 @@ export default {
         abort_on_critical_error: options.abortOnCriticalError === true,
         request_id: options.requestId,
         expected_version: options.expectedVersion,
-        preflight_token: options.preflightToken
+        preflight_token: options.preflightToken,
+        readiness_token: options.readinessToken
       }
     })
   },
@@ -177,7 +185,8 @@ export default {
         abort_on_critical_error: options.abortOnCriticalError === true,
         request_id: options.requestId,
         expected_version: options.expectedVersion,
-        preflight_token: options.preflightToken
+        preflight_token: options.preflightToken,
+        readiness_token: options.readinessToken
       }
     })
   },
@@ -200,7 +209,8 @@ export default {
         abort_on_critical_error: options.abortOnCriticalError === true,
         request_id: options.requestId,
         expected_version: options.expectedVersion,
-        preflight_token: options.preflightToken
+        preflight_token: options.preflightToken,
+        readiness_token: options.readinessToken
       }
     })
   },

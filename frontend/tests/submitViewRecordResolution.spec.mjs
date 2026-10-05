@@ -41,6 +41,7 @@ const mocked = vi.hoisted(() => ({
     getSession: vi.fn(),
   },
   pipelineService: {
+    checkSubmissionReadiness: vi.fn(),
     listPipelines: vi.fn(),
     getPipeline: vi.fn(),
     executePipelineWithPlan: vi.fn(),
@@ -119,6 +120,9 @@ describe('SubmitView record-resolution plan', () => {
     Object.values(mocked.toast).forEach((fn) => fn.mockReset())
     Object.values(mocked.fileService).forEach((fn) => fn.mockReset())
     Object.values(mocked.pipelineService).forEach((fn) => fn.mockReset())
+    mocked.pipelineService.checkSubmissionReadiness.mockResolvedValue({ data: {
+      ready: true, blockers: [], unverified: [], selected_count: 1, readiness_token: 'checked-settings',
+    } })
     Object.values(mocked.submissionService).forEach((fn) => fn.mockReset())
     Object.values(mocked.workflowState).forEach((fn) => fn.mockClear?.())
 
@@ -253,6 +257,8 @@ describe('SubmitView record-resolution plan', () => {
       true,
       {
         asyncExecution: true,
+        expectedVersion: null,
+        readinessToken: 'checked-settings',
         abortOnCriticalError: false,
         requestId: expect.any(String),
       }
@@ -329,6 +335,8 @@ describe('SubmitView record-resolution plan', () => {
       false,
       {
         asyncExecution: true,
+        expectedVersion: null,
+        readinessToken: 'checked-settings',
         abortOnCriticalError: false,
         requestId: expect.any(String),
       },
