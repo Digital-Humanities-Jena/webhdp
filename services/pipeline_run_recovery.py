@@ -3,13 +3,29 @@ import json
 import os
 import socket
 import subprocess
-from datetime import datetime
+from datetime import datetime, timezone
 from functools import wraps
 from contextlib import nullcontext
 
 from database.database import db
-from database.models import PipelineRun, PipelineRunStatus, Session, StepRun
+from database.models import PipelineRun, PipelineRunStatus, PlaygroundRun, Session, StepRun
 from services.pipeline_execution_lock import PipelineAlreadyRunning, session_pipeline_lock, project_lock_held
+from services.registry_lock import OperationConflict, registry_lock
+
+DISPATCH_RESERVATION_SECONDS = 120
+
+
+def dispatch_lock(run):
+    return registry_lock(f'run-dispatch:{run.__tablename__}:{run.public_id}')
+
+
+def dispatch_reservation_expired(run):
+    if not run.started_at:
+        return False
+    started = run.started_at
+    if started.tzinfo:
+        started = started.astimezone(timezone.utc).replace(tzinfo=None)
+    return (datetime.utcnow() - started).total_seconds() >= DISPATCH_RESERVATION_SECONDS
 
 
 def process_owner():
@@ -55,7 +71,11 @@ def reconcile_run(run):
             dispatch = request.get('_dispatch') or {}
             abandoned = run.status == PipelineRunStatus.RUNNING
             if run.status == PipelineRunStatus.PENDING:
-                abandoned = dispatch.get('state') == 'preparing' and owner_alive(dispatch.get('owner')) is False
+                if dispatch.get('state') == 'preparing':
+                    # A shared dispatch lock proves an active request across hosts.
+                    # Expiry only cancels unstarted work; late deliveries see FAILED.
+                    with dispatch_lock(run):
+                        abandoned = owner_alive(dispatch.get('owner')) is False or dispatch_reservation_expired(run)
                 if dispatch.get('task_id'):
                     try:
                         from celery_app import celery
@@ -72,20 +92,21 @@ def reconcile_run(run):
             result.update(success=False, status='failed', interrupted=True, error=message)
             run.result_json = json.dumps(result)
             run.completed_at = datetime.utcnow()
-            for step in StepRun.query.filter(StepRun.pipeline_run_id == run.id, StepRun.status.in_(['pending', 'running'])).all():
-                step.status = 'failed'
-                step.error_message = message
-                step.completed_at = run.completed_at
-            session.status = 'failed'
+            if isinstance(run, PipelineRun):
+                for step in StepRun.query.filter(StepRun.pipeline_run_id == run.id, StepRun.status.in_(['pending', 'running'])).all():
+                    step.status = 'failed'
+                    step.error_message = message
+                    step.completed_at = run.completed_at
+                session.status = 'failed'
             db.session.commit()
-    except PipelineAlreadyRunning:
+    except (PipelineAlreadyRunning, OperationConflict):
         return
 
 
-def resolve_dispatch_failure(run_id):
+def resolve_dispatch_failure(run_id, model=PipelineRun):
     """Cancel unstarted work without overwriting a worker's accepted result."""
     db.session.rollback()
-    run = PipelineRun.query.filter_by(public_id=run_id).one()
+    run = model.query.filter_by(public_id=run_id).one()
     session = db.session.get(Session, run.session_id)
     lock = session_pipeline_lock(session.hdpc_path) if session and session.hdpc_path else nullcontext()
     try:
@@ -98,21 +119,42 @@ def resolve_dispatch_failure(run_id):
             run.error_message = message
             run.completed_at = datetime.utcnow()
             run.result_json = json.dumps({'success': False, 'status': 'failed', 'error': message})
+            if isinstance(run, PipelineRun) and session:
+                session.status = 'failed'
             db.session.commit()
     except PipelineAlreadyRunning:
         pass  # The running worker owns the final outcome.
 
 
+def cancel_pending_run(run):
+    session = db.session.get(Session, run.session_id)
+    if not session or not session.hdpc_path or not os.path.isdir(os.path.dirname(session.hdpc_path)):
+        raise OperationConflict('The run workspace is unavailable.')
+    with dispatch_lock(run), session_pipeline_lock(session.hdpc_path):
+        db.session.refresh(run)
+        if run.status != PipelineRunStatus.PENDING:
+            raise OperationConflict('Only a queued run can be cancelled. Refresh its status.')
+        message = 'This run was cancelled before processing. Existing files and drafts were kept.'
+        run.status = PipelineRunStatus.FAILED
+        run.error_message = message
+        run.completed_at = datetime.utcnow()
+        run.result_json = json.dumps({'success': False, 'status': 'failed', 'cancelled': True, 'error': message})
+        if isinstance(run, PipelineRun):
+            session.status = 'failed'
+        db.session.commit()
+
+
 def require_available_session(session_id, run_id=None):
     """Honor queued reservations as well as workers already holding a lock."""
-    active = PipelineRun.query.filter(PipelineRun.session_id == session_id,
-        PipelineRun.status.in_([PipelineRunStatus.PENDING, PipelineRunStatus.RUNNING]))
-    if run_id:
-        active = active.filter(PipelineRun.public_id != run_id)
-    for other in active.all():
-        reconcile_run(other)
-        if other.status in {PipelineRunStatus.PENDING, PipelineRunStatus.RUNNING}:
-            raise PipelineAlreadyRunning(other.public_id)
+    for model in (PipelineRun, PlaygroundRun):
+        active = model.query.filter(model.session_id == session_id,
+            model.status.in_([PipelineRunStatus.PENDING, PipelineRunStatus.RUNNING]))
+        if run_id:
+            active = active.filter(model.public_id != run_id)
+        for other in active.all():
+            reconcile_run(other)
+            if other.status in {PipelineRunStatus.PENDING, PipelineRunStatus.RUNNING}:
+                raise PipelineAlreadyRunning(other.public_id, 'playground' if model is PlaygroundRun else 'pipeline')
 
 
 def guard_run_reservation(function):
@@ -123,11 +165,15 @@ def guard_run_reservation(function):
             return function(self, identifier, session_id=session_id, **kwargs)
         session = db.session.get(Session, session_id)
         lock = session_pipeline_lock(session.hdpc_path) if session and session.hdpc_path else nullcontext()
-        if session:
-            for run in PipelineRun.query.filter(PipelineRun.session_id == session_id,
-                    PipelineRun.status.in_([PipelineRunStatus.PENDING, PipelineRunStatus.RUNNING])).all():
-                reconcile_run(run)
+        def check_available():
+            if session:
+                try:
+                    require_available_session(session_id)
+                except PipelineAlreadyRunning as exc:
+                    raise OperationConflict('This session already has an active run.', details=exc.details) from exc
+        check_available()
         with lock:
+            check_available()
             return function(self, identifier, session_id=session_id, **kwargs)
     return guarded
 
@@ -143,6 +189,8 @@ def guard_native_run(function):
             run = PipelineRun.query.filter_by(public_id=run_id, session_id=session.id).first()
             if run:
                 reconcile_run(run)
+                if run.status in {PipelineRunStatus.COMPLETED, PipelineRunStatus.FAILED}:
+                    return function(self, identifier, execution_context, **kwargs)
         require_available_session(session.id, run_id)
         with session_pipeline_lock(session.hdpc_path):
             require_available_session(session.id, run_id)

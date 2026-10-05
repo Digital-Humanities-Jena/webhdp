@@ -102,6 +102,8 @@ class _DummyZenodoHttp:
                     "doi": "10.5072/zenodo.9001",
                     "conceptrecid": "7001",
                     "conceptdoi": "10.5072/zenodo.7001",
+                    "submitted": True,
+                    "state": "done",
                     "files": [
                         {"filename": "model.glb", "key": "model.glb", "checksum": "md5:abc", "filesize": 100},
                         {"filename": "preview.png", "key": "preview.png", "checksum": "md5:def", "filesize": 200},

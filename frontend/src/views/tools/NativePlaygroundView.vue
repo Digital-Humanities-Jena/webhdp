@@ -264,7 +264,7 @@ async function loadSessions() {
   sessionsError.value = ''
   try {
     const response = await fileService.listSessions()
-    sessions.value = response.data?.sessions || []
+    sessions.value = (response.data?.sessions || []).filter((session) => session.permissions?.can_edit !== false && session.access_mode !== 'explorer_only')
   } catch (err) {
     sessionsError.value = err?.error?.message || err?.message || 'Could not load sessions. Upload a file first if you have no sessions yet.'
   } finally {

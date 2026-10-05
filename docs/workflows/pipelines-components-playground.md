@@ -215,6 +215,7 @@ Entry points:
 - UI redirect: `/tools/native-playground`
 - API: `/api/v2/playground/execute`
 - API: `/api/v2/playground/runs/<run_id>`
+- API: `/api/v2/playground/runs/<run_id>/cancel`
 - API: `/api/v2/playground/runs/<run_id>/artifacts/<artifact_index>`
 - API: `/api/v2/playground/sessions/<session_id>/file`
 
@@ -229,8 +230,14 @@ declare compatibility.
 Workflow:
 1. Select a registered Playground-capable component.
 2. Select session-backed files and parameter values.
-3. Execute the component through the native adapter system.
+3. Queue the component through the native adapter system. The browser saves the request ID and reconnects to the same run after a refresh or reopening the dialog.
 4. Review JSON results, logs, and downloadable artifacts.
+
+Execution requires edit permission on a mutable session. Readers of an institution-shared session can inspect its runs and download permitted session files. All file and directory inputs, including imported components' parameters, resolve inside the selected session; traversal and symlink escapes are rejected before dispatch and checked again by the worker.
+
+API clients can send `async_execution: true` and a UUID `request_id`. Retry an unconfirmed request with the same ID and unchanged payload. The run pins its registered component version and execution profile. `timeout_seconds` defaults to 3600 and accepts values from 1 to 86400. Synchronous execution remains available for existing clients.
+
+Queued runs can be cancelled from Playground, Pipeline Constructor, or submission progress. Cancellation persists before returning, so a late delivery cannot execute the cancelled request. A preparation reservation abandoned by a web process expires after 120 seconds when no dispatcher holds its shared lock. Running jobs remain protected by the project execution lock regardless of age. Interrupted work retains its files and drafts for review.
 
 Complete when:
 - The Playground run reaches completed or failed state and artifacts are available.

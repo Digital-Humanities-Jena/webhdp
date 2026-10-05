@@ -21,6 +21,9 @@ from services.hdpc_local_service import (
     normalize_hdpc_record_origin,
 )
 from services.hdpc_schema_service import connect_hdpc, ensure_hdpc_schema
+from services.zenodo_operation_service import (
+    begin_operation, finish_operation, pending_operation, record_response, uncertain_result,
+)
 
 
 def _utc_now_iso() -> str:
@@ -261,6 +264,126 @@ def _store_record_payload(
         ),
     )
     _upsert_links(cursor, int(record_id), payload.get("links", {}))
+
+
+def _save_operation_record(conn, cursor, record_id, payload, operation, *, published=False):
+    _store_record_payload(cursor, record_id, payload=payload, record_status='published' if published else 'draft')
+    response_column = 'last_publish_api_response' if published else 'creation_api_response'
+    cursor.execute(f'UPDATE zenodo_records SET {response_column} = ? WHERE record_id = ?',
+                   (json.dumps(payload), record_id))
+    _store_snapshot(cursor, record_id, 'publish_completed' if published else 'draft_created', payload)
+    if published:
+        _sync_uploaded_files(cursor, record_id, payload)
+    else:
+        cursor.execute("""UPDATE record_files_map SET upload_status = CASE
+            WHEN upload_status IN ('disabled', 'removal_pending') THEN 'disabled'
+            WHEN upload_status LIKE 'validation_pending%' THEN 'validation_pending' ELSE 'pending' END,
+            upload_timestamp = NULL WHERE record_id = ?""", (record_id,))
+    finish_operation(cursor, operation)
+    conn.commit()
+    return {'success': True, 'message': 'Zenodo state reconciled.' if published else 'Zenodo draft connected.',
+            'local_record_db_id': record_id, 'zenodo_response': payload, 'reconciled': True}
+
+
+def _reconcile_publication(conn, cursor, record_id, operation, is_sandbox, token, http, *, confirmed_not_published=False):
+    remote_id = operation.get('remote_id')
+    if not remote_id:
+        return uncertain_result(conn, operation)
+    saved = _json_loads(operation.get('response_json'), {})
+    if str(saved.get('id') or '') == str(remote_id) and (saved.get('submitted') is True or saved.get('state') == 'done'):
+        return _save_operation_record(conn, cursor, record_id, saved, operation, published=True)
+    try:
+        response = http.get(f'{_base_url(is_sandbox)}/api/deposit/depositions/{remote_id}',
+                            params={'access_token': token}, timeout=30)
+        payload = _response_payload(response)
+        draft_payload = payload
+        draft_verified = (response.status_code == 200 and str(payload.get('id') or '') == str(remote_id)
+                          and payload.get('submitted') is False and payload.get('state') == 'inprogress')
+        published = (response.status_code == 200 and str(payload.get('id') or '') == str(remote_id)
+                     and (payload.get('submitted') is True or payload.get('state') == 'done'))
+        if not published:
+            response = http.get(f'{_base_url(is_sandbox)}/api/records/{remote_id}',
+                                params={'access_token': token}, timeout=30)
+            payload = _response_payload(response)
+            published = response.status_code == 200 and str(payload.get('id') or '') == str(remote_id)
+        if published:
+            return _save_operation_record(conn, cursor, record_id, payload, operation, published=True)
+        if confirmed_not_published and draft_verified and response.status_code == 404:
+            _store_record_payload(cursor, record_id, payload=draft_payload, record_status='draft')
+            _store_snapshot(cursor, record_id, 'publication_absence_confirmed', draft_payload)
+            finish_operation(cursor, operation, state='confirmed_not_published')
+            conn.commit()
+            return {'success': True, 'message': 'The draft remains unpublished. Publication can be tried again.'}
+    except Exception as exc:
+        return uncertain_result(conn, operation, exc)
+    return uncertain_result(conn, operation)
+
+
+def _metadata_contains(actual, expected):
+    if isinstance(expected, dict):
+        return isinstance(actual, dict) and all(_metadata_contains(actual.get(key), value) for key, value in expected.items())
+    if isinstance(expected, list):
+        return isinstance(actual, list) and len(actual) == len(expected) and all(
+            _metadata_contains(value, wanted) for value, wanted in zip(actual, expected))
+    return actual == expected
+
+
+@serialize_project_mutation
+def reconcile_remote_operation(hdpc_path, local_record_id, *, deposition_id=None,
+                               confirmed_not_created=False, confirmed_not_published=False, access_token=None, http=requests):
+    conn = connect_hdpc(hdpc_path, timeout=30, row_factory=sqlite3.Row)
+    try:
+        project_id = ensure_hdpc_schema(conn, hdpc_path)
+        cursor = conn.cursor()
+        row = cursor.execute('SELECT is_sandbox FROM zenodo_records WHERE record_id = ?', (local_record_id,)).fetchone()
+        if not row:
+            return {'success': False, 'error': 'Record not found'}
+        is_sandbox = bool(row['is_sandbox'])
+        token = _resolved_access_token(cursor, project_id, is_sandbox, access_token)
+        operation = pending_operation(cursor, local_record_id, 'publish')
+        if operation:
+            return _reconcile_publication(conn, cursor, local_record_id, operation, is_sandbox, token, http,
+                                          confirmed_not_published=confirmed_not_published)
+        operation = pending_operation(cursor, local_record_id, 'create_draft')
+        if not operation:
+            return {'success': True, 'message': 'No unresolved remote operation remains.'}
+        if confirmed_not_created:
+            if operation.get('remote_id'):
+                return uncertain_result(conn, operation, 'A remote draft ID is already known. Reconnect that draft.')
+            finish_operation(cursor, operation, state='confirmed_not_created')
+            cursor.execute('UPDATE zenodo_records SET last_api_error = NULL WHERE record_id = ?', (local_record_id,))
+            _store_snapshot(cursor, local_record_id, 'draft_creation_absence_confirmed', {'operation_id': operation['operation_id']})
+            conn.commit()
+            return {'success': True, 'message': 'Absence confirmed. Draft creation can be tried again.'}
+        saved = _json_loads(operation.get('response_json'), {})
+        if saved.get('id') and str(saved['id']) == str(operation.get('remote_id')):
+            return _save_operation_record(conn, cursor, local_record_id, saved, operation)
+        remote_id = str(deposition_id or operation.get('remote_id') or '')
+        if not remote_id.isdigit():
+            return uncertain_result(conn, operation, 'Enter the numeric Zenodo draft ID after checking your account.')
+        try:
+            response = http.get(f'{_base_url(is_sandbox)}/api/deposit/depositions/{remote_id}',
+                                params={'access_token': token}, timeout=30)
+            payload = _response_payload(response)
+        except Exception as exc:
+            return uncertain_result(conn, operation, exc)
+        if response.status_code != 200 or str(payload.get('id') or '') != remote_id:
+            return uncertain_result(conn, operation, 'The remote draft could not be verified with this record’s credentials.')
+        if payload.get('submitted') or payload.get('state') == 'done':
+            return uncertain_result(conn, operation, 'This draft is already submitted. Review its publication state.')
+        expected = json.loads(operation['request_json']).get('metadata') or {}
+        actual = payload.get('metadata') or {}
+        for field in ('title', 'description', 'creators', 'version'):
+            if field in expected and not _metadata_contains(actual.get(field), expected[field]):
+                return uncertain_result(conn, operation, 'The draft metadata differs from the original request. Check the draft ID.')
+        existing = cursor.execute('SELECT record_id FROM zenodo_records WHERE zenodo_record_id = ? AND is_sandbox = ? AND record_id != ?',
+                                  (remote_id, int(is_sandbox), local_record_id)).fetchone()
+        if existing:
+            return uncertain_result(conn, operation, 'This draft is already connected to another local record.')
+        record_response(conn, operation, payload)
+        return _save_operation_record(conn, cursor, local_record_id, payload, operation)
+    finally:
+        conn.close()
 
 
 def _store_api_error(cursor: sqlite3.Cursor, record_id: int, payload: dict[str, Any], fallback_message: str) -> None:
@@ -851,6 +974,9 @@ def create_api_draft(
 
         is_sandbox = bool(row["is_sandbox"])
         token = _resolved_access_token(cursor, project_id, is_sandbox, access_token)
+        publication = pending_operation(cursor, int(local_record_id), 'publish')
+        if publication:
+            return uncertain_result(conn, publication)
         stored_payload = _json_loads(row["record_metadata_json"], {})
         existing_id = str(row["zenodo_record_id"] or "").strip()
         if existing_id:
@@ -886,71 +1012,33 @@ def create_api_draft(
             conn.commit()
             return {"success": True, "message": "Existing Zenodo draft reused.",
                     "local_record_db_id": int(local_record_id), "zenodo_response": payload}
+        pending = pending_operation(cursor, int(local_record_id), 'create_draft')
+        if pending:
+            if pending.get('remote_id'):
+                conn.commit()
+                return reconcile_remote_operation(hdpc_path, int(local_record_id), access_token=access_token, http=http)
+            return uncertain_result(conn, pending)
+        request_payload = _metadata_payload_for_draft(stored_payload)
         _store_snapshot(cursor, int(local_record_id), "prepared_before_draft", stored_payload)
-        response = http.post(
-            f"{_base_url(is_sandbox)}/api/deposit/depositions",
-            params={"access_token": token},
-            json=_metadata_payload_for_draft(stored_payload),
-            timeout=120,
-        )
-        response_payload = _json_loads(getattr(response, "text", None), {})
-        if hasattr(response, "json"):
-            try:
-                response_payload = response.json()
-            except ValueError:
-                pass
-
+        operation = begin_operation(conn, int(local_record_id), 'create_draft', request_payload)
+        try:
+            response = http.post(f"{_base_url(is_sandbox)}/api/deposit/depositions",
+                                 params={"access_token": token}, json=request_payload, timeout=120)
+            response_payload = _response_payload(response)
+        except Exception as exc:
+            return uncertain_result(conn, operation, exc)
+        if response.status_code >= 500:
+            return uncertain_result(conn, operation)
         if response.status_code not in {200, 201}:
-            cursor.execute(
-                "UPDATE zenodo_records SET last_api_error = ?, last_updated_timestamp = ? WHERE record_id = ?",
-                (json.dumps(response_payload or {"error": getattr(response, "text", "")}), _utc_now_iso(), int(local_record_id)),
-            )
+            message = str(response_payload.get('message') or getattr(response, 'text', '') or 'Zenodo draft creation failed')
+            finish_operation(cursor, operation, state='rejected', error=message)
+            _store_api_error(cursor, int(local_record_id), response_payload, message)
             conn.commit()
-            return {
-                "success": False,
-                "error": str((response_payload or {}).get("message") or getattr(response, "text", "") or "Zenodo draft creation failed"),
-                "zenodo_response": response_payload,
-            }
-
-        now_iso = _utc_now_iso()
-        cursor.execute(
-            """
-            UPDATE zenodo_records
-            SET record_status = 'draft',
-                zenodo_record_id = ?,
-                zenodo_doi = ?,
-                concept_rec_id = ?,
-                concept_doi = ?,
-                record_metadata_json = ?,
-                creation_api_response = ?,
-                last_api_error = NULL,
-                last_updated_timestamp = ?
-            WHERE record_id = ?
-            """,
-            (
-                str(response_payload.get("id") or "") or None,
-                str(response_payload.get("doi") or "") or None,
-                str(response_payload.get("conceptrecid") or "") or None,
-                str(response_payload.get("conceptdoi") or "") or None,
-                json.dumps(response_payload),
-                json.dumps(response_payload),
-                now_iso,
-                int(local_record_id),
-            ),
-        )
-        _upsert_links(cursor, int(local_record_id), response_payload.get("links", {}))
-        _store_snapshot(cursor, int(local_record_id), "draft_created", response_payload, http_status=response.status_code)
-        cursor.execute(
-            "UPDATE record_files_map SET upload_status = CASE WHEN upload_status IN ('disabled', 'removal_pending') THEN 'disabled' WHEN upload_status LIKE 'validation_pending%' THEN 'validation_pending' ELSE 'pending' END, upload_timestamp = NULL WHERE record_id = ?",
-            (int(local_record_id),),
-        )
-        conn.commit()
-        return {
-            "success": True,
-            "message": "Zenodo draft record created successfully.",
-            "local_record_db_id": int(local_record_id),
-            "zenodo_response": response_payload,
-        }
+            return {'success': False, 'error': message, 'zenodo_response': response_payload}
+        if not response_payload.get('id'):
+            return uncertain_result(conn, operation, 'Zenodo returned no draft identity.')
+        record_response(conn, operation, response_payload)
+        return _save_operation_record(conn, cursor, int(local_record_id), response_payload, operation)
     finally:
         conn.close()
 
@@ -977,6 +1065,10 @@ def discard_draft(
         ).fetchone()
         if not row:
             return {"success": False, "error": f"Record {local_record_id} not found", "error_code": "not_found"}
+        for operation_type in ('create_draft', 'publish'):
+            operation = pending_operation(cursor, int(local_record_id), operation_type)
+            if operation:
+                return uncertain_result(conn, operation)
 
         status = str(row["record_status"] or "").strip().lower()
         if status != "draft":
@@ -1104,20 +1196,15 @@ def publish_record(
     access_token: str | None = None,
     http=requests,
 ) -> Dict[str, Any]:
-    if os.environ.get("ZENODO_PUBLISH_ENABLED", "true").lower() not in {"true", "1", "yes", "on"}:
-        return {"success": False, "error": "Zenodo publication is disabled by this deployment"}
-    from services.lod_artifact_service import record_lod_readiness
-    readiness = record_lod_readiness(hdpc_path, local_record_id)
-    if not readiness['ready']:
-        return {'success': False, 'error': 'Metadata validation is incomplete. Retry metadata generation before publishing.', 'readiness': readiness}
-    if readiness['pending_upload_count']:
-        return {'success': False, 'error': 'Files still need syncing. Upload pending files before publishing.', 'readiness': readiness}
+    publish_enabled = os.environ.get('ZENODO_PUBLISH_ENABLED', 'true').lower() in {'true', '1', 'yes', 'on'}
+    if not publish_enabled and not os.path.isfile(hdpc_path):
+        return {'success': False, 'error': 'Zenodo publication is disabled by this deployment'}
     conn = connect_hdpc(hdpc_path, timeout=30, row_factory=sqlite3.Row)
     try:
         project_id = ensure_hdpc_schema(conn, hdpc_path)
         cursor = conn.cursor()
         row = cursor.execute(
-            "SELECT is_sandbox, record_metadata_json FROM zenodo_records WHERE record_id = ?",
+            "SELECT is_sandbox, record_status, zenodo_record_id, record_metadata_json FROM zenodo_records WHERE record_id = ?",
             (int(local_record_id),),
         ).fetchone()
         if not row:
@@ -1125,80 +1212,52 @@ def publish_record(
         is_sandbox = bool(row["is_sandbox"])
         token = _resolved_access_token(cursor, project_id, is_sandbox, access_token)
         payload = _json_loads(row["record_metadata_json"], {})
+        operation = pending_operation(cursor, int(local_record_id), 'publish')
+        if operation:
+            return _reconcile_publication(conn, cursor, int(local_record_id), operation, is_sandbox, token, http)
+        creation = pending_operation(cursor, int(local_record_id), 'create_draft')
+        if creation:
+            return uncertain_result(conn, creation)
+        if row['record_status'] == 'published':
+            return {'success': True, 'message': 'Record is already published.', 'zenodo_response': payload, 'reconciled': True}
+        if row['record_status'] != 'draft':
+            return {'success': False, 'error': 'Only a connected draft can be published.'}
+        if not publish_enabled:
+            return {"success": False, "error": "Zenodo publication is disabled by this deployment"}
+        from services.lod_artifact_service import record_lod_readiness
+        conn.commit()
+        readiness = record_lod_readiness(hdpc_path, local_record_id)
+        if not readiness['ready']:
+            return {'success': False, 'error': 'Metadata validation is incomplete. Retry metadata generation before publishing.', 'readiness': readiness}
+        if readiness['pending_upload_count']:
+            return {'success': False, 'error': 'Files still need syncing. Upload pending files before publishing.', 'readiness': readiness}
         publish_url = ((payload.get("links") or {}).get("publish") if isinstance(payload, dict) else None) or ""
-        deposition_id = str(payload.get("id") or payload.get("record_id") or "").strip()
+        deposition_id = str(row['zenodo_record_id'] or payload.get("id") or "").strip()
         if not publish_url:
             return {"success": False, "error": "Publish link missing in stored Zenodo draft"}
 
-        response = http.post(publish_url, params={"access_token": token}, timeout=120)
-        response_payload = _json_loads(getattr(response, "text", None), {})
-        if hasattr(response, "json"):
-            try:
-                response_payload = response.json()
-            except ValueError:
-                pass
-
-        if response.status_code == 500 and deposition_id:
-            recheck = http.get(
-                f"{_base_url(is_sandbox)}/api/records/{deposition_id}",
-                params={"access_token": token},
-                timeout=30,
-            )
-            if recheck.status_code == 200:
-                try:
-                    response_payload = recheck.json()
-                except ValueError:
-                    response_payload = {}
-                response = recheck
-
+        operation = begin_operation(conn, int(local_record_id), 'publish', {}, remote_id=deposition_id)
+        try:
+            response = http.post(publish_url, params={"access_token": token}, timeout=120)
+            response_payload = _response_payload(response)
+        except Exception as exc:
+            result = _reconcile_publication(conn, cursor, int(local_record_id), operation, is_sandbox, token, http)
+            if not result['success']:
+                return uncertain_result(conn, operation, exc)
+            return result
+        if response.status_code >= 500:
+            return _reconcile_publication(conn, cursor, int(local_record_id), operation, is_sandbox, token, http)
         if response.status_code not in {200, 202}:
-            cursor.execute(
-                "UPDATE zenodo_records SET last_api_error = ?, last_updated_timestamp = ? WHERE record_id = ?",
-                (json.dumps(response_payload or {"error": getattr(response, "text", "")}), _utc_now_iso(), int(local_record_id)),
-            )
+            message = str(response_payload.get('message') or getattr(response, 'text', '') or 'Zenodo publish failed')
+            finish_operation(cursor, operation, state='rejected', error=message)
+            _store_api_error(cursor, int(local_record_id), response_payload, message)
             conn.commit()
-            return {
-                "success": False,
-                "error": str((response_payload or {}).get("message") or getattr(response, "text", "") or "Zenodo publish failed"),
-                "zenodo_response": response_payload,
-            }
-
-        now_iso = _utc_now_iso()
-        cursor.execute(
-            """
-            UPDATE zenodo_records
-            SET record_status = 'published',
-                zenodo_record_id = ?,
-                zenodo_doi = ?,
-                concept_rec_id = ?,
-                concept_doi = ?,
-                record_metadata_json = ?,
-                last_publish_api_response = ?,
-                last_api_error = NULL,
-                last_updated_timestamp = ?
-            WHERE record_id = ?
-            """,
-            (
-                str(response_payload.get("id") or "") or None,
-                str(response_payload.get("doi") or "") or None,
-                str(response_payload.get("conceptrecid") or "") or None,
-                str(response_payload.get("conceptdoi") or "") or None,
-                json.dumps(response_payload),
-                json.dumps(response_payload),
-                now_iso,
-                int(local_record_id),
-            ),
-        )
-        _upsert_links(cursor, int(local_record_id), response_payload.get("links", {}))
-        _store_snapshot(cursor, int(local_record_id), "publish_completed", response_payload, http_status=response.status_code)
-        _sync_uploaded_files(cursor, int(local_record_id), response_payload if isinstance(response_payload, dict) else {})
-        conn.commit()
-        return {
-            "success": True,
-            "message": "Zenodo record published successfully.",
-            "local_record_db_id": int(local_record_id),
-            "zenodo_response": response_payload,
-        }
+            return {'success': False, 'error': message, 'zenodo_response': response_payload}
+        if (str(response_payload.get('id') or '') != deposition_id or
+                not (response_payload.get('submitted') is True or response_payload.get('state') == 'done')):
+            return _reconcile_publication(conn, cursor, int(local_record_id), operation, is_sandbox, token, http)
+        record_response(conn, operation, response_payload)
+        return _save_operation_record(conn, cursor, int(local_record_id), response_payload, operation, published=True)
     finally:
         conn.close()
 
@@ -1255,6 +1314,10 @@ def upload_files_for_deposition(
         ).fetchone()
         if not row:
             return {"success": False, "error": f"Record {local_record_id} not found"}
+        for operation_type in ('create_draft', 'publish'):
+            operation = pending_operation(cursor, int(local_record_id), operation_type)
+            if operation:
+                return uncertain_result(conn, operation)
         from services.lod_artifact_service import record_lod_readiness
         readiness = record_lod_readiness(hdpc_path, local_record_id)
         if not readiness['ready']:

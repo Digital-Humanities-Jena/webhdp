@@ -287,6 +287,9 @@ class PlaygroundExecutionRequestSchema(BaseModel):
     parameters: Dict[str, Any] = Field(default_factory=dict)
     profile_id: Optional[str] = None
     is_sandbox: bool = True
+    request_id: Optional[str] = None
+    async_execution: bool = False
+    timeout_seconds: int = Field(default=3600, gt=0, le=86400)
 
 
 class PipelineConstructorPreflightRequestSchema(BaseModel):

@@ -668,6 +668,20 @@ def start_upload_coordinator(self, session_id, zip_path, msf_path, storage_mode,
 
 
 @celery.task(bind=True, acks_late=True, reject_on_worker_lost=True)
+def execute_playground_task(self, run_id):
+    from services.pipeline_execution_lock import PipelineAlreadyRunning
+    from services.pipeline_run_recovery import resolve_dispatch_failure
+    from database.models import PlaygroundRun
+    try:
+        return current_app.native_pipeline_service.execute_playground_run(run_id)
+    except PipelineAlreadyRunning as exc:
+        raise self.retry(exc=exc, countdown=15, max_retries=None)
+    except Exception:
+        resolve_dispatch_failure(run_id, PlaygroundRun)
+        raise
+
+
+@celery.task(bind=True, acks_late=True, reject_on_worker_lost=True)
 def execute_submission_pipeline_task(
     self,
     submission_id,
@@ -703,6 +717,16 @@ def execute_submission_pipeline_task(
 
     try:
         delivery = getattr(getattr(self, "request", None), "delivery_info", None) or {}
+        if precreated_run_public_id:
+            from database.models import PipelineRunStatus
+            from services.pipeline_run_recovery import reconcile_run
+            saved_run = PipelineRun.query.filter_by(public_id=precreated_run_public_id, session_id=db_session_id).first()
+            if saved_run:
+                reconcile_run(saved_run)
+                if saved_run.status in {PipelineRunStatus.COMPLETED, PipelineRunStatus.FAILED}:
+                    return {'submission_id': submission_id, 'run_id': saved_run.public_id,
+                            'status': saved_run.status.value, 'result': json.loads(saved_run.result_json or '{}'),
+                            'timings': json.loads(saved_run.timings_json or '{}')}
         if not precreated_run_public_id and delivery.get("redelivered") is True:
             # Older callers have no stable native run identity. Never replay their remote actions.
             from services.pipeline_execution_lock import session_pipeline_lock
@@ -751,6 +775,10 @@ def execute_submission_pipeline_task(
             precreated_run_public_id=precreated_run_public_id,
         )
         result_success = bool(execution_output.get("result", {}).get("success", True))
+        if execution_output.get('reused'):
+            return {'submission_id': submission_id, 'run_id': precreated_run_public_id,
+                    'status': 'completed' if result_success else 'failed',
+                    'result': execution_output['result'], 'timings': execution_output['timings']}
 
         if submission_id is not None:
             submission = db.session.get(Submission, submission_id)

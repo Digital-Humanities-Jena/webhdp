@@ -297,6 +297,9 @@
             <button type="button" :disabled="submitting" class="text-indigo-700 underline disabled:opacity-50" @click="retryPendingRun">Retry this request</button>
             <p class="text-sm text-slate-600">This uses the same operation ID and will reconnect if processing has already started.</p>
           </div>
+          <div v-if="nativeRunStatus === 'pending'" class="mb-4">
+            <button type="button" :disabled="cancellingNativeRun" class="text-indigo-700 underline disabled:opacity-50" @click="cancelNativeRun">{{ cancellingNativeRun ? 'Cancelling…' : 'Cancel queued run' }}</button>
+          </div>
           <p v-if="workflowSaveWarning" role="status" class="max-w-md mx-auto mb-4 text-sm text-amber-800">{{ workflowSaveWarning }}</p>
           <ProgressBar v-if="!monitoringStopped" class="max-w-md mx-auto mb-6" :percentage="processingProgress?.percent" label="Processing progress" />
 
@@ -575,6 +578,20 @@ const handleMonitorError = (err) => {
   }
 }
 const pendingRun = ref(null)
+const nativeRunStatus = ref('')
+const cancellingNativeRun = ref(false)
+async function cancelNativeRun() {
+  if (!pipelineRunId.value || nativeRunStatus.value !== 'pending' || cancellingNativeRun.value) return
+  cancellingNativeRun.value = true
+  try {
+    await pipelineService.cancelPipelineRun(pipelineRunId.value)
+    await pollNativeRunProgress()
+  } catch (err) {
+    statusMessage.value = err?.error?.message || err?.message || 'Cancellation could not be confirmed. Reconnecting to the run.'
+  } finally {
+    cancellingNativeRun.value = false
+  }
+}
 let disposed = false
 let nativePollInFlight = false
 const workflowSaveWarning = ref('')
@@ -1394,6 +1411,7 @@ const pollNativeRunProgress = async () => {
     monitorUnavailable.value = false
     monitorFailures = 0
     const runPayload = response.data?.run || {}
+    nativeRunStatus.value = runPayload.status || ''
     if (runPayload.run_id && pendingRun.value) {
       pendingRun.value.confirmed = true
       rememberPendingRun()

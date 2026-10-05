@@ -216,6 +216,7 @@ Complete when:
 - Missing session access should be diagnosed through ownership, collaboration, and admin/moderator policy.
 - Broken `.hdpc` imports should be checked against schema compatibility and file availability.
 - Versioning failures should distinguish local eligibility from remote Zenodo draft or concept state.
+- A lost draft or publication acknowledgement appears in Record Detail as an unresolved Zenodo operation. Check remote state there before retrying. Reconnect an unknown draft by its numeric ID, or explicitly confirm its absence after reviewing the publishing account. Publication retries require confirmation of an authenticated, unpublished draft when the original outcome remains uncertain. The operation journal retains the request intent and verified response across process or local commit failures.
 - Batch operation failures should be reviewed per target rather than rerunning the whole set blindly.
 - Provenance gaps should be traced to source registration, pipeline outputs, and `.hdpc` evidence.
 

@@ -63,6 +63,7 @@ from services.hdpc_shared_export_service import (
 )
 from services.hdpc_provenance_service import build_hdpc_provenance
 from services.hdpc_zenodo_service import discard_draft as discard_local_zenodo_draft
+from services.hdpc_zenodo_service import reconcile_remote_operation
 from services.session_batch_history_service import (
     get_task_entry as get_session_batch_task_entry,
     list_task_entries as list_session_batch_task_entries,
@@ -3674,6 +3675,32 @@ def discard_session_draft(session_id, local_record_id):
             exc_info=True,
         )
         return APIResponse.server_error("Failed to discard draft")
+
+
+@session_bp.route("/<int:session_id>/records/<int:local_record_id>/reconcile", methods=["POST"])
+@jwt_required()
+def reconcile_session_record(session_id, local_record_id):
+    """Verify an uncertain Zenodo operation using the record's own environment."""
+    session, _, error_response = get_session_with_permission(session_id, permission='edit', require_mutable=True)
+    if error_response is not None:
+        return error_response
+    hdpc_path = _resolve_existing_hdpc_path(session.hdpc_path)
+    if not hdpc_path:
+        return APIResponse.error('SOURCE_UNAVAILABLE', 'Session project file is unavailable.', 503)
+    context = read_hdpc_record_context(hdpc_path, local_record_id)
+    if not context:
+        return APIResponse.not_found('Record not found in this session')
+    record = context['traceability']['record']
+    environment = 'sandbox' if record.get('is_sandbox') else 'production'
+    token_context = publishing_context_service.resolve_token_for_session(session, environment)
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict) or any(not isinstance(payload.get(key, False), bool) for key in ('confirmed_not_created', 'confirmed_not_published')):
+        return APIResponse.validation_error('Expected a draft ID or an explicit absence confirmation.')
+    result = reconcile_remote_operation(hdpc_path, local_record_id,
+        deposition_id=payload.get('deposition_id'), confirmed_not_created=payload.get('confirmed_not_created') is True,
+        confirmed_not_published=payload.get('confirmed_not_published') is True,
+        access_token=token_context.get('token'))
+    return APIResponse.success(data=result)
 
 
 @session_bp.route("/<int:session_id>/workspace-summary", methods=["GET"])

@@ -19,6 +19,7 @@ CORE_TABLES = (
     "record_files_map",
     "zenodo_record_links",
     "zenodo_record_snapshots",
+    "zenodo_remote_operations",
     "hdpc_provenance",
     "shared_export_manifest",
 )
@@ -54,6 +55,10 @@ _CORE_INDEXES = (
 )
 
 _CANONICAL_TABLE_COLUMNS = {
+    "zenodo_remote_operations": (
+        "operation_id", "record_id", "operation_type", "state", "request_json",
+        "remote_id", "response_json", "error", "created_at", "updated_at",
+    ),
     "project_configuration": (
         "config_id",
         "project_id",
@@ -461,6 +466,24 @@ def _zenodo_record_snapshots_sql(table_name: str = "zenodo_record_snapshots") ->
     """
 
 
+def _zenodo_remote_operations_sql(table_name: str = "zenodo_remote_operations") -> str:
+    return f"""
+        CREATE TABLE IF NOT EXISTS {table_name} (
+            operation_id TEXT PRIMARY KEY,
+            record_id INTEGER NOT NULL,
+            operation_type TEXT NOT NULL,
+            state TEXT NOT NULL,
+            request_json TEXT NOT NULL,
+            remote_id TEXT,
+            response_json TEXT,
+            error TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (record_id) REFERENCES zenodo_records(record_id) ON DELETE CASCADE
+        )
+    """
+
+
 def _hdpc_provenance_sql(table_name: str = "hdpc_provenance") -> str:
     return f"""
         CREATE TABLE IF NOT EXISTS {table_name} (
@@ -489,6 +512,7 @@ _CANONICAL_CREATE_SQL = {
     "record_files_map": _record_files_map_sql,
     "zenodo_record_links": _zenodo_record_links_sql,
     "zenodo_record_snapshots": _zenodo_record_snapshots_sql,
+    "zenodo_remote_operations": _zenodo_remote_operations_sql,
     "hdpc_provenance": _hdpc_provenance_sql,
 }
 
@@ -895,6 +919,8 @@ def _repair_record_references(cursor: sqlite3.Cursor) -> None:
             WHERE record_id NOT IN (SELECT record_id FROM zenodo_records)
             """
         )
+    if table_exists(cursor, "zenodo_remote_operations"):
+        cursor.execute("DELETE FROM zenodo_remote_operations WHERE record_id NOT IN (SELECT record_id FROM zenodo_records)")
 
 
 def _parse_version_rank(version_value: Any) -> int | None:
@@ -986,6 +1012,7 @@ def _rebuild_core_tables(cursor: sqlite3.Cursor) -> None:
         "record_files_map",
         "zenodo_record_links",
         "zenodo_record_snapshots",
+        "zenodo_remote_operations",
         "hdpc_provenance",
     )
     cursor.execute("PRAGMA foreign_keys = OFF")
@@ -1036,6 +1063,7 @@ def ensure_hdpc_schema(conn: sqlite3.Connection, hdpc_path: str) -> int:
     cursor.execute(_record_files_map_sql())
     cursor.execute(_zenodo_record_links_sql())
     cursor.execute(_zenodo_record_snapshots_sql())
+    cursor.execute(_zenodo_remote_operations_sql())
     cursor.execute(_hdpc_provenance_sql())
 
     _ensure_repairable_core_columns(cursor)
@@ -1064,6 +1092,8 @@ def ensure_hdpc_schema(conn: sqlite3.Connection, hdpc_path: str) -> int:
 
     for index_sql in _CORE_INDEXES:
         cursor.execute(index_sql)
+    cursor.execute("""CREATE UNIQUE INDEX IF NOT EXISTS idx_zenodo_uncertain_operation
+        ON zenodo_remote_operations (record_id, operation_type) WHERE state = 'uncertain'""")
 
     return project_id
 

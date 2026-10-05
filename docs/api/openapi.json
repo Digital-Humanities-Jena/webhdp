@@ -8727,6 +8727,58 @@
         ]
       }
     },
+    "/api/v1/sessions/{session_id}/records/{local_record_id}/reconcile": {
+      "post": {
+        "operationId": "post_sessions_reconcile_session_record",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "local_record_id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response. WebHDP API responses generally use {success, data, message, metadata}."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "sessions reconcile_session_record",
+        "tags": [
+          "sessions"
+        ]
+      }
+    },
     "/api/v1/sessions/{session_id}/records/{local_record_id}/traceability": {
       "get": {
         "operationId": "get_sessions_get_session_record_traceability",
@@ -13357,6 +13409,50 @@
         ]
       }
     },
+    "/api/v2/playground/runs/{run_id}/cancel": {
+      "post": {
+        "operationId": "post_pipeline_v2_cancel_playground_run_v2",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response. WebHDP API responses generally use {success, data, message, metadata}."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "pipeline_v2 cancel_playground_run_v2",
+        "tags": [
+          "playground"
+        ]
+      }
+    },
     "/api/v2/playground/sessions/{session_id}/file": {
       "get": {
         "operationId": "get_pipeline_v2_download_playground_session_file_v2",
@@ -13440,6 +13536,50 @@
           }
         ],
         "summary": "pipeline_v2 get_pipeline_run_v2",
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/api/v2/runs/{run_id}/cancel": {
+      "post": {
+        "operationId": "post_pipeline_v2_cancel_pipeline_run_v2",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response. WebHDP API responses generally use {success, data, message, metadata}."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "pipeline_v2 cancel_pipeline_run_v2",
         "tags": [
           "runs"
         ]

@@ -52,6 +52,7 @@
 
         <div class="grid min-h-0 flex-1 grid-cols-1 gap-0 lg:grid-cols-[minmax(0,1fr)_22rem]">
           <div class="min-h-0 overflow-y-auto px-6 py-5">
+            <fieldset :disabled="running || persistentRun.submitting.value" class="min-w-0">
             <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
               <div>
                 <label class="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Session</label>
@@ -204,6 +205,7 @@
                 </article>
               </div>
             </section>
+            </fieldset>
           </div>
 
           <aside class="min-h-0 border-t border-slate-200 bg-slate-50 px-6 py-5 lg:border-l lg:border-t-0">
@@ -216,7 +218,7 @@
                 <button
                   type="button"
                   class="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
-                  :disabled="running"
+                  :disabled="running || persistentRun.submitting.value"
                   @click="runPlayground"
                 >
                   {{ running ? 'Running…' : 'Run Playground' }}
@@ -239,7 +241,11 @@
               </div>
 
               <div v-if="running" class="mt-5 rounded-2xl border border-slate-200 bg-white px-4 py-4">
-                <LoadingSpinner size="sm" text="Executing component..." />
+                <p class="text-sm text-slate-700">{{ persistentRun.trackingUnavailable.value ? 'Run tracking needs attention.' : 'Processing continues when you close this dialog.' }} Run {{ persistentRun.pending.value?.runId }} · {{ persistentRun.elapsed.value }}s</p>
+                <button type="button" class="mt-3 mr-3 text-sm font-semibold text-indigo-700 underline" @click="persistentRun.refresh">Reconnect</button>
+                <button v-if="result?.status === 'pending'" type="button" class="text-sm font-semibold text-indigo-700 underline" @click="persistentRun.cancel">Cancel queued run</button>
+                <button v-if="!result && persistentRun.pending.value?.request" type="button" class="text-sm font-semibold text-indigo-700 underline" :disabled="persistentRun.submitting.value" @click="persistentRun.retry">Retry same request</button>
+                <button v-if="persistentRun.trackingUnavailable.value" type="button" class="ml-3 text-sm text-indigo-700 underline" @click="persistentRun.dismiss">Dismiss tracking</button>
               </div>
 
               <div v-if="result" class="mt-5 min-h-0 flex-1 overflow-y-auto space-y-4">
@@ -248,6 +254,7 @@
                     <span class="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-700">
                       Run {{ result.run_id || 'n/a' }}
                     </span>
+                    <span v-if="result.component_version" class="text-xs text-slate-500">Component v{{ result.component_version }}</span>
                     <span
                       class="rounded-full px-2.5 py-1 text-[11px] font-medium"
                       :class="result.status === 'completed' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'"
@@ -290,11 +297,12 @@
 <script setup>
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import fileService from '@/services/file.service'
-import pipelineService from '@/services/pipeline.service'
 import hpcLinkService from '@/services/hpcLink.service'
 import LoadingSpinner from '@/components/ui/LoadingSpinner.vue'
 import PlaygroundFieldRenderer from '@/components/tools/playground/PlaygroundFieldRenderer.vue'
 import { useToast } from '@/composables/useToast'
+import { useAuthStore } from '@/stores/auth'
+import { usePersistentPlaygroundRun } from '@/composables/usePersistentPlaygroundRun'
 import {
   buildPlaygroundFieldIndex,
   buildPlaygroundFormState,
@@ -339,9 +347,12 @@ const SESSION_RESOURCE_CACHE_TTL_MS = 30_000
 
 const titleId = 'playground-runner-modal-title'
 const dialogRef = ref(null)
-const running = ref(false)
-const result = ref(null)
-const errorMessage = ref('')
+const authStore = useAuthStore()
+const persistentRun = usePersistentPlaygroundRun(() => authStore.user?.id || 'current', () => props.component?.key || '')
+const running = persistentRun.active
+const result = persistentRun.run
+const localError = ref('')
+const errorMessage = computed(() => localError.value || persistentRun.error.value)
 const loadingSessionPaths = ref(false)
 const sessionFiles = ref([])
 const sessionDirectories = ref([])
@@ -403,8 +414,7 @@ function resetState() {
   form.isSandbox = true
   form.inputs = defaults.inputs
   form.parameters = defaults.parameters
-  result.value = null
-  errorMessage.value = ''
+  localError.value = ''
   hpcPlaygroundAllocation.value = null
   hpcPlaygroundMessage.value = 'Allocate HPC resources before running HDP Components remotely.'
   fieldErrors.value = {
@@ -418,11 +428,11 @@ function resetState() {
 
 async function requestPlaygroundHpcAllocation() {
   if (!form.sessionId) {
-    errorMessage.value = 'Select a session before allocating HPC resources.'
+    localError.value = 'Select a session before allocating HPC resources.'
     return
   }
   hpcPlaygroundLoading.value = true
-  errorMessage.value = ''
+  localError.value = ''
   hpcPlaygroundMessage.value = 'Requesting Playground allocation...'
   try {
     const response = await hpcLinkService.requestAllocation({
@@ -437,7 +447,7 @@ async function requestPlaygroundHpcAllocation() {
     success('HPC-Link Playground allocation requested.')
   } catch (requestError) {
     hpcPlaygroundMessage.value = requestError?.error?.message || requestError?.message || 'HPC-Link Playground allocation failed.'
-    errorMessage.value = hpcPlaygroundMessage.value
+    localError.value = hpcPlaygroundMessage.value
   } finally {
     hpcPlaygroundLoading.value = false
   }
@@ -497,9 +507,9 @@ function getFocusableElements() {
   }
   return Array.from(
     dialogRef.value.querySelectorAll(
-      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'
     )
-  ).filter((element) => !element.hasAttribute('disabled'))
+  ).filter((element) => !element.matches(':disabled'))
 }
 
 function focusInitialElement() {
@@ -726,28 +736,35 @@ async function runPlayground() {
     return
   }
 
-  running.value = true
-  result.value = null
-  errorMessage.value = ''
-
-  try {
-    const response = await pipelineService.executePlayground(payload, { suppressGlobalError: true })
-    result.value = response.data?.playground_run || null
-    invalidateSessionResourceCache(form.sessionId)
-    await loadSessionResources(form.sessionId, { force: true })
-    success('Playground run completed.')
-  } catch (requestError) {
-    errorMessage.value = requestError?.error?.message || requestError?.response?.data?.error?.message || requestError?.message || 'Playground execution failed.'
-  } finally {
-    running.value = false
-  }
+  localError.value = ''
+  await persistentRun.start(payload)
 }
+
+watch(() => result.value?.status, async (status, previous) => {
+  if (!['completed', 'failed'].includes(status) || status === previous || !props.show) return
+  if (status === 'completed') success('Playground run completed.')
+  else showError(result.value?.error || 'Playground run failed. Review its results and logs.')
+  const sessionId = result.value?.request?.session_id
+  if (sessionId) {
+    invalidateSessionResourceCache(sessionId)
+    await loadSessionResources(sessionId, { force: true })
+  }
+})
 
 watch(
   () => [props.show, props.component?.key],
   async ([isOpen]) => {
     if (isOpen) {
       resetState()
+      await persistentRun.resume()
+      const savedRequest = persistentRun.pending.value?.request || result.value?.request
+      if (savedRequest) {
+        form.sessionId = String(savedRequest.session_id)
+        form.profileId = savedRequest.profile_id || form.profileId
+        const savedValues = buildPlaygroundFormState(schema.value, savedRequest)
+        form.inputs = savedValues.inputs
+        form.parameters = savedValues.parameters
+      }
       previouslyFocusedElement = document.activeElement
       document.addEventListener('keydown', handleDocumentKeydown)
       await nextTick()
@@ -756,6 +773,7 @@ watch(
     }
 
     cancelSessionResourceLoad()
+    persistentRun.pause()
     document.removeEventListener('keydown', handleDocumentKeydown)
     restorePreviousFocus()
   },

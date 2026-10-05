@@ -1557,7 +1557,10 @@ def read_hdpc_record_context(hdpc_path: str, record_id: int) -> dict[str, Any] |
         link_map = {item.get("link_rel"): item.get("link_url") for item in links if item.get("link_rel")}
         from services.lod_artifact_service import record_lod_readiness
         lod_readiness = record_lod_readiness(hdpc_path, record_id)
+        from services.zenodo_operation_service import pending_operations
+        unresolved = pending_operations(cursor, record_id) if table_exists(cursor, 'zenodo_remote_operations') else []
         zenodo_status = {
+            "unresolved_operations": unresolved,
             "lod_readiness": lod_readiness,
             "record": traceability["record"],
             "links": link_map,
@@ -1583,6 +1586,9 @@ def read_hdpc_record_context(hdpc_path: str, record_id: int) -> dict[str, Any] |
                 "latest_payload": latest_snapshot_payload,
             },
         }
+
+        if unresolved:
+            zenodo_status['actions'] = {key: False for key in zenodo_status['actions']}
 
         return {
             "traceability": traceability,
@@ -1749,10 +1755,21 @@ def read_hdpc_operations_summary(
         is_sandbox=is_sandbox,
         _snapshot=snapshot,
     )
+    conn = connect_hdpc(hdpc_path, readonly=True)
+    try:
+        cursor = conn.cursor()
+        unresolved_ids = {int(row[0]) for row in cursor.execute(
+            "SELECT DISTINCT record_id FROM zenodo_remote_operations WHERE state = 'uncertain'"
+        ).fetchall()} if table_exists(cursor, 'zenodo_remote_operations') else set()
+    finally:
+        conn.close()
+    actionable_prepared = [item for item in pending_operations if item.get('local_record_db_id') not in unresolved_ids]
+    actionable_drafts = [item for item in drafts if item.get('local_record_db_id') not in unresolved_ids]
+    uploadable_files = [item for item in uploadable_files if item.get('local_record_db_id') not in unresolved_ids]
     upload_record_items: list[dict[str, Any]] = []
     publish_record_items: list[dict[str, Any]] = []
     from services.lod_artifact_service import record_lod_readiness
-    for item in drafts:
+    for item in actionable_drafts:
         record_id = int(item.get("local_record_db_id") or 0)
         if not record_id:
             continue
@@ -1793,16 +1810,16 @@ def read_hdpc_operations_summary(
         },
         "actionable_operations": {
             "create_drafts": {
-                "count": len(pending_operations),
+                "count": len(actionable_prepared),
                 "target_kind": "record",
-                "target_ids": [int(item["local_record_db_id"]) for item in pending_operations if item.get("local_record_db_id")],
-                "items": pending_operations,
+                "target_ids": [int(item["local_record_db_id"]) for item in actionable_prepared if item.get("local_record_db_id")],
+                "items": actionable_prepared,
             },
             "discard_drafts": {
-                "count": len(drafts),
+                "count": len(actionable_drafts),
                 "target_kind": "record",
-                "target_ids": [int(item["local_record_db_id"]) for item in drafts if item.get("local_record_db_id")],
-                "items": drafts,
+                "target_ids": [int(item["local_record_db_id"]) for item in actionable_drafts if item.get("local_record_db_id")],
+                "items": actionable_drafts,
             },
             "upload_files": {
                 "count": len(upload_record_items),

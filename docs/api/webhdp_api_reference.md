@@ -477,15 +477,31 @@ Headers used by `/stream`:
 | Method | Path | Auth | Access | Purpose |
 |---|---|---|---|---|
 | POST | `/pipelines/<identifier>/execute` | Yes | Session edit + mutable | Execute the native submit pipeline on selected files or existing records |
-| GET | `/runs/<run_id>` | Yes | Any authenticated | Poll a native pipeline run |
-| POST | `/playground/execute` | Yes | Any authenticated | Execute a playground run |
-| GET | `/playground/runs/<run_id>` | Yes | Any authenticated | Poll a playground run |
+| GET | `/runs/<run_id>` | Yes | Session view | Poll a native pipeline run |
+| POST | `/runs/<run_id>/cancel` | Yes | Session edit + mutable | Cancel an unstarted native run |
+| POST | `/playground/execute` | Yes | Session edit + mutable | Execute or queue a Playground run |
+| GET | `/playground/runs/<run_id>` | Yes | Session view | Poll a Playground run |
+| POST | `/playground/runs/<run_id>/cancel` | Yes | Session edit + mutable | Cancel an unstarted Playground run |
 
 Execution notes:
 - First submit uses `local_file_paths`.
 - Record-based rerun/reprocess uses `record_ids`.
 - Session-aware native execution carries resolved publishing context, including environment and credential source.
 - Submit-time LOD generation uses explicit `required`, `optional`, or `disabled` policy. `required` failures block Zenodo upload for the affected record.
+- Playground accepts `async_execution: true` with a stable UUID `request_id` and returns HTTP 202 with `data.playground_run`. Repeating the same request returns its persisted run. Changed payloads with the same ID return HTTP 409.
+- Playground paths are session-scoped for every adapter. Its worker uses the pinned component version and profile, and rechecks session permissions and paths before execution.
+- Run payloads expose `can_cancel` for queued work. A cancelled run has terminal status `failed` and `result.cancelled: true`; late worker delivery cannot restart it.
+
+### Uncertain Zenodo operations
+
+`POST /api/v1/sessions/<session_id>/records/<local_record_id>/reconcile` requires session edit permission and a mutable workspace. Record detail exposes `zenodo_status.unresolved_operations` and pauses record mutations while an acknowledgement remains uncertain.
+
+- Use `{}` to check a known publication or draft ID without issuing another mutation.
+- Use `{"deposition_id": "9001"}` to reconnect an unknown draft after checking the publishing account. The authenticated response must match the original draft metadata and must not be connected to another local record.
+- Use `{"confirmed_not_created": true}` only after verifying in Zenodo that no draft was created. This confirmation is recorded before permitting another creation attempt.
+- Use `{"confirmed_not_published": true}` only after reviewing a known draft. The service additionally requires an authenticated, unsubmitted draft and a missing public record before permitting another publication attempt.
+
+The credential environment comes from the local record. An unresolved outcome returns `data.success: false`, `error_code: REMOTE_OUTCOME_UNCERTAIN`, and `reconciliation_required: true`. HTTP 202 from Zenodo is finalized locally only when its state confirms publication; recovery also checks the published-record endpoint. See the [Zenodo API documentation](https://developers.zenodo.org/) for deposition states.
 
 ## 14. Submission API (`/api/v1/submissions`)
 

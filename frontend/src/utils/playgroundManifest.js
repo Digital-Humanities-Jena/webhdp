@@ -180,16 +180,16 @@ function defaultFieldValue(field) {
   return defaultValue
 }
 
-export function buildPlaygroundFormState(schema) {
+export function buildPlaygroundFormState(schema, request = {}) {
   const inputs = {}
   const parameters = {}
 
   getPlaygroundInputFields(schema).forEach((field) => {
-    inputs[field.name] = defaultFieldValue(field)
+    inputs[field.name] = defaultFieldValue({ ...field, default: request.inputs?.[field.name] ?? field.default })
   })
   getPlaygroundParameterGroups(schema).forEach((group) => {
     group.fields.forEach((field) => {
-      parameters[field.name] = defaultFieldValue(field)
+      parameters[field.name] = defaultFieldValue({ ...field, default: request.parameters?.[field.name] ?? field.default })
     })
   })
   return { inputs, parameters }

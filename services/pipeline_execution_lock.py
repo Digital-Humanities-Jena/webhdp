@@ -18,8 +18,11 @@ class PipelineAlreadyRunning(AppException):
     error_code = "PIPELINE_ALREADY_RUNNING"
     user_message = "This session is already being processed. Wait for it to finish before retrying."
 
-    def __init__(self, run_id=None):
-        super().__init__(self.user_message, details={'run_id': run_id} if run_id else None)
+    def __init__(self, run_id=None, run_kind=None):
+        details = {'run_id': run_id} if run_id else {}
+        if run_kind:
+            details['run_kind'] = run_kind
+        super().__init__(self.user_message, details=details or None)
 
 
 @contextmanager
@@ -79,7 +82,7 @@ def guard_submission_execution(function):
             if run and run.status in {PipelineRunStatus.COMPLETED, PipelineRunStatus.FAILED}:
                 result = json.loads(run.result_json or "{}")
                 result.update(run_id=run.public_id, success=run.status == PipelineRunStatus.COMPLETED)
-                return {"result": result, "timings": json.loads(run.timings_json or "{}"), "progress_summary": result.get("summary", {})}
+                return {"result": result, "timings": json.loads(run.timings_json or "{}"), "progress_summary": result.get("summary", {}), "reused": True}
             if run:
                 run.status = PipelineRunStatus.RUNNING
                 db.session.commit()
@@ -92,6 +95,8 @@ def guard_submission_execution(function):
             existing = PipelineRun.query.filter_by(public_id=run_id).first()
             if existing:
                 reconcile_run(existing)
+                if existing.status in {PipelineRunStatus.COMPLETED, PipelineRunStatus.FAILED}:
+                    return execute_once()
         from services.pipeline_run_recovery import require_available_session
         require_available_session(session.id, run_id)
         with session_pipeline_lock(session.hdpc_path):

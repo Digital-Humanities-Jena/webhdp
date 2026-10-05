@@ -20,7 +20,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 import yaml
 from flask import current_app
 from itsdangerous import URLSafeTimedSerializer, BadSignature
-from services.registry_lock import serialize_registry, OperationConflict
+from services.registry_lock import serialize_registry, OperationConflict, registry_lock
 
 from constants import (
     LEGACY_PIPELINE_ALIASES,
@@ -65,6 +65,7 @@ from schemas.native_pipeline_schemas import (
 )
 from services.native_pipeline_adapters import AdapterExecutionRequest, build_default_adapter_registry
 from services.hdpc_local_service import add_local_source_files
+from services.session_access_service import can_edit_session, can_view_session, is_session_mutable
 from services.hdpc_zenodo_service import create_api_draft as create_local_zenodo_draft
 from services.hdpc_zenodo_service import upload_files_for_deposition as upload_local_zenodo_files
 from services.hdp_component_policy import (
@@ -560,10 +561,12 @@ class NativePipelineSystemService:
         reconcile_run(run)
         return self._serialize_pipeline_run(run)
 
-    def get_playground_run(self, run_public_id: str) -> Dict[str, Any]:
+    def get_playground_run(self, run_public_id: str, user_id: Optional[int] = None) -> Dict[str, Any]:
         run = PlaygroundRun.query.filter_by(public_id=run_public_id).first()
         if run is None:
             raise ResourceNotFoundError("Playground run not found", details={"run_id": run_public_id})
+        self._assert_user_can_access_session(db.session.get(DBSession, run.session_id), user_id)
+        reconcile_run(run)
         return self._serialize_playground_run(run)
 
     def get_pipeline_constructor_support(self) -> Dict[str, Any]:
@@ -762,16 +765,32 @@ class NativePipelineSystemService:
             candidate = Path(session_row.session_dir).expanduser() / candidate
         return self._resolve_session_scoped_file_path(session_row, str(candidate))
 
-    def _assert_user_can_access_session(self, session_row: DBSession, user_id: Optional[int]) -> None:
+    def _assert_user_can_access_session(self, session_row: DBSession, user_id: Optional[int], *, edit=False) -> None:
         if session_row is None:
             raise ResourceNotFoundError("Session not found")
-        if user_id is None:
-            raise ValidationError("Authenticated user is required to access Playground files")
-        user = db.session.get(User, int(user_id))
-        if user and user.role in {UserRole.ADMIN, UserRole.MODERATOR}:
-            return
-        if int(session_row.user_id) != int(user_id):
-            raise ResourceNotFoundError("Requested Playground resource was not found")
+        user = db.session.get(User, int(user_id)) if user_id is not None else None
+        permission = can_edit_session if edit else can_view_session
+        if not permission(session_row, user):
+            raise ResourceNotFoundError("Requested session resource was not found")
+        if edit and not is_session_mutable(session_row):
+            raise OperationConflict("Explorer-only sessions cannot run components.")
+
+    def _scope_playground_paths(self, manifest, session_row, inputs, parameters):
+        definitions = [(manifest.get("inputs") or [], inputs)]
+        for group in manifest.get("parameter_groups") or []:
+            definitions.append((group.get("parameters") or [], parameters))
+        for fields, values in definitions:
+            for field in fields:
+                name = field.get("name")
+                value = values.get(name)
+                if self._is_missing_manifest_value(value):
+                    continue
+                kind = PLAYGROUND_FIELD_TYPE_ALIASES.get(field.get("type"), field.get("type"))
+                if kind == "file_list":
+                    values[name] = [str(self._resolve_session_scoped_file_path(session_row, path)) for path in value]
+                elif kind in {"file_path", "dir_path"}:
+                    values[name] = str(self._resolve_session_scoped_path(
+                        session_row, value, expected_kind="directory" if kind == "dir_path" else "file"))
 
     def _resolve_session_scoped_path(
         self,
@@ -1133,20 +1152,23 @@ class NativePipelineSystemService:
             db.session.commit()
             raise
 
-    def execute_playground(self, payload: Dict[str, Any], user_id: Optional[int] = None) -> Dict[str, Any]:
-        self.ensure_seeded()
+    def _prepare_playground_request(self, payload, user_id, *, version=None, profile=None):
         request_model = PlaygroundExecutionRequestSchema.model_validate(payload)
+        session_row = db.session.get(DBSession, request_model.session_id)
+        self._assert_user_can_access_session(session_row, user_id, edit=True)
+        if version is None:
+            self.ensure_seeded()
         component_definition = ComponentDefinition.query.filter_by(key=request_model.component_key, is_active=True).first()
         if component_definition is None:
             raise ResourceNotFoundError("Component not found", details={"component_key": request_model.component_key})
-        component_version = (
+        component_version = version or (
             ComponentVersion.query.filter_by(component_definition_id=component_definition.id, is_active=True)
             .order_by(ComponentVersion.created_at.desc())
             .first()
         )
         if component_version is None:
             raise ResourceNotFoundError("Component version not found", details={"component_key": request_model.component_key})
-        profile = self._get_profile_row(component_version, request_model.profile_id)
+        profile = profile or self._get_profile_row(component_version, request_model.profile_id)
         manifest = _json_loads(component_version.manifest_json, {})
         manifest["compatibility"] = self._normalize_manifest_compatibility(
             manifest.get("compatibility"),
@@ -1162,64 +1184,126 @@ class NativePipelineSystemService:
                 },
             )
         normalized_inputs, normalized_parameters = self._normalize_playground_payload(manifest, request_model)
-        session_row = db.session.get(DBSession, request_model.session_id)
-        if session_row is None:
-            raise ResourceNotFoundError("Session not found", details={"session_id": request_model.session_id})
+        self._scope_playground_paths(manifest, session_row, normalized_inputs, normalized_parameters)
         request_payload = request_model.model_dump()
         request_payload["inputs"] = normalized_inputs
         request_payload["parameters"] = normalized_parameters
-        run = PlaygroundRun(
-            component_version_id=component_version.id,
-            component_profile_id=profile.id,
-            session_id=request_model.session_id,
-            initiated_by_user_id=user_id,
-            status=PipelineRunStatus.RUNNING,
-            request_json=_json_dumps(request_payload),
-            started_at=datetime.utcnow(),
-        )
-        db.session.add(run)
-        db.session.commit()
+        return session_row, component_definition, component_version, profile, manifest, request_payload
 
-        workdir = os.path.join(session_row.session_dir, "playground", run.public_id)
+    def create_pending_playground_run(self, payload, user_id):
+        from services.pipeline_execution_lock import session_pipeline_lock
+        from services.pipeline_run_recovery import require_available_session
+        request_model = PlaygroundExecutionRequestSchema.model_validate(payload)
+        try:
+            request_id = str(UUID(request_model.request_id)) if request_model.request_id else None
+        except (ValueError, TypeError, AttributeError):
+            raise ValidationError('request_id must be a UUID')
+        session_row = db.session.get(DBSession, request_model.session_id)
+        self._assert_user_can_access_session(session_row, user_id, edit=True)
+        fingerprint = _hash_payload(request_model.model_dump())
+        with registry_lock(f'playground-reservation:{request_id or session_row.id}'):
+            if request_id:
+                existing = PlaygroundRun.query.filter_by(public_id=request_id).first()
+                if existing:
+                    saved = _json_loads(existing.request_json, {})
+                    if existing.initiated_by_user_id != user_id or saved.get('_request_fingerprint') != fingerprint:
+                        raise OperationConflict('This request identifier belongs to another component run.')
+                    reconcile_run(existing)
+                    return {**self._serialize_playground_run(existing), 'reused': True}
+            require_available_session(session_row.id)
+            with session_pipeline_lock(session_row.hdpc_path):
+                require_available_session(session_row.id)
+                _, _, version, profile, _, request_payload = self._prepare_playground_request(payload, user_id)
+                request_payload.update(_request_fingerprint=fingerprint,
+                                       _dispatch={'state': 'preparing', 'owner': process_owner()})
+                run = PlaygroundRun(
+                    **({'public_id': request_id} if request_id else {}),
+                    component_version_id=version.id, component_profile_id=profile.id,
+                    session_id=session_row.id, initiated_by_user_id=user_id,
+                    status=PipelineRunStatus.PENDING, request_json=_json_dumps(request_payload),
+                    started_at=datetime.utcnow(),
+                )
+                db.session.add(run)
+                db.session.commit()
+                return self._serialize_playground_run(run)
+
+    def execute_playground(self, payload: Dict[str, Any], user_id: Optional[int] = None) -> Dict[str, Any]:
+        pending = self.create_pending_playground_run(payload, user_id)
+        return self.execute_playground_run(pending['run_id'])
+
+    def execute_playground_run(self, run_public_id):
+        from services.pipeline_execution_lock import session_pipeline_lock
+        from services.pipeline_run_recovery import require_available_session
+        run = PlaygroundRun.query.filter_by(public_id=run_public_id).first()
+        if run is None:
+            raise ResourceNotFoundError('Playground run not found')
+        session_row = db.session.get(DBSession, run.session_id)
+        if session_row is None:
+            raise ResourceNotFoundError('Run session is unavailable')
+        reconcile_run(run)
+        if run.status in {PipelineRunStatus.COMPLETED, PipelineRunStatus.FAILED}:
+            return self._serialize_playground_run(run)
+        require_available_session(session_row.id, run.public_id)
+        with session_pipeline_lock(session_row.hdpc_path):
+            db.session.refresh(run)
+            if run.status in {PipelineRunStatus.COMPLETED, PipelineRunStatus.FAILED}:
+                return self._serialize_playground_run(run)
+            require_available_session(session_row.id, run.public_id)
+            run.status = PipelineRunStatus.RUNNING
+            db.session.commit()
+            try:
+                version = db.session.get(ComponentVersion, run.component_version_id)
+                profile = db.session.get(ComponentProfile, run.component_profile_id)
+                if version is None or profile is None:
+                    raise ValidationError('The queued component version or profile is unavailable.')
+                session_row, definition, _, profile, manifest, payload = self._prepare_playground_request(
+                    _json_loads(run.request_json, {}), run.initiated_by_user_id, version=version, profile=profile)
+                result = self._execute_playground_component(session_row, definition, profile, manifest, payload, run.public_id)
+                run.status = PipelineRunStatus.COMPLETED if result.get('success', True) else PipelineRunStatus.FAILED
+                run.result_json = _json_dumps(result)
+                run.logs_json = _json_dumps(result.get('logs', {}))
+                run.error_message = result.get('error')
+            except Exception as exc:
+                db.session.rollback()
+                run = PlaygroundRun.query.filter_by(public_id=run_public_id).one()
+                run.status = PipelineRunStatus.FAILED
+                run.error_message = str(exc)
+                run.result_json = _json_dumps({'success': False, 'status': 'failed', 'error': str(exc)})
+                logger.exception('Playground component run %s failed', run_public_id)
+            run.completed_at = datetime.utcnow()
+            db.session.commit()
+            return self._serialize_playground_run(run)
+
+    def _execute_playground_component(self, session_row, component_definition, profile, manifest, payload, run_id):
+        workdir = os.path.join(session_row.session_dir, "playground", run_id)
         os.makedirs(workdir, exist_ok=True)
         adapter_name = profile.adapter
-        if self._should_route_component_to_hpc_link(component_definition.key, request_model.session_id):
+        if self._should_route_component_to_hpc_link(component_definition.key, session_row.id):
             adapter_name = "hpc_link"
         elif adapter_name == "hpc_link":
             self._ensure_component_runtime_available(
                 component_definition.key,
-                {"db_session_id": request_model.session_id},
+                {"db_session_id": session_row.id},
                 hpc_only=True,
             )
         elif component_definition.key in {"fast_renderer", "any_to_usdz"}:
             self._ensure_component_runtime_available(
                 component_definition.key,
-                {"db_session_id": request_model.session_id},
+                {"db_session_id": session_row.id},
             )
 
         request = AdapterExecutionRequest(
             step_id=component_definition.key,
             profile={**self._profile_payload(profile, component_key=component_definition.key), "adapter": adapter_name},
             workdir=workdir,
-            inputs=normalized_inputs,
-            parameters=normalized_parameters,
-            metadata={"manifest": manifest, "timeout_seconds": None, "session_id": request_model.session_id},
+            inputs=payload['inputs'],
+            parameters=payload['parameters'],
+            metadata={"manifest": manifest, "timeout_seconds": payload.get('timeout_seconds', 3600), "session_id": session_row.id},
         )
         adapter = self._adapter_registry.get(adapter_name)
         if adapter is None:
             raise ValidationError("Unsupported adapter", details={"adapter": adapter_name})
-        result = adapter.execute(request)
-
-        run.status = PipelineRunStatus.COMPLETED if result.get("success", True) else PipelineRunStatus.FAILED
-        run.result_json = _json_dumps(result)
-        run.logs_json = _json_dumps(result.get("logs", {}))
-        run.error_message = result.get("error")
-        run.completed_at = datetime.utcnow()
-        db.session.commit()
-
-        payload = self._serialize_playground_run(run)
-        payload["result"] = result
-        return payload
+        return adapter.execute(request)
 
     def _ensure_builtin_components_seeded(self) -> None:
         for component_key, manifest in self._builtin_component_manifests().items():
@@ -1500,6 +1584,7 @@ class NativePipelineSystemService:
     def _serialize_pipeline_run(self, run: PipelineRun) -> Dict[str, Any]:
         return {
             "run_id": run.public_id,
+            "can_cancel": run.status == PipelineRunStatus.PENDING,
             "pipeline_version": db.session.get(PipelineVersion, run.pipeline_version_id).version,
             "status": run.status.value if hasattr(run.status, "value") else run.status,
             "started_at": run.started_at.isoformat() + "Z" if run.started_at else None,
@@ -1538,12 +1623,17 @@ class NativePipelineSystemService:
         }
 
     def _serialize_playground_run(self, run: PlaygroundRun) -> Dict[str, Any]:
+        version = db.session.get(ComponentVersion, run.component_version_id)
+        profile = db.session.get(ComponentProfile, run.component_profile_id)
         return {
             "run_id": run.public_id,
+            "can_cancel": run.status == PipelineRunStatus.PENDING,
+            "component_version": version.version if version else None,
+            "profile_id": profile.profile_id if profile else None,
             "status": run.status.value if hasattr(run.status, "value") else run.status,
             "started_at": run.started_at.isoformat() + "Z" if run.started_at else None,
             "completed_at": run.completed_at.isoformat() + "Z" if run.completed_at else None,
-            "request": _json_loads(run.request_json, {}),
+            "request": {key: value for key, value in _json_loads(run.request_json, {}).items() if not key.startswith("_")},
             "result": _json_loads(run.result_json, {}),
             "logs": _json_loads(run.logs_json, {}),
             "error": run.error_message,

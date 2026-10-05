@@ -244,6 +244,7 @@
           @reconnect-run="persistentRun.refresh"
           @dismiss-run="persistentRun.dismiss"
           @retry-run-request="persistentRun.retry"
+          @cancel-run="persistentRun.cancel"
           @focus-diagnostic="focusDiagnostic"
           :validation-result="validationResult"
           :preflight-result="preflightResult"

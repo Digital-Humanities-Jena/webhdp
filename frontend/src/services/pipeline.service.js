@@ -112,11 +112,22 @@ export default {
     })
   },
 
-  getPlaygroundRun(runId) {
+  getPlaygroundRun(runId, requestOptions = {}) {
     return requestV2({
       method: 'get',
-      url: `/playground/runs/${runId}`
+      url: `/playground/runs/${runId}`,
+      timeout: 15000,
+      suppressGlobalError: true,
+      ...requestOptions
     })
+  },
+
+  cancelPlaygroundRun(runId) {
+    return requestV2({ method: 'post', url: `/playground/runs/${runId}/cancel`, suppressGlobalError: true })
+  },
+
+  cancelPipelineRun(runId) {
+    return requestV2({ method: 'post', url: `/runs/${runId}/cancel`, suppressGlobalError: true })
   },
 
   downloadPlaygroundArtifact(runId, artifactIndex, requestOptions = {}) {

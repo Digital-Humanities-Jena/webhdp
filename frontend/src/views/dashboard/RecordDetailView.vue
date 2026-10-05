@@ -52,6 +52,22 @@
       </div>
 
       <div v-else-if="detail" class="space-y-6">
+        <section v-if="unresolvedOperations.length" role="alert" class="rounded-xl border border-amber-300 bg-amber-50 p-5 space-y-3">
+          <h2 class="font-semibold text-amber-900">Zenodo response could not be confirmed</h2>
+          <p class="text-sm text-amber-900">Zenodo may have accepted the request. Record actions are paused until its state is verified.</p>
+          <p v-if="reconciliationError" class="text-sm text-rose-700">{{ reconciliationError }}</p>
+          <div v-for="operation in unresolvedOperations" :key="operation.operation_id" class="space-y-2 text-sm">
+            <p>{{ operation.operation_type === 'publish' ? 'Publication' : 'Draft creation' }} · {{ operation.remote_id ? `Zenodo #${operation.remote_id}` : 'Draft ID unknown' }}</p>
+            <template v-if="operation.operation_type === 'create_draft' && !operation.remote_id">
+              <p>Check your Zenodo uploads for this record. Enter the matching draft ID to reconnect it.</p>
+              <label class="block">Zenodo draft ID <input v-model.trim="reconciliationDraftId" inputmode="numeric" class="ml-2 rounded border-slate-300" /></label>
+              <button v-if="canEditRecord" type="button" :disabled="reconciliationBusy || !reconciliationDraftId" class="mr-3 font-semibold underline disabled:opacity-50" @click="reconcileRecord(false)">Reconnect draft</button>
+              <button v-if="canEditRecord" type="button" :disabled="reconciliationBusy" class="font-semibold underline disabled:opacity-50" @click="reconcileRecord(true)">Confirm no draft was created</button>
+            </template>
+            <button v-else-if="canEditRecord" type="button" :disabled="reconciliationBusy" class="font-semibold underline disabled:opacity-50" @click="reconcileRecord(false)">{{ reconciliationBusy ? 'Checking…' : 'Check Zenodo state' }}</button>
+            <button v-if="canEditRecord && operation.operation_type === 'publish'" type="button" :disabled="reconciliationBusy" class="ml-3 font-semibold underline disabled:opacity-50" @click="reconcileRecord(false, true)">Confirm draft is unpublished</button>
+          </div>
+        </section>
         <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
           <div class="bg-white rounded-xl border border-slate-200 p-4">
             <p class="text-xs uppercase tracking-wide text-slate-500">Status</p>
@@ -423,6 +439,31 @@ const lodReport = ref(null)
 const lodError = ref('')
 const lodBusy = ref(false)
 const downloadingFile = ref('')
+const reconciliationBusy = ref(false)
+const reconciliationDraftId = ref('')
+const reconciliationError = ref('')
+const unresolvedOperations = computed(() => detail.value?.zenodo_status?.unresolved_operations || [])
+const canEditRecord = computed(() => detail.value?.session?.permissions?.can_edit !== false && detail.value?.session?.access_mode !== 'explorer_only')
+async function reconcileRecord(confirmAbsence, confirmUnpublished = false) {
+  if (reconciliationBusy.value) return
+  if (confirmAbsence && !window.confirm('Only continue after checking your Zenodo uploads and confirming that no draft was created for this request. Allow another draft creation attempt?')) return
+  if (confirmUnpublished && !window.confirm('Check the draft in Zenodo and confirm that publication is not pending. WebHDP will verify that this draft is still unpublished before allowing another attempt. Continue?')) return
+  reconciliationBusy.value = true
+  reconciliationError.value = ''
+  try {
+    const response = await api.post(`/sessions/${Number(route.params.sessionId)}/records/${Number(route.params.recordId)}/reconcile`, {
+      deposition_id: reconciliationDraftId.value || undefined,
+      confirmed_not_created: confirmAbsence,
+      ...(confirmUnpublished ? { confirmed_not_published: true } : {}),
+    }, { suppressGlobalError: true })
+    if (!response.data?.success) reconciliationError.value = response.data?.operation?.error || response.data?.error || 'The remote state remains uncertain. Check Zenodo and try again.'
+    await loadDetail()
+  } catch (err) {
+    reconciliationError.value = err?.error?.message || err?.message || 'Could not verify the Zenodo state. Try again.'
+  } finally {
+    reconciliationBusy.value = false
+  }
+}
 async function downloadGeneratedFile(file) {
   if (downloadingFile.value) return
   downloadingFile.value = file.absolute_path

@@ -713,6 +713,37 @@ class NativePipelineSystemTestCase(unittest.TestCase):
             self.assertEqual(run.status, PipelineRunStatus.COMPLETED)
             self.assertEqual(json.loads(run.result_json)['saved'], 'result')
 
+    def test_retired_hostname_preparation_expires_and_frees_session(self):
+        from datetime import datetime, timedelta
+        from database.models import PipelineRunStatus
+        with self.app.app_context():
+            _, _, session = self._prepare_generic_pipeline_session('retired_hostname')
+            queued = self.native_service.create_pending_run('render', session_id=session.id, initiated_by_user_id=self.user_id, request_payload={})
+            run = PipelineRun.query.filter_by(public_id=queued['run_id']).one()
+            payload = json.loads(run.request_json)
+            payload['_dispatch']['owner']['host'] = 'previous-container'
+            run.request_json = json.dumps(payload)
+            run.started_at = datetime.utcnow() - timedelta(minutes=3)
+            db.session.commit()
+            self.assertEqual(self.native_service.get_pipeline_run(run.public_id)['status'], 'failed')
+            self.assertEqual(run.status, PipelineRunStatus.FAILED)
+            self.assertEqual(session.status, 'failed')
+            replacement = self.native_service.create_pending_run('render', session_id=session.id, initiated_by_user_id=self.user_id, request_payload={})
+            self.assertNotEqual(replacement['run_id'], run.public_id)
+
+    def test_cancelled_pipeline_reservation_is_not_replayed(self):
+        from services.pipeline_run_recovery import cancel_pending_run
+        with self.app.app_context():
+            _, _, session = self._prepare_generic_pipeline_session('cancelled_reservation')
+            queued = self.native_service.create_pending_run('render', session_id=session.id, initiated_by_user_id=self.user_id, request_payload={})
+            run = PipelineRun.query.filter_by(public_id=queued['run_id']).one()
+            cancel_pending_run(run)
+            self.assertTrue(self.native_service.get_pipeline_run(run.public_id)['result']['cancelled'])
+            with patch.object(self.native_service, '_run_native_pipeline') as execute:
+                result = self.native_service.execute_registered_submission('render', {'db_session_id': session.id}, existing_run_public_id=run.public_id)
+                self.assertFalse(result['success'])
+                execute.assert_not_called()
+
     def test_preflight_token_binds_definition_user_and_file_selection(self):
         from services.registry_lock import OperationConflict
         with self.app.app_context():
@@ -1722,12 +1753,14 @@ class NativePipelineSystemTestCase(unittest.TestCase):
             db.session.add(session_row)
             db.session.commit()
 
+            source = session_dir / "example.glb"
+            source.write_bytes(b"model")
             imported = self.native_service.import_component_from_path(str(component_dir))
             result = self.native_service.execute_playground(
                 {
                     "component_key": imported["key"],
                     "session_id": session_row.id,
-                    "inputs": {"input_files": ["/tmp/example.glb"]},
+                    "inputs": {"input_files": [str(source)]},
                     "parameters": {"quality": "preview"},
                     "profile_id": "local_default",
                 },
@@ -1788,12 +1821,14 @@ class NativePipelineSystemTestCase(unittest.TestCase):
             db.session.add(session_row)
             db.session.commit()
 
+            source = session_dir / "example.glb"
+            source.write_bytes(b"model")
             imported = self.native_service.import_component_from_path(str(component_dir))
             result = self.native_service.execute_playground(
                 {
                     "component_key": imported["key"],
                     "session_id": session_row.id,
-                    "input_files": ["/tmp/example.glb"],
+                    "input_files": [str(source)],
                     "profile_id": "local_default",
                 },
                 self.user_id,

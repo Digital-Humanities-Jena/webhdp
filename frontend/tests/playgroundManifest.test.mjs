@@ -175,3 +175,12 @@ test('flattenSessionFilePaths and deriveDirectories prepare constructor session 
     '/tmp/session/uploads/set_b'
   ])
 })
+
+test('restores saved arrays and JSON into editable widget values', () => {
+  const schema = getPlaygroundSchema(component)
+  const values = buildPlaygroundFormState(schema, { inputs: { image_path: '/session/image.png' }, parameters: { tags: ['first', 'second'], metadata: { quality: 'low' }, advanced: true } })
+  expect(values.inputs.image_path).toBe('/session/image.png')
+  expect(values.parameters.tags).toBe('first\nsecond')
+  expect(JSON.parse(values.parameters.metadata)).toEqual({ quality: 'low' })
+  expect(values.parameters.advanced).toBe(true)
+})

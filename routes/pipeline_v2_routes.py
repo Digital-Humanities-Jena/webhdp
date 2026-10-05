@@ -14,6 +14,7 @@ from uuid import UUID
 from routes.admin_routes import require_admin
 from routes.access_helpers import get_session_with_permission
 from schemas.native_pipeline_schemas import PipelineExecutionRequestSchema
+from schemas.native_pipeline_schemas import PlaygroundExecutionRequestSchema
 from services.pipeline_platform_service import get_pipeline_platform_contract
 from services.submission_pipeline_service import execute_submission_pipeline
 
@@ -24,23 +25,47 @@ pipeline_v2_bp = Blueprint("pipeline_v2", __name__)
 
 def _enqueue_submission_pipeline_task(*args):
     from tasks import execute_submission_pipeline_task
-
-    from database.models import PipelineRun
-    from database.database import db
-    import json
+    from database.models import PipelineRun, PipelineRunStatus
+    from services.pipeline_run_recovery import dispatch_lock
     run_id = args[-1]
     row = PipelineRun.query.filter_by(public_id=run_id).one()
-    payload = json.loads(row.request_json)
-    payload['_dispatch'].update(task_id=run_id)
-    row.request_json = json.dumps(payload)
-    db.session.commit()
-    task = execute_submission_pipeline_task.apply_async(args=args, task_id=run_id)
-    db.session.refresh(row)
-    payload = json.loads(row.request_json)
-    payload['_dispatch'].update(state='queued', task_id=task.id)
-    row.request_json = json.dumps(payload)
-    db.session.commit()
-    return task
+    with dispatch_lock(row):
+        db.session.refresh(row)
+        if row.status != PipelineRunStatus.PENDING:
+            raise ValidationError('This run is no longer queued.')
+        payload = json.loads(row.request_json)
+        payload['_dispatch'].update(task_id=run_id)
+        row.request_json = json.dumps(payload)
+        db.session.commit()
+        task = execute_submission_pipeline_task.apply_async(args=args, task_id=run_id)
+        db.session.refresh(row)
+        payload = json.loads(row.request_json)
+        payload['_dispatch'].update(state='queued', task_id=task.id)
+        row.request_json = json.dumps(payload)
+        db.session.commit()
+        return task
+
+
+def _enqueue_playground_task(run_id):
+    from tasks import execute_playground_task
+    from database.models import PlaygroundRun, PipelineRunStatus
+    from services.pipeline_run_recovery import dispatch_lock
+    row = PlaygroundRun.query.filter_by(public_id=run_id).one()
+    with dispatch_lock(row):
+        db.session.refresh(row)
+        if row.status != PipelineRunStatus.PENDING:
+            raise ValidationError('This component run is no longer queued.')
+        payload = json.loads(row.request_json)
+        payload['_dispatch'].update(task_id=run_id)
+        row.request_json = json.dumps(payload)
+        db.session.commit()
+        task = execute_playground_task.apply_async(args=[run_id], task_id=run_id)
+        db.session.refresh(row)
+        payload = json.loads(row.request_json)
+        payload['_dispatch'].update(state='queued', task_id=task.id)
+        row.request_json = json.dumps(payload)
+        db.session.commit()
+        return task
 
 
 def _current_user_can_author_pipelines() -> bool:
@@ -274,11 +299,42 @@ def get_pipeline_run_v2(run_id):
     return APIResponse.success(data={"run": run_payload})
 
 
+@pipeline_v2_bp.route("/runs/<run_id>/cancel", methods=["POST"])
+@jwt_required()
+def cancel_pipeline_run_v2(run_id):
+    from database.models import PipelineRun
+    from exceptions import ResourceNotFoundError
+    from services.pipeline_run_recovery import cancel_pending_run
+    run = PipelineRun.query.filter_by(public_id=run_id).first()
+    if run is None:
+        raise ResourceNotFoundError('Pipeline run not found')
+    _, _, error_response = get_session_with_permission(run.session_id, permission='edit', require_mutable=True)
+    if error_response:
+        return error_response
+    cancel_pending_run(run)
+    return APIResponse.success(data={'run': current_app.native_pipeline_service.get_pipeline_run(run_id, int(get_jwt_identity()))})
+
+
 @pipeline_v2_bp.route("/playground/execute", methods=["POST"])
 @jwt_required()
 def execute_playground_v2():
     data = request.get_json() or {}
     user_id = get_jwt_identity()
+    request_model = PlaygroundExecutionRequestSchema.model_validate(data)
+    _, _, error_response = get_session_with_permission(request_model.session_id, permission='edit', require_mutable=True)
+    if error_response:
+        return error_response
+    if request_model.async_execution:
+        result = current_app.native_pipeline_service.create_pending_playground_run(data, int(user_id))
+        if not result.get('reused'):
+            try:
+                _enqueue_playground_task(result['run_id'])
+            except Exception:
+                from database.models import PlaygroundRun
+                from services.pipeline_run_recovery import resolve_dispatch_failure
+                resolve_dispatch_failure(result['run_id'], PlaygroundRun)
+                result = current_app.native_pipeline_service.get_playground_run(result['run_id'], int(user_id))
+        return APIResponse.accepted(data={'playground_run': result}, message='Component run accepted')
     result = current_app.native_pipeline_service.execute_playground(data, int(user_id) if user_id else None)
     return APIResponse.created(data={"playground_run": result}, message="Playground execution completed")
 
@@ -286,8 +342,25 @@ def execute_playground_v2():
 @pipeline_v2_bp.route("/playground/runs/<run_id>", methods=["GET"])
 @jwt_required()
 def get_playground_run_v2(run_id):
-    result = current_app.native_pipeline_service.get_playground_run(run_id)
+    result = current_app.native_pipeline_service.get_playground_run(run_id, int(get_jwt_identity()))
     return APIResponse.success(data={"playground_run": result})
+
+
+@pipeline_v2_bp.route('/playground/runs/<run_id>/cancel', methods=['POST'])
+@jwt_required()
+def cancel_playground_run_v2(run_id):
+    from database.models import PlaygroundRun
+    from exceptions import ResourceNotFoundError
+    from services.pipeline_run_recovery import cancel_pending_run
+    run = PlaygroundRun.query.filter_by(public_id=run_id).first()
+    if run is None:
+        raise ResourceNotFoundError('Playground run not found')
+    _, _, error_response = get_session_with_permission(run.session_id, permission='edit', require_mutable=True)
+    if error_response:
+        return error_response
+    cancel_pending_run(run)
+    result = current_app.native_pipeline_service.get_playground_run(run_id, int(get_jwt_identity()))
+    return APIResponse.success(data={'playground_run': result})
 
 
 @pipeline_v2_bp.route("/playground/runs/<run_id>/artifacts/<int:artifact_index>", methods=["GET"])
