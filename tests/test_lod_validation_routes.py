@@ -198,7 +198,7 @@ def test_iiif_test_mapping_returns_validation_and_repair_flag(tmp_path, monkeypa
     monkeypatch.setattr(
         iiif_routes,
         "build_pipeline_aligned_lod_metadata",
-        lambda **kwargs: {"title": "Artifact"},
+        lambda **kwargs: ({"title": "Artifact"}, {}) if kwargs.get("with_provenance") else {"title": "Artifact"},
     )
     monkeypatch.setattr(iiif_routes, "iiif_service", _PreviewIiifService())
 
@@ -232,7 +232,7 @@ def test_mets_test_mapping_returns_validation_and_repair_flag(tmp_path, monkeypa
     monkeypatch.setattr(
         mets_routes,
         "build_pipeline_aligned_lod_metadata",
-        lambda **kwargs: {"title": "Artifact"},
+        lambda **kwargs: ({"title": "Artifact"}, {}) if kwargs.get("with_provenance") else {"title": "Artifact"},
     )
     monkeypatch.setattr(mets_routes, "mets_service", _PreviewMetsService())
 
@@ -266,7 +266,7 @@ def test_edm_test_mapping_returns_validation_and_repair_flag(tmp_path, monkeypat
     monkeypatch.setattr(
         edm_routes,
         "build_pipeline_aligned_lod_metadata",
-        lambda **kwargs: {"title": "Artifact"},
+        lambda **kwargs: ({"title": "Artifact"}, {}) if kwargs.get("with_provenance") else {"title": "Artifact"},
     )
     monkeypatch.setattr(edm_routes, "edm_service", _PreviewEdmService())
 
@@ -309,7 +309,7 @@ def test_output_preview_local_returns_structured_validation_sections(tmp_path, m
     monkeypatch.setattr(
         tools_routes,
         "build_pipeline_aligned_lod_metadata",
-        lambda **kwargs: {"title": "Artifact"},
+        lambda **kwargs: ({"title": "Artifact"}, {}) if kwargs.get("with_provenance") else {"title": "Artifact"},
     )
 
     client = app.test_client()

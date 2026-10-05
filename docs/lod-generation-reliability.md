@@ -1,6 +1,36 @@
 # Reliable metadata generation
 
-LOD Generation 1.1.0 produces EDM, IIIF, METS/MODS, CIDOC-CRM RDF/XML, and JSON-LD. CIDOC-CRM and JSON-LD serialize the same digital-dataset graph and share mappings. Each format has its own enable switch and validation result.
+LOD Generation 1.2.0 produces EDM, IIIF, METS/MODS, CIDOC-CRM RDF/XML, and JSON-LD. CIDOC-CRM and JSON-LD serialize the same digital-dataset graph and share mappings. Each format has its own enable switch and validation result.
+
+## Format profiles and limits
+
+IIIF uses the `presentation-3-media-2` local profile. Every Canvas,
+AnnotationPage, Annotation, body, and target is checked, including later entries
+in arrays. Resource types must match media formats; Canvas extents are positive
+and finite, width and height are supplied together, and annotations target their
+own Canvas. Sound and video painting require actual positive durations. Unknown
+duration and documents use rendering links, optionally with a cover image.
+The default 1000 × 1000 Canvas is a virtual frame, not an asset measurement.
+Mapped dimensions describe the presentation aspect ratio. Model placement uses
+scene-space coordinates; geographic latitude/longitude is not repurposed as a
+Canvas PointSelector.
+
+The local IIIF profile covers generated painting and rendering structures,
+including supported model placement. It does not establish remote availability,
+JSON-LD extension semantics, full Presentation API conformance for arbitrary
+templates, or interoperability with a particular viewer. Multi-page template
+content beyond the generated first Canvas is validated but not repaired.
+Validate the intended viewer separately before publication. The profile version
+is part of the captured validation policy, so earlier cached results need
+revalidation after a profile change.
+
+CIDOC-CRM/JSON-LD use the `digital-dataset-1` profile: a digital dataset with its
+title, public record link, and file relationships. The paired serializations are
+checked for graph equivalence. Physical objects and historical events require
+an explicit richer model; this profile is not a general CRM conformance claim.
+METS/MODS uses the local XML schemas and EDM uses the configured required checks.
+Reports identify validation scope and distinguish invalid exports from an
+unavailable validator.
 
 ## Validation and upload eligibility
 
@@ -33,6 +63,14 @@ Before generation starts, every requested format is journaled as pending. Comple
 Guided submission saves an immutable request and operation ID in browser session storage before sending it. Ambiguous responses can be retried using the same ID, while conflicts identifying an existing run reconnect to it. Accepted-run monitoring starts independently of workflow-state persistence. A saved run reconnects before loading submission configuration; definitive validation failures release the request for correction.
 
 Previews are tied to the selected format, template, provider, sample row, source, parser options, and mappings. Changing an input clears the old result; late responses cannot overwrite the current preview. Validator outages display an unverified result. The Constructor's persistent-run monitor stops polling inaccessible or deleted runs and permits explicit dismissal without cancelling processing.
+
+Readable previews show titles, descriptions, creators, rights, and source
+filenames before technical JSON/XML. Source labels distinguish mapped, entered,
+shared, record-specific, inferred, and default values. Spreadsheet checks count
+input gaps across all rows before defaults; export validation still concerns the
+selected preview. Minimum-viable adjustments report semantic additions, changes,
+and removals rather than formatting differences. Removed values are not copied
+into the report. These details are also available in the record metadata panel.
 
 ## Changes after generation
 

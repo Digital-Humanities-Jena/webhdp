@@ -828,6 +828,9 @@ class EdmService:
 
         # Detect standard MIME type
         mime_type, _ = mimetypes.guess_type(filename)
+        # System MIME tables can identify Wavefront OBJ as the unrelated TGIF format.
+        if ext == 'obj':
+            mime_type = 'model/obj'
 
         # If detection failed or gave generic binary, use our specific fallbacks
         if not mime_type or mime_type == 'application/octet-stream':
@@ -1497,6 +1500,7 @@ class EdmService:
             and schematron_result.get("valid") is True
             and business_result.get("valid") is True
         )
+        local_valid = valid
 
         if include_remote:
             remote_result = self.validate_with_local_edm_validator(xml_string, metadata=metadata)
@@ -1510,11 +1514,14 @@ class EdmService:
                     all_warnings.append(prefixed)
             valid = valid and remote_result.get("valid") is True
 
+        unavailable = remote_result and str(remote_result.get("status") or "").lower() in ("error", "unavailable", "disabled", "unknown")
         return {
             "valid": valid,
+            "status": "validated" if valid else "unverified" if unavailable and local_valid else "invalid",
             "errors": all_errors,
             "warnings": all_warnings,
             "details": {
+                "scope": "Enabled XML, schema and business checks, plus the configured EDM validator. Skipped checks and unavailable services are listed in this report.",
                 "basic": basic_result,
                 "xsd": xsd_result,
                 "schematron": schematron_result,
@@ -2450,7 +2457,9 @@ class EdmService:
         )
         from services.lod_reliability import assert_public_document
         assert_public_document(repaired)
-        minimum_viable_applied = repaired != rendered
+        from services.metadata_adjustments import document_adjustments
+        adjustments = document_adjustments(rendered, repaired, "edm")
+        minimum_viable_applied = bool(adjustments)
 
         # Optional validation
         validation = None
@@ -2473,6 +2482,7 @@ class EdmService:
         return {
             "content": repaired,
             "minimum_viable_applied": minimum_viable_applied,
+            "adjustments": adjustments,
             "validation": validation,
         }
 

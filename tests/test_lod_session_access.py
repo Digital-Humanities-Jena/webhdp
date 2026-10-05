@@ -62,7 +62,7 @@ def lod_access_app(tmp_path, monkeypatch):
             {"filename_column": "filename"},
         ),
     )
-    monkeypatch.setattr(iiif_routes, "build_pipeline_aligned_lod_metadata", lambda **kwargs: {"title": "Artifact"})
+    monkeypatch.setattr(iiif_routes, "build_pipeline_aligned_lod_metadata", lambda **kwargs: ({"title": "Artifact"}, {}) if kwargs.get("with_provenance") else {"title": "Artifact"})
     monkeypatch.setattr(iiif_routes, "iiif_service", _StubIiifService())
 
     with app.app_context():

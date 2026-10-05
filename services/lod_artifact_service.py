@@ -66,7 +66,10 @@ def load_record_manifest(hdpc_path, record_id):
 def validation_policy():
     keys = ('LOCAL_EDM_VALIDATOR_REQUIRED', 'ENABLE_LOCAL_EDM_VALIDATION', 'ENABLE_METIS_VALIDATION',
             'LOCAL_EDM_VALIDATOR_URL', 'METIS_SANDBOX_URL', 'ENABLE_XSD_VALIDATION')
-    return {key: current_app.config.get(key) for key in keys} if has_app_context() else {}
+    policy = {key: current_app.config.get(key) for key in keys} if has_app_context() else {}
+    from services.iiif_validation import PROFILE_VERSION
+    policy['iiif_profile'] = PROFILE_VERSION
+    return policy
 
 
 def policy_error(manifest, standard, status):
@@ -245,7 +248,9 @@ def generate_artifacts(output_dir, specification, register, progress=None, *, hd
                     validation = {**validation, 'sha256': sha256, 'standard': standard}
                     atomic_write(path, content)
                     register(path, validation)
-                    status.update(status='generated', success=True, path=path, sha256=sha256, validation=validation, minimum_viable_applied=bool(generation.get('minimum_viable_applied')))
+                    status.update(status='generated', success=True, path=path, sha256=sha256, validation=validation,
+                                  minimum_viable_applied=bool(generation.get('minimum_viable_applied')),
+                                  adjustments=generation.get('adjustments', []))
                     outputs[standard] = path
                 except Exception as exc:
                     status.update(status='failed', error=str(exc))

@@ -1,10 +1,12 @@
 # services/iiif_service.py
 import logging
 import json
+import math
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 import jinja2
 from services.edm_service import EdmService, DotDict
+from services.iiif_validation import content_type, validate_manifest
 
 logger = logging.getLogger(__name__)
 
@@ -261,13 +263,52 @@ class IiifService:
 
         source_entry = {
             "id": str(metadata.get("iiif_model_id") or main_file.get("content_url")),
-            "type": "Model",
+            "type": content_type(main_file),
             "format": str(
-                metadata.get("iiif_model_format")
+                (metadata.get("iiif_model_format") if content_type(main_file) == "Model" else None)
                 or main_file.get("format")
                 or "model/gltf-binary"
             ),
         }
+        def dimension(name, integer=False):
+            value = next((value for value in (metadata.get(f"iiif_{name}"), metadata.get(name), main_file.get(name)) if value not in (None, "")), None)
+            if value in (None, ""):
+                return None
+            if isinstance(value, bool):
+                raise ValueError(f"IIIF {name} must be a positive {'integer' if integer else 'number'}")
+            try:
+                number = float(value)
+            except (TypeError, ValueError, OverflowError):
+                raise ValueError(f"IIIF {name} must be numeric") from None
+            if not math.isfinite(number) or number <= 0 or (integer and not number.is_integer()):
+                raise ValueError(f"IIIF {name} must be a positive {'integer' if integer else 'number'}")
+            return int(number) if integer else number
+
+        width, height, duration = dimension("width", True), dimension("height", True), dimension("duration")
+        if (width is None) != (height is None):
+            raise ValueError("Supply both IIIF width and height, or leave both unset")
+        kind = source_entry["type"]
+        # Canvas dimensions describe a virtual presentation frame, not measured asset dimensions.
+        canvas["width"] = width or canvas.get("width") or 1000
+        canvas["height"] = height or canvas.get("height") or 1000
+        if duration is not None and kind in {"Sound", "Video"}:
+            canvas["duration"] = duration
+            source_entry["duration"] = duration
+        if width and height and kind in {"Image", "Video"}:
+            source_entry.update(width=width, height=height)
+        if kind in {"Text", "Dataset"} or (kind in {"Sound", "Video"} and duration is None):
+            rendering = {**source_entry, "label": self.lang_map(str(main_file.get("filename") or "Open source file"))}
+            existing = canvas.get("rendering") if isinstance(canvas.get("rendering"), list) else []
+            canvas["rendering"] = [rendering, *[item for item in existing if item.get("id") != rendering["id"]]]
+            # Downloads and media with unknown duration remain linked instead of inventing time extents.
+            canvas["items"] = []
+            if thumbnail_files:
+                cover = thumbnail_files[0]
+                annotation["body"] = [{"id": cover["content_url"], "type": "Image", "format": cover["mime_type"]}]
+                annotation["target"] = [canvas["id"]]
+                canvas["items"] = [annotation_page]
+            return json.dumps(manifest, ensure_ascii=False, indent=2, allow_nan=False)
+
         model_label = self._normalize_lang_map(
             metadata.get("iiif_model_label"),
             fallback="",
@@ -275,29 +316,35 @@ class IiifService:
         if model_label:
             source_entry["label"] = model_label
 
-        def _float_or_none(value: Any) -> Optional[float]:
-            text = str(value or "").strip()
-            if not text:
+        def _coordinate(name: str) -> Optional[float]:
+            value = metadata.get(name) if kind == "Model" else None
+            if value in (None, ""):
                 return None
+            label = name.removeprefix("iiif_").replace("_", " ").title()
             try:
-                return float(text)
-            except (TypeError, ValueError):
-                return None
+                number = float(value)
+            except (TypeError, ValueError, OverflowError):
+                raise ValueError(f"IIIF {label} must be a finite number") from None
+            if isinstance(value, bool) or not math.isfinite(number):
+                raise ValueError(f"IIIF {label} must be a finite number")
+            if name.startswith("iiif_scale_") and number == 0:
+                raise ValueError(f"IIIF {label} must be non-zero")
+            return number
 
         translate = {
-            "x": _float_or_none(metadata.get("iiif_translate_x")),
-            "y": _float_or_none(metadata.get("iiif_translate_y")),
-            "z": _float_or_none(metadata.get("iiif_translate_z")),
+            "x": _coordinate("iiif_translate_x"),
+            "y": _coordinate("iiif_translate_y"),
+            "z": _coordinate("iiif_translate_z"),
         }
         rotate = {
-            "x": _float_or_none(metadata.get("iiif_rotate_x")),
-            "y": _float_or_none(metadata.get("iiif_rotate_y")),
-            "z": _float_or_none(metadata.get("iiif_rotate_z")),
+            "x": _coordinate("iiif_rotate_x"),
+            "y": _coordinate("iiif_rotate_y"),
+            "z": _coordinate("iiif_rotate_z"),
         }
         scale = {
-            "x": _float_or_none(metadata.get("iiif_scale_x")),
-            "y": _float_or_none(metadata.get("iiif_scale_y")),
-            "z": _float_or_none(metadata.get("iiif_scale_z")),
+            "x": _coordinate("iiif_scale_x"),
+            "y": _coordinate("iiif_scale_y"),
+            "z": _coordinate("iiif_scale_z"),
         }
 
         transforms = []
@@ -340,14 +387,9 @@ class IiifService:
         else:
             annotation["body"] = [source_entry]
 
-        point_x = _float_or_none(metadata.get("iiif_point_x"))
-        point_y = _float_or_none(metadata.get("iiif_point_y"))
-        point_z = _float_or_none(metadata.get("iiif_point_z"))
-        if point_x is None and point_y is None and point_z is None:
-            point_x = _float_or_none(metadata.get("iiif_latitude"))
-            point_y = _float_or_none(metadata.get("iiif_longitude"))
-            point_z = _float_or_none(metadata.get("iiif_altitude"))
-
+        point_x = _coordinate("iiif_point_x")
+        point_y = _coordinate("iiif_point_y")
+        point_z = _coordinate("iiif_point_z")
         if any(value is not None for value in (point_x, point_y, point_z)):
             annotation["target"] = [
                 {
@@ -369,176 +411,10 @@ class IiifService:
         else:
             annotation["target"] = [canvas["id"]]
 
-        return json.dumps(manifest, ensure_ascii=False, indent=2)
+        return json.dumps(manifest, ensure_ascii=False, indent=2, allow_nan=False)
 
     def validate_iiif_manifest(self, manifest_json: str) -> Dict[str, Any]:
-        result = {
-            "valid": True,
-            "errors": [],
-            "warnings": [],
-            "details": {},
-        }
-
-        try:
-            manifest = json.loads(manifest_json)
-        except json.JSONDecodeError as exc:
-            result["valid"] = False
-            result["errors"].append(f"JSON Syntax Error: {exc}")
-            return result
-
-        if not isinstance(manifest, dict):
-            result["valid"] = False
-            result["errors"].append("Manifest root must be a JSON object.")
-            return result
-
-        result["details"]["top_level_keys"] = sorted(manifest.keys())
-
-        if manifest.get("@context") != self.IIIF_V3_CONTEXT:
-            result["valid"] = False
-            result["errors"].append("Manifest must declare the IIIF Presentation v3 context.")
-
-        if not str(manifest.get("id") or "").strip():
-            result["valid"] = False
-            result["errors"].append("Manifest must include a non-empty id.")
-
-        if manifest.get("type") != "Manifest":
-            result["valid"] = False
-            result["errors"].append("Manifest type must be 'Manifest'.")
-
-        label = manifest.get("label")
-        if not isinstance(label, dict) or not any(isinstance(v, list) and v for v in label.values()):
-            result["valid"] = False
-            result["errors"].append("Manifest label must be a non-empty IIIF language map.")
-
-        items = manifest.get("items")
-        if not isinstance(items, list) or not items:
-            result["valid"] = False
-            result["errors"].append("Manifest must contain at least one Canvas in items.")
-            return result
-
-        canvas = items[0]
-        if not isinstance(canvas, dict):
-            result["valid"] = False
-            result["errors"].append("Canvas entry must be an object.")
-            return result
-
-        if canvas.get("type") != "Canvas":
-            result["valid"] = False
-            result["errors"].append("Manifest items[0] must be a Canvas.")
-        if not str(canvas.get("id") or "").strip():
-            result["valid"] = False
-            result["errors"].append("Canvas must include a non-empty id.")
-
-        canvas_items = canvas.get("items")
-        if not isinstance(canvas_items, list) or not canvas_items:
-            result["valid"] = False
-            result["errors"].append("Canvas must contain at least one AnnotationPage.")
-            return result
-
-        page = canvas_items[0]
-        if not isinstance(page, dict) or page.get("type") != "AnnotationPage":
-            result["valid"] = False
-            result["errors"].append("Canvas items[0] must be an AnnotationPage.")
-            return result
-
-        page_items = page.get("items")
-        if not isinstance(page_items, list) or not page_items:
-            result["valid"] = False
-            result["errors"].append("AnnotationPage must contain at least one Annotation.")
-            return result
-
-        annotation = page_items[0]
-        if not isinstance(annotation, dict) or annotation.get("type") != "Annotation":
-            result["valid"] = False
-            result["errors"].append("AnnotationPage items[0] must be an Annotation.")
-            return result
-
-        motivation = annotation.get("motivation")
-        if isinstance(motivation, str):
-            motivation = [motivation]
-        if not isinstance(motivation, list) or not motivation:
-            result["valid"] = False
-            result["errors"].append("Annotation must define a non-empty motivation list.")
-
-        body = annotation.get("body")
-        body_items = body if isinstance(body, list) else [body]
-        if not body_items or not isinstance(body_items[0], dict):
-            result["valid"] = False
-            result["errors"].append("Annotation body must contain at least one object.")
-            return result
-
-        body_item = body_items[0]
-        if body_item.get("type") == "SpecificResource":
-            sources = body_item.get("source")
-            if isinstance(sources, list):
-                model = sources[0] if sources else None
-            else:
-                model = sources
-        else:
-            model = body_item
-
-        if not isinstance(model, dict):
-            result["valid"] = False
-            result["errors"].append("Annotation body must contain at least one Model source.")
-            return result
-
-        if not isinstance(model, dict):
-            result["valid"] = False
-            result["errors"].append("Model source entry must be an object.")
-            return result
-        if model.get("type") != "Model":
-            result["valid"] = False
-            result["errors"].append("Model source type must be 'Model'.")
-        if not str(model.get("id") or "").strip():
-            result["valid"] = False
-            result["errors"].append("Model source must include a non-empty id.")
-
-        model_format = str(model.get("format") or "").strip()
-        if not model_format:
-            result["valid"] = False
-            result["errors"].append("Model source must include a format.")
-        elif model_format not in self.allowed_model_formats:
-            result["warnings"].append(f"Model format is unusual for the current validator: {model_format}")
-
-        target = annotation.get("target")
-        target_items = target if isinstance(target, list) else [target]
-        if not target_items:
-            result["valid"] = False
-            result["errors"].append("Annotation target must reference the Canvas.")
-            return result
-
-        target_item = target_items[0]
-        if isinstance(target_item, str):
-            if not target_item.strip():
-                result["valid"] = False
-                result["errors"].append("Annotation target must reference the Canvas.")
-        elif isinstance(target_item, dict):
-            if target_item.get("type") != "SpecificResource":
-                result["valid"] = False
-                result["errors"].append("Annotation target type must be 'SpecificResource' when targeting a point in Canvas space.")
-            target_source = target_item.get("source")
-            if not isinstance(target_source, dict) or target_source.get("type") != "Canvas":
-                result["valid"] = False
-                result["errors"].append("Annotation target source must reference a Canvas.")
-            selectors = target_item.get("selector")
-            if selectors:
-                first_selector = selectors[0] if isinstance(selectors, list) and selectors else None
-                if not isinstance(first_selector, dict) or first_selector.get("type") != "PointSelector":
-                    result["valid"] = False
-                    result["errors"].append("Canvas-space 3D selectors must use PointSelector.")
-        else:
-            result["valid"] = False
-            result["errors"].append("Annotation target must reference the Canvas.")
-
-        if not manifest.get("thumbnail"):
-            result["warnings"].append("Manifest has no thumbnail.")
-        if not manifest.get("summary"):
-            result["warnings"].append("Manifest has no summary.")
-
-        result["details"]["canvas_count"] = len(items)
-        result["details"]["annotation_page_count"] = len(canvas_items) if isinstance(canvas_items, list) else 0
-        result["details"]["annotation_count"] = len(page_items) if isinstance(page_items, list) else 0
-        return result
+        return validate_manifest(manifest_json)
 
     def render_template(
         self,
@@ -693,7 +569,9 @@ class IiifService:
         )
         from services.lod_reliability import assert_public_document
         assert_public_document(repaired)
-        minimum_viable_applied = repaired != rendered
+        from services.metadata_adjustments import document_adjustments
+        adjustments = document_adjustments(rendered, repaired, "iiif")
+        minimum_viable_applied = bool(adjustments)
 
         validation = None
         if validate:
@@ -705,5 +583,6 @@ class IiifService:
         return {
             "content": repaired,
             "minimum_viable_applied": minimum_viable_applied,
+            "adjustments": adjustments,
             "validation": validation,
         }

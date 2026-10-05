@@ -358,13 +358,14 @@ def test_zenodo_mapping():
             return APIResponse.validation_error(f"Row index {row_index} out of bounds")
 
         row = df.iloc[row_index]
-        mapped_metadata = build_pipeline_aligned_lod_metadata(
+        mapped_metadata, provenance = build_pipeline_aligned_lod_metadata(
             msf_service=msf_service,
             row=row,
             zenodo_record=zenodo_record,
             mapping_config=mapping_config,
             msf_profile=msf_profile,
             session_id=session_row.id if session_row else None,
+            with_provenance=True,
         )
         mapped_metadata = normalize_zenodo_metadata(mapped_metadata)
         community_cfg = ZenodoConfigService.get_community_override_config()
@@ -374,6 +375,8 @@ def test_zenodo_mapping():
             else ZenodoConfigService.apply_community_override(mapped_metadata)
         )
 
+        if community_cfg.get("enabled"):
+            provenance["communities"] = {"source": "default", "field": "Administrator policy"}
         validation_payload = {"metadata": mapped_metadata}
         errors = validate_zenodo_metadata(validation_payload)
         warnings = []
@@ -385,6 +388,8 @@ def test_zenodo_mapping():
         return APIResponse.success(
             data={
                 "metadata": mapped_metadata,
+                "provenance": provenance,
+                "source_filename": str(row.get(msf_profile.get("filename_column") or "filename", "")),
                 "payload": validation_payload,
                 "community_override": community_cfg,
                 "row_index_used": row_index,

@@ -1109,6 +1109,7 @@ def _analyze_workflow_session_msf(
                 "errors": validation.get("errors", []),
                 "warnings": validation.get("warnings", []),
                 "minimum_viable_applied": bool(generation.get("minimum_viable_applied")),
+                "adjustments": generation.get("adjustments", []),
                 "metadata": metadata_for_standard,
                 content_key: generation["content"],
             }

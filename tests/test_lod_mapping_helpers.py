@@ -1,6 +1,6 @@
 import pandas as pd
 
-from routes.lod_mapping_helpers import build_pipeline_aligned_lod_metadata
+from routes.lod_mapping_helpers import build_pipeline_aligned_lod_metadata, spreadsheet_samples
 from services.msf_service import MSFService
 
 
@@ -108,3 +108,32 @@ def test_session_preview_uses_exact_batch_record_and_pipeline_fallbacks(tmp_path
             preview('model.glb')
         db.session.remove()
         db.drop_all()
+
+
+def test_provenance_distinguishes_actual_mapping_from_missing_value_defaults():
+    metadata, provenance = build_pipeline_aligned_lod_metadata(
+        msf_service=MSFService(), row=pd.Series({'filename': '模型.glb', 'dc:title': 'Museum object'}),
+        zenodo_record={'metadata': {'creators': [], 'license': 'cc-by-4.0'}},
+        mapping_config={'dc:title': {'source': 'msf', 'field': 'dc:title'},
+                        'dc:creator': {'source': 'zenodo', 'field': 'creators'},
+                        'dc:description': {'source': 'static', 'value': 'A curated description'}},
+        msf_profile={'filename_column': 'filename'}, with_provenance=True,
+    )
+    assert metadata['title'] == 'Museum object'
+    assert provenance['title'] == {'source': 'mapped', 'field': 'dc:title'}
+    assert provenance['description']['source'] == 'entered'
+    assert provenance['creators']['source'] == 'default'
+    assert provenance['license']['source'] == 'entered'
+
+
+def test_spreadsheet_quality_covers_every_row_and_creator_column_aliases():
+    df = pd.DataFrame([
+        {'filename': '模型.glb', 'dc:title': 'One', 'dc:description': 'Details', 'dc:creator': 'Museum'},
+        {'filename': 'nested/model.glb', 'dc:title': 'Two', 'dc:description': None, 'dc:creator': float('nan')},
+        {'filename': '模型.glb', 'dc:title': ' ', 'dc:description': '', 'dc:creator': ''},
+    ])
+    data = spreadsheet_samples(df, {'filename_column': 'filename'}, MSFService())
+    assert data['sample_records'][1]['label'] == 'nested/model.glb · row 2'
+    assert data['quality_summary']['missing'] == {'filename': 0, 'title': 1, 'description': 2, 'creators': 2}
+    assert data['quality_summary']['duplicate_source_count'] == 1
+    assert data['quality_summary']['row_count'] == 3

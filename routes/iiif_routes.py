@@ -115,13 +115,14 @@ def test_mapping():
         zenodo_record, main_file_key = record_for_metadata_row(row, msf_profile, zenodo_record)
 
         # 2. Apply Mapping (pipeline-aligned merge semantics)
-        metadata = build_pipeline_aligned_lod_metadata(
+        metadata, provenance = build_pipeline_aligned_lod_metadata(
             msf_service=msf_service,
             row=row,
             zenodo_record=zenodo_record,
             mapping_config=mapping_config,
             msf_profile=msf_profile,
             session_id=session_row.id if session_row else None,
+            with_provenance=True,
             zenodo_mapping=data.get("zenodo_mapping"),
         )
 
@@ -144,6 +145,9 @@ def test_mapping():
             data={
                 "json": json_output,
                 "metadata": metadata,
+                "provenance": provenance,
+                "source_filename": main_file_key,
+                "adjustments": generation.get("adjustments", []),
                 "validation": validation,
                 "minimum_viable_applied": generation["minimum_viable_applied"],
                 "row_index_used": row_index,

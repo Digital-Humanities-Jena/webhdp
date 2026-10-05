@@ -694,7 +694,9 @@ class MetsService:
         )
         from services.lod_reliability import assert_public_document
         assert_public_document(repaired)
-        minimum_viable_applied = repaired != rendered
+        from services.metadata_adjustments import document_adjustments
+        adjustments = document_adjustments(rendered, repaired, "mets")
+        minimum_viable_applied = bool(adjustments)
 
         validation = None
         if validate:
@@ -706,5 +708,6 @@ class MetsService:
         return {
             "content": repaired,
             "minimum_viable_applied": minimum_viable_applied,
+            "adjustments": adjustments,
             "validation": validation,
         }

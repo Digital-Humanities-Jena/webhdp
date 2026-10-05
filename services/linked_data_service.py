@@ -120,6 +120,7 @@ def validate_linked_data(content, standard):
         for title in graph.objects(dataset, CRM.P102_has_title):
             if not any(str(value).strip() for value in graph.objects(title, CRM.P190_has_symbolic_content)):
                 raise ValueError('Dataset title is empty')
-        return {'valid': True, 'errors': [], 'warnings': [], 'triple_count': len(graph)}
+        return {'valid': True, 'errors': [], 'warnings': [], 'triple_count': len(graph),
+                'details': {'profile': 'digital-dataset-1', 'scope': 'Digital dataset identity, title and file relationships. Physical objects and historical events are not modeled.'}}
     except Exception as exc:
         return {'valid': False, 'errors': [str(exc)], 'warnings': []}

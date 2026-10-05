@@ -3561,6 +3561,7 @@ def output_preview_local():
                     "content": xml_output,
                     "preview": _text_preview(xml_output),
                     "minimum_viable_applied": edm_result["minimum_viable_applied"],
+                    "adjustments": edm_result.get("adjustments", []),
                     "validation": _build_validation_report(
                         "edm",
                         validation,
@@ -3589,6 +3590,7 @@ def output_preview_local():
                     "content": json_output,
                     "preview": _text_preview(json_output),
                     "minimum_viable_applied": iiif_result["minimum_viable_applied"],
+                    "adjustments": iiif_result.get("adjustments", []),
                     "validation": _build_validation_report(
                         "iiif",
                         validation,
@@ -3616,6 +3618,7 @@ def output_preview_local():
                     "content": xml_output,
                     "preview": _text_preview(xml_output),
                     "minimum_viable_applied": mets_result["minimum_viable_applied"],
+                    "adjustments": mets_result.get("adjustments", []),
                     "validation": _build_validation_report(
                         "mets",
                         validation,

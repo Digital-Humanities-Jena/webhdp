@@ -9,7 +9,7 @@ from database.models import Session as DBSession, UserMetadata
 from routes.access_helpers import get_session_with_permission
 from services.edm_service import EdmService
 from services.msf_service import MSFService
-from .lod_mapping_helpers import build_pipeline_aligned_lod_metadata, record_for_metadata_row
+from .lod_mapping_helpers import build_pipeline_aligned_lod_metadata, record_for_metadata_row, spreadsheet_samples
 import yaml
 from schemas.mapping_schemas import MappingConfig, MappingExportRequest
 from flask import send_file
@@ -165,13 +165,14 @@ def test_mapping():
         zenodo_record, main_file_key = record_for_metadata_row(row, msf_profile, zenodo_record)
 
         # 2. Apply Mapping (pipeline-aligned merge semantics)
-        metadata = build_pipeline_aligned_lod_metadata(
+        metadata, provenance = build_pipeline_aligned_lod_metadata(
             msf_service=msf_service,
             row=row,
             zenodo_record=zenodo_record,
             mapping_config=mapping_config,
             msf_profile=msf_profile,
             session_id=session_row.id if session_row else None,
+            with_provenance=True,
             zenodo_mapping=data.get("zenodo_mapping"),
         )
 
@@ -204,6 +205,9 @@ def test_mapping():
             data={
                 "xml": xml_output,
                 "metadata": metadata,
+                "provenance": provenance,
+                "source_filename": main_file_key,
+                "adjustments": generation.get("adjustments", []),
                 "validation": validation,
                 "minimum_viable_applied": generation["minimum_viable_applied"],
                 "row_index_used": row_index,
@@ -243,6 +247,7 @@ def get_msf_columns():
 
         return APIResponse.success(
             data={
+                **spreadsheet_samples(df, msf_profile, msf_service),
                 "columns": columns,
                 "filename_column": msf_profile.get("filename_column"),
                 "suggested_row_index": suggested_row,
@@ -375,9 +380,9 @@ def test_linked_mapping():
             return APIResponse.validation_error('Choose an existing sample row')
         row = df.iloc[index]
         record = data.get('zenodo_record') or {}
-        metadata = build_pipeline_aligned_lod_metadata(msf_service=msf_service, row=row, zenodo_record=record, mapping_config=data.get('mapping_config') or {}, msf_profile=profile, zenodo_mapping=data.get('zenodo_mapping'), session_id=session_row.id)
+        metadata, provenance = build_pipeline_aligned_lod_metadata(msf_service=msf_service, row=row, zenodo_record=record, mapping_config=data.get('mapping_config') or {}, msf_profile=profile, zenodo_mapping=data.get('zenodo_mapping'), session_id=session_row.id, with_provenance=True)
         record, name = record_for_metadata_row(row, profile, record)
         content = generate_linked_data(metadata, record, main_file_key=name)[standard][1]
-        return APIResponse.success(data={'json' if standard == 'jsonld' else 'xml': content, 'metadata': metadata, 'row_index_used': index, 'validation': validate_linked_data(content, standard)})
+        return APIResponse.success(data={'json' if standard == 'jsonld' else 'xml': content, 'metadata': metadata, 'provenance': provenance, 'source_filename': name, 'row_index_used': index, 'validation': validate_linked_data(content, standard)})
     except (ValueError, OSError) as exc:
         return APIResponse.validation_error(str(exc))

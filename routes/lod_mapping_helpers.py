@@ -51,7 +51,8 @@ def build_pipeline_aligned_lod_metadata(
     msf_profile: Dict[str, Any],
     zenodo_mapping: Dict[str, Any] | None = None,
     session_id: int | None = None,
-) -> Dict[str, Any]:
+    with_provenance: bool = False,
+) -> Dict[str, Any] | tuple[Dict[str, Any], Dict[str, Any]]:
     """
     Build LOD metadata in the same spirit as pipeline execution:
     1) start from normalized Zenodo metadata defaults,
@@ -64,6 +65,7 @@ def build_pipeline_aligned_lod_metadata(
         if isinstance(candidate, dict):
             zenodo_metadata = dict(candidate)
 
+    provenance = {key: {'source': 'entered'} for key, value in zenodo_metadata.items() if has_non_empty_value(value)}
     item_defaults = {}
     source_name = str(row.get((msf_profile or {}).get('filename_column') or 'filename', '') or '').strip().replace('\\', '/')
     if session_id is not None:
@@ -73,7 +75,10 @@ def build_pipeline_aligned_lod_metadata(
         entries = BatchFileMetadata.query.filter_by(session_id=session_id).all()
         rows = MetadataRows([(entry.filename, json.loads(entry.metadata_json)) for entry in entries], [entry.filename for entry in entries])
         shared, item_defaults = _split_batch_shared_zenodo_metadata(zenodo_metadata)
-        zenodo_metadata = merge_non_empty_metadata(shared, rows.get(source_name) or {})
+        batch_metadata = rows.get(source_name) or {}
+        zenodo_metadata = merge_non_empty_metadata(shared, batch_metadata)
+        provenance = {key: {'source': 'batch' if has_non_empty_value(batch_metadata.get(key)) else 'shared'}
+                      for key, value in zenodo_metadata.items() if has_non_empty_value(value)}
         zenodo_record = {**zenodo_record, 'metadata': zenodo_metadata}
 
     if zenodo_mapping:
@@ -104,7 +109,21 @@ def build_pipeline_aligned_lod_metadata(
         mapping_config,
         include_defaults=False,
     )
-    return merge_non_empty_metadata(normalized_base, mapped_values)
+    metadata = merge_non_empty_metadata(normalized_base, mapped_values)
+    if not with_provenance:
+        return metadata
+    for key in normalized_base:
+        if key not in provenance:
+            provenance[key] = {'source': 'inferred' if key == 'title' else 'default'}
+    for config in (zenodo_mapping or {}, mapping_config or {}):
+        for tag, item in config.items():
+            values = msf_service.apply_lod_mapping(row, zenodo_record, {tag: item}, include_defaults=False)
+            for key, value in values.items():
+                if has_non_empty_value(value):
+                    origin = provenance.get(item.get('field'), {}) if item.get('source') == 'zenodo' else {}
+                    source = origin.get('source') if origin.get('source') in ('default', 'inferred') else 'mapped' if item.get('source') in ('msf', 'zenodo') else 'entered'
+                    provenance[key] = {'source': source, 'field': item.get('field') or 'Static value'}
+    return metadata, provenance
 
 
 def record_for_metadata_row(row, profile, record):
@@ -121,3 +140,30 @@ def record_for_metadata_row(row, profile, record):
         files = [{'key': name, 'filename': name}]
     record['files'] = files
     return record, name
+
+
+def spreadsheet_samples(df, profile, service):
+    """Name every source row and summarize input gaps; this does not validate exports."""
+    filename_column = profile.get('filename_column') or 'filename'
+    mapping = service.suggest_column_mapping(list(df.columns))
+    aliases = {'_creators_raw': 'creators', '_filename': 'filename'}
+    columns = {aliases.get(target, target): column for column, target in mapping.items()}
+    samples, missing = [], {'filename': 0, 'title': 0, 'description': 0, 'creators': 0}
+    names = {}
+    def text(value):
+        value = str(value).strip() if value is not None else ''
+        return '' if value.lower() in ('nan', 'none', '<na>') else value
+    for index, (_, row) in enumerate(df.iterrows()):
+        name = text(row.get(filename_column))
+        title = text(row.get(columns.get('title', 'title')))
+        samples.append({'row_index': index, 'filename': name, 'title': title,
+                        'label': f"{name or 'Missing filename'} · row {index + 1}"})
+        if name:
+            names[name.casefold()] = names.get(name.casefold(), 0) + 1
+        for key in missing:
+            column = filename_column if key == 'filename' else columns.get(key, columns.get('creator', 'creator') if key == 'creators' else key)
+            if not text(row.get(column)):
+                missing[key] += 1
+    return {'sample_records': samples, 'quality_summary': {'row_count': len(df), 'missing': missing,
+            'duplicate_source_count': sum(count - 1 for count in names.values() if count > 1),
+            'scope': 'Spreadsheet values before defaults; export validation applies only to the selected preview.'}}
