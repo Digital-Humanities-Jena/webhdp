@@ -49,15 +49,12 @@
 
         <div class="w-px h-6 bg-white/20 mx-1"></div>
 
-        <div class="flex flex-wrap items-center gap-2">
-          <label for="lod-sample-row" class="text-xs text-cyan-100">Sample row (starts at 0)</label>
-          <input
-            id="lod-sample-row"
-            v-model.number="selectedRowIndex"
-            type="number"
-            min="0"
-            class="w-20 px-2 py-1 bg-white/20 border border-white/20 rounded text-xs text-white placeholder-cyan-100 focus:outline-none focus:ring-1 focus:ring-white/40"
-          >
+        <div class="flex min-w-0 flex-wrap items-center gap-2">
+          <label for="lod-sample-row" class="text-sm text-cyan-100">Preview record</label>
+          <select id="lod-sample-row" v-model.number="selectedRowIndex" class="max-w-full min-h-[44px] rounded border border-white/30 bg-white px-2 py-2 text-sm text-slate-800">
+            <option v-for="sample in sampleRecords" :key="sample.row_index" :value="sample.row_index">{{ sample.label }}</option>
+            <option v-if="!sampleRecords.length" :value="suggestedRowIndex">Suggested record {{ suggestedRowIndex + 1 }}</option>
+          </select>
         </div>
 
         <button
@@ -78,15 +75,15 @@
       </div>
     </div>
 
-    <div class="flex flex-1 overflow-hidden bg-white/5 backdrop-blur-sm">
+    <div class="flex flex-col sm:flex-row flex-1 overflow-hidden bg-white/5 backdrop-blur-sm">
       <!-- Sidebar: LOD Standards -->
-      <div class="w-20 shrink-0 bg-black/5 border-r border-white/10 flex flex-col items-center py-6 gap-6">
+      <div class="w-full sm:w-20 shrink-0 bg-black/5 border-r border-white/10 flex flex-row sm:flex-col items-center overflow-x-auto px-2 py-2 sm:py-6 gap-2 sm:gap-6">
         <button
           type="button"
           :aria-pressed="activeStandard === std.id"
           v-for="std in lodStandards"
           :key="std.id"
-          class="group relative flex flex-col items-center gap-1 cursor-pointer"
+          class="group relative shrink-0 min-w-[60px] flex flex-col items-center gap-1 cursor-pointer"
           @click="activeStandard = std.id"
         >
           <div :class="['p-3 rounded-2xl transition-all duration-300', activeStandard === std.id ? 'bg-cyan-700 text-white shadow-lg shadow-cyan-500/40 scale-110' : 'bg-white/70 text-slate-700 hover:bg-white opacity-80 hover:opacity-100']">
@@ -104,6 +101,7 @@
           <button
             v-for="mod in modalities"
             :key="mod.id"
+            :aria-pressed="activeModality === mod.id"
             @click="activeModality = mod.id"
             :class="['px-3 sm:px-5 py-3 text-xs font-bold uppercase tracking-widest transition-all relative', activeModality === mod.id ? 'text-cyan-700' : 'text-gray-500 hover:text-gray-700']"
           >
@@ -119,6 +117,7 @@
              <p class="text-xs font-medium uppercase tracking-widest">Loading Fields...</p>
           </div>
 
+          <div v-else-if="columnsError" role="alert" class="p-4 text-sm text-rose-800">{{ columnsError }} <button type="button" class="underline" @click="fetchColumns">Retry loading fields</button></div>
           <div v-else class="space-y-4">
             <div
               v-if="activeStandard === 'zenodo' && communityOverride.enabled"
@@ -127,29 +126,31 @@
               Zenodo community is hardcoded by admin to <strong>{{ communityOverride.community }}</strong>.
               Community mapping is overridden while this setting is enabled.
             </div>
-            <div v-for="tag in currentTags" :key="tag.id" class="mapping-row group flex items-center gap-4 p-4 rounded-xl border border-white/40 bg-white/50 hover:bg-white/80 hover:shadow-md transition-all">
+            <div v-for="tag in currentTags" :key="tag.id" class="mapping-row group flex flex-col lg:flex-row items-stretch lg:items-center gap-3 p-4 rounded-xl border border-white/40 bg-white/50 hover:bg-white/80 hover:shadow-md transition-all">
               <!-- Target Tag -->
-              <div class="w-1/3">
+              <div class="min-w-0 lg:w-1/3">
                 <div class="flex items-center gap-2 mb-1">
-                  <span class="text-xs font-bold text-slate-800 tracking-tight">{{ tag.name }}</span>
+                  <label :for="controlId(tag, 'value')" class="text-sm font-semibold text-slate-800">{{ tag.name }}</label>
                   <span v-if="tag.required" class="text-red-500 text-[10px] font-bold">*</span>
                 </div>
-                <p class="text-[10px] text-gray-500 leading-tight">{{ tag.description }}</p>
+                <p class="text-xs text-gray-500 leading-relaxed">{{ tag.description }}</p>
               </div>
 
               <!-- Connector -->
-              <div class="flex-shrink-0 text-gray-300">
+              <div class="hidden lg:block flex-shrink-0 text-gray-300">
                 <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8l4 4m0 0l-4 4m4-4H3" />
                 </svg>
               </div>
 
               <!-- Source Selector -->
-              <div class="flex-1 flex gap-2">
+              <div class="min-w-0 flex-1 flex flex-col sm:flex-row gap-2">
+                <label :for="controlId(tag, 'source')" class="sr-only">{{ tag.name }} source · {{ activeStandardLabel }} {{ activeModality }}</label>
                 <select
+                  :id="controlId(tag, 'source')"
                   v-model="mapping[activeStandard][activeModality][tag.id].source"
                   :disabled="isCommunityOverrideLocked(tag.id)"
-                  class="bg-white border border-gray-200 rounded-lg px-2 py-1.5 text-xs font-medium focus:ring-2 focus:ring-cyan-600 focus:border-cyan-600 transition-all outline-none"
+                  class="w-full sm:w-40 shrink-0 min-h-[44px] bg-white border border-gray-200 rounded-lg px-2 py-2 text-sm font-medium focus:ring-2 focus:ring-cyan-600 focus:border-cyan-600 transition-all outline-none"
                 >
                   <option value="msf">MSF Column</option>
                   <option value="zenodo">Zenodo Metadata</option>
@@ -158,7 +159,7 @@
                   <option value="skip">Skip / Default</option>
                 </select>
 
-                <div class="flex-1 relative">
+                <div class="min-w-0 flex-1 relative">
                   <div
                     v-if="isCommunityOverrideLocked(tag.id)"
                     class="h-full min-h-[34px] flex items-center px-3 rounded-lg border border-amber-200 bg-amber-50 text-xs text-amber-800"
@@ -168,8 +169,9 @@
                   <!-- MSF Dropdown -->
                   <select
                     v-else-if="mapping[activeStandard][activeModality][tag.id].source === 'msf'"
+                    :id="controlId(tag, 'value')"
                     v-model="mapping[activeStandard][activeModality][tag.id].field"
-                    class="w-full bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-xs font-medium focus:ring-2 focus:ring-cyan-600 outline-none"
+                    class="w-full min-w-0 min-h-[44px] bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm font-medium focus:ring-2 focus:ring-cyan-600 outline-none"
                   >
                     <option v-for="col in msfColumns" :key="col" :value="col">{{ col }}</option>
                   </select>
@@ -177,8 +179,9 @@
                   <!-- Zenodo Dropdown -->
                   <select
                     v-else-if="mapping[activeStandard][activeModality][tag.id].source === 'zenodo'"
+                    :id="controlId(tag, 'value')"
                     v-model="mapping[activeStandard][activeModality][tag.id].field"
-                    class="w-full bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-xs font-medium focus:ring-2 focus:ring-cyan-600 outline-none"
+                    class="w-full min-w-0 min-h-[44px] bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm font-medium focus:ring-2 focus:ring-cyan-600 outline-none"
                   >
                     <option v-for="opt in zenodoOptions" :key="opt.id" :value="opt.id">{{ opt.name }}</option>
                   </select>
@@ -186,17 +189,19 @@
                   <!-- Static Input -->
                   <input
                     v-else-if="mapping[activeStandard][activeModality][tag.id].source === 'static'"
+                    :id="controlId(tag, 'value')"
                     v-model="mapping[activeStandard][activeModality][tag.id].value"
                     type="text"
                     placeholder="Enter value..."
-                    class="w-full bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-xs font-medium focus:ring-2 focus:ring-cyan-600 outline-none"
+                    class="w-full min-w-0 min-h-[44px] bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm font-medium focus:ring-2 focus:ring-cyan-600 outline-none"
                   />
 
                   <!-- Options Selector -->
                   <select
                     v-else-if="mapping[activeStandard][activeModality][tag.id].source === 'options'"
+                    :id="controlId(tag, 'value')"
                     v-model="mapping[activeStandard][activeModality][tag.id].value"
-                    class="w-full bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-xs font-medium focus:ring-2 focus:ring-cyan-600 outline-none"
+                    class="w-full min-w-0 min-h-[44px] bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm font-medium focus:ring-2 focus:ring-cyan-600 outline-none"
                   >
                     <option v-for="opt in tag.options" :key="opt" :value="opt">{{ opt }}</option>
                   </select>
@@ -212,16 +217,21 @@
       </div>
     </div>
 
+    <details v-if="qualitySummary" class="px-4 py-3 text-sm text-slate-700">
+      <summary class="cursor-pointer">Spreadsheet checks · {{ qualitySummary.row_count }} rows</summary>
+      <p class="mt-2">Missing: {{ qualitySummary.missing.filename }} filenames, {{ qualitySummary.missing.title }} titles, {{ qualitySummary.missing.description }} descriptions, {{ qualitySummary.missing.creators }} creator entries. {{ qualitySummary.duplicate_source_count }} repeated source paths.</p>
+      <p class="mt-1 text-xs">{{ qualitySummary.scope }}</p>
+    </details>
     <p v-if="testError" role="alert" class="p-4 text-sm text-red-700">{{ testError }} Use Test Mapping to retry.</p>
     <p v-if="['cidoc_crm', 'jsonld'].includes(activeStandard)" class="px-4 py-2 text-sm text-slate-700">CIDOC-CRM and JSON-LD describe the same digital dataset. Both use the CIDOC-CRM mappings.</p>
     <!-- Test results -->
     <div v-if="testResult" class="bg-white border-t border-gray-200 flex flex-col max-h-[600px] overflow-auto">
-      <div class="flex items-center justify-between p-4 bg-gray-50 border-b">
+      <div class="flex flex-wrap gap-3 items-center justify-between p-4 bg-gray-50 border-b">
         <div class="flex items-center gap-3">
-          <span :class="['px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider', testResult.validation.valid ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700']">
-            {{ testResult.validation.valid ? `Valid ${activeStandardLabel}` : 'Validation Failed' }}
+          <span :class="['px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider', testResult.validation.valid ? 'bg-green-100 text-green-700' : validationUnavailable ? 'bg-amber-100 text-amber-800' : 'bg-red-100 text-red-700']">
+            {{ testResult.validation.valid ? `Valid ${activeStandardLabel}` : validationUnavailable ? 'Unverified · validator unavailable' : 'Validation Failed' }}
           </span>
-          <h3 class="text-sm font-bold text-gray-900">Preview (row {{ testResult.row_index_used ?? selectedRowIndex }}) - {{ activeStandard.toUpperCase() }}</h3>
+          <h3 class="text-sm font-bold text-gray-900">Preview · {{ sampleLabel }} - {{ activeStandard.toUpperCase() }}</h3>
         </div>
         <button aria-label="Close preview" @click="testResult = null" class="text-gray-400 hover:text-gray-600 transition-colors">
           <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -231,25 +241,29 @@
       </div>
       <div class="flex flex-col lg:flex-row flex-1 overflow-auto">
         <div class="w-full lg:w-1/3 min-w-0 border-r p-4 overflow-y-auto bg-gray-50/50">
-          <h4 class="text-[10px] uppercase font-bold text-gray-400 mb-2">Applied Metadata</h4>
-          <pre class="text-[10px] bg-white p-3 rounded-lg border border-gray-100 shadow-sm">{{ JSON.stringify(testResult.metadata, null, 2) }}</pre>
+          <MetadataReview :metadata="testResult.metadata" :provenance="testResult.provenance" :source-name="testResult.source_filename || sampleRecords.find(sample => sample.row_index === selectedRowIndex)?.filename || ''" />
+          <details v-if="testResult.adjustments?.length" class="mt-3 text-xs text-slate-700">
+            <summary class="cursor-pointer">{{ testResult.adjustments.length }} generated additions or corrections</summary>
+            <ul class="mt-2 space-y-2 break-words"><li v-for="(item, index) in testResult.adjustments" :key="index">{{ item.field }} · {{ item.action }}<span v-if="item.value != null">: {{ item.value }}</span></li></ul>
+          </details>
 
           <div v-if="testResult.validation.errors?.length || testResult.validation.warnings?.length" class="mt-4">
-            <h4 v-if="testResult.validation.errors?.length" class="text-[10px] uppercase font-bold text-red-400 mb-2">Errors</h4>
+            <h4 v-if="testResult.validation.errors?.length" class="text-xs uppercase font-semibold text-red-700 mb-2">Errors</h4>
             <ul v-if="testResult.validation.errors?.length" class="space-y-1 mb-4">
-              <li v-for="(err, i) in testResult.validation.errors" :key="i" class="text-[9px] text-red-600 bg-red-50 p-1.5 rounded border border-red-100">{{ err }}</li>
+              <li v-for="(err, i) in testResult.validation.errors" :key="i" class="text-xs text-red-600 bg-red-50 p-1.5 rounded border border-red-100"><button v-if="correctionTag(err)" type="button" class="text-left underline" @click="focusCorrection(err)">{{ err }}</button><span v-else>{{ err }}</span></li>
             </ul>
 
-            <h4 v-if="testResult.validation.warnings?.length" class="text-[10px] uppercase font-bold text-amber-500 mb-2">Warnings (Problem Patterns)</h4>
+            <h4 v-if="testResult.validation.warnings?.length" class="text-xs uppercase font-semibold text-amber-800 mb-2">Warnings</h4>
             <ul v-if="testResult.validation.warnings?.length" class="space-y-1">
-              <li v-for="(warn, i) in testResult.validation.warnings" :key="i" class="text-[9px] text-amber-700 bg-amber-50 p-1.5 rounded border border-amber-100">{{ warn }}</li>
+              <li v-for="(warn, i) in testResult.validation.warnings" :key="i" class="text-xs text-amber-700 bg-amber-50 p-1.5 rounded border border-amber-100">{{ warn }}</li>
             </ul>
           </div>
-          <p class="mt-4 text-[10px] text-gray-500">Row used: {{ testResult.row_index_used ?? selectedRowIndex }}</p>
+          <p class="mt-4 text-xs text-gray-500">This check covers the selected record. {{ testResult.validation.details?.scope || 'Review generated defaults and warnings before processing the batch.' }}</p>
         </div>
-        <div class="min-w-0 flex-1 bg-gray-900 overflow-auto">
-          <pre class="p-4 text-green-400 font-mono text-[10px] leading-relaxed">{{ testPreviewOutput }}</pre>
-        </div>
+        <details class="min-w-0 flex-1 overflow-auto p-4">
+          <summary class="cursor-pointer text-sm text-indigo-700">Generated document</summary>
+          <pre class="p-4 bg-gray-900 text-green-300 overflow-x-auto rounded-md font-mono text-xs leading-relaxed">{{ testPreviewOutput }}</pre>
+        </details>
       </div>
     </div>
   </div>
@@ -260,6 +274,7 @@ import { ref, onMounted, onBeforeUnmount, reactive, computed, watch } from 'vue'
 import api from '@/services/api'
 import { useToast } from '@/composables/useToast'
 import { useWorkflowStore } from '@/stores/workflow'
+import MetadataReview from '@/components/workflow/MetadataReview.vue'
 
 const toast = useToast()
 const workflowStore = useWorkflowStore()
@@ -286,6 +301,17 @@ let testEpoch = 0
 let columnsEpoch = 0
 const msfColumns = ref([])
 const selectedRowIndex = ref(0)
+const sampleRecords = ref([])
+const qualitySummary = ref(null)
+const columnsError = ref('')
+function controlId(tag, role) { return `lod-${activeStandard.value}-${activeModality.value}-${tag.id.replace(/[^a-z0-9]/gi, '-')}-${role}` }
+const sampleLabel = computed(() => sampleRecords.value.find(sample => sample.row_index === (testResult.value?.row_index_used ?? selectedRowIndex.value))?.label || `Record ${(testResult.value?.row_index_used ?? selectedRowIndex.value) + 1}`)
+const validationUnavailable = computed(() => {
+  if (testResult.value?.validation?.status === 'invalid') return false
+  if (testResult.value?.validation?.status === 'unverified') return true
+  const remote = testResult.value?.validation?.details?.remote
+  return remote && ['error', 'unavailable', 'disabled', 'unknown'].includes(String(remote.status).toLowerCase()) && remote.valid !== true
+})
 const suggestedRowIndex = ref(0)
 const communityOverride = ref({
   enabled: true,
@@ -319,7 +345,7 @@ const lodStandards = [
   },
   {
     id: 'iiif',
-    name: 'IIIF 3D',
+    name: 'IIIF',
     mapped: true,
     icon: {
       template: `
@@ -412,12 +438,15 @@ const tagsByModality = {
     { id: 'label', name: 'Label', required: true, description: 'The title of the Manifest.' },
     { id: 'summary', name: 'Summary', required: false, description: 'A brief description of the object.' },
     { id: 'iiif:manifestId', name: 'Manifest ID', required: false, description: 'Persistent IIIF Manifest ID URL.' },
-    { id: 'iiif:sceneId', name: 'Scene ID', required: false, description: 'Scene identifier URI.' },
-    { id: 'iiif:sceneLabel', name: 'Scene Label', required: false, description: 'Human-readable scene label.' },
+    { id: 'iiif:sceneId', name: 'Canvas ID', required: false, description: 'Scene identifier URI.' },
+    { id: 'iiif:sceneLabel', name: 'Canvas Label', required: false, description: 'Human-readable scene label.' },
     { id: 'iiif:annotationPageId', name: 'Annotation Page ID', required: false, description: 'Annotation page identifier URI.' },
     { id: 'iiif:annotationId', name: 'Annotation ID', required: false, description: 'Annotation identifier URI.' },
-    { id: 'iiif:modelId', name: 'Model URL', required: false, description: 'Direct model URL used in body.source.' },
+    { id: 'iiif:modelId', name: 'Content URL', required: false, description: 'Direct model URL used in body.source.' },
     { id: 'iiif:modelFormat', name: 'Model Format', required: false, description: 'Model media type.', options: ['model/gltf-binary', 'model/gltf+json', 'model/obj', 'application/octet-stream'] },
+    { id: 'iiif:width', name: 'Canvas Width', required: false, description: 'Positive integer. Supply with height to set the presentation aspect ratio.' },
+    { id: 'iiif:height', name: 'Canvas Height', required: false, description: 'Positive integer. Without dimensions, a square virtual frame is used.' },
+    { id: 'iiif:duration', name: 'Duration (seconds)', required: false, description: 'Positive duration for audio/video playback. Without it, the source is offered as a download.' },
     { id: 'iiif:translateX', name: 'Translate X', required: false, description: 'Translate transform X value.' },
     { id: 'iiif:translateY', name: 'Translate Y', required: false, description: 'Translate transform Y value.' },
     { id: 'iiif:translateZ', name: 'Translate Z', required: false, description: 'Translate transform Z value.' },
@@ -448,6 +477,7 @@ const mapping = reactive({
 function getTagsForStandardAndModality(standardId, modalityId) {
   if (standardId === 'zenodo') return tagsByModality.zenodo
   if (['cidoc_crm', 'jsonld'].includes(standardId)) return tagsByModality['3d'].filter(tag => ['dc:title', 'dc:description', 'dc:creator'].includes(tag.id))
+  if (standardId === 'iiif' && modalityId !== '3d') return tagsByModality.iiif_3d.filter(tag => !/iiif:(translate|rotate|scale|point|modelFormat)/.test(tag.id))
   const tagKey = standardId === 'iiif' ? `iiif_${modalityId}` : modalityId
   if (tagsByModality[tagKey]) return tagsByModality[tagKey]
   if (standardId === 'iiif') return tagsByModality.iiif_3d
@@ -471,7 +501,7 @@ function getDefaultMappingForTag(tagId) {
     return { source: 'options', field: '', value: 'mul' }
   }
   if (tagId === 'iiif:modelFormat') {
-    return { source: 'options', field: '', value: 'model/gltf-binary' }
+    return { source: 'skip', field: '', value: '' }
   }
   if (tagId === 'iiif:sceneLabel') {
     return { source: 'static', field: '', value: 'A Scene' }
@@ -601,6 +631,14 @@ const currentTags = computed(() => {
   return getTagsForStandardAndModality(activeStandard.value, activeModality.value)
 })
 
+function correctionTag(message) {
+  const text = String(message).toLowerCase()
+  return currentTags.value.find(tag => text.includes(tag.name.toLowerCase()) || new RegExp(`\\b${tag.id.split(':').pop().toLowerCase()}\\b`).test(text))
+}
+function focusCorrection(message) {
+  const tag = correctionTag(message)
+  if (tag) (document.getElementById(controlId(tag, 'value')) || document.getElementById(controlId(tag, 'source')))?.focus()
+}
 const activeStandardLabel = computed(() => {
   const match = lodStandards.find(std => std.id === activeStandard.value)
   return match?.name || activeStandard.value.toUpperCase()
@@ -638,6 +676,7 @@ async function fetchCommunityOverride() {
 async function fetchColumns() {
   const epoch = ++columnsEpoch
   loadingColumns.value = true
+  columnsError.value = ''
   try {
     const payload = {
       msf_path: props.msfPath,
@@ -650,6 +689,8 @@ async function fetchColumns() {
     if (epoch !== columnsEpoch) return
     if (res.success) {
       msfColumns.value = res.data.columns || []
+      sampleRecords.value = res.data.sample_records || []
+      qualitySummary.value = res.data.quality_summary || null
       const suggested = Number.isInteger(res.data.suggested_row_index) ? res.data.suggested_row_index : 0
       suggestedRowIndex.value = Math.max(0, suggested)
       selectedRowIndex.value = suggestedRowIndex.value
@@ -674,7 +715,7 @@ async function fetchColumns() {
   } catch (e) {
     if (epoch !== columnsEpoch) return
     msfColumns.value = []
-    toast.error("Failed to load MSF columns")
+    columnsError.value = "Could not load spreadsheet fields. Check your connection and try again."
   } finally {
     if (epoch === columnsEpoch) loadingColumns.value = false
   }
@@ -823,6 +864,8 @@ watch(mapping, (newMapping) => {
 
 watch(() => JSON.stringify([props.msfPath, workflowStore.sessionId, msfParseOptions.value]), () => {
   columnsEpoch++
+  sampleRecords.value = []
+  qualitySummary.value = null
   msfColumns.value = []
   fetchColumns()
 })

@@ -109,7 +109,13 @@ What you do:
 
 What happens internally:
 - Metadata draft is autosaved.
+- Pending edits are retained in this browser tab for the current user and session, and recovered after reload. Navigation attempts a server save; a failed save stays visible with a retry action.
 - On final save, payload is normalized and validated.
+
+Field errors identify the affected input and move focus to the first invalid
+field. In batch mode, use the filename picker and missing-description counts to
+review individual records before continuing. Save successfully before closing
+the browser tab; the temporary browser copy is cleared on logout.
 
 Why this step is required:
 - High-quality metadata is mandatory for discoverability, interoperability, and standards compliance.
@@ -124,6 +130,8 @@ What you do:
 - Preview rendered XML.
 - Run validation report.
 - Confirm LOD mapping and minimum viable output preferences when available.
+- Review readable metadata, source labels, and generated adjustments; technical output remains expandable.
+- In a batch, choose preview records by filename and inspect spreadsheet checks. A preview validates the selected row only.
 
 What happens internally:
 - Jinja-based template rendering occurs with your metadata.
@@ -141,6 +149,7 @@ Proceed when:
 What you do:
 - Choose the processing pipeline for the selected files and metadata.
 - Review enabled pipeline steps before continuing.
+- Read the outcome and expand **Outputs and requirements** for formats, credentials, and resources. Incompatible source selections cannot start that pipeline.
 - When available, run optional 3D analysis or derivative pipelines before publication to check technical readiness.
 
 What happens internally:
@@ -200,9 +209,9 @@ LOD policy:
 - `optional`: LOD generation failure is recorded as a warning and upload can continue.
 - `disabled`: LOD generation is skipped.
 
-Current baseline note:
-- In the current implementation, submission execution is centered on predefined/default pipeline IDs maintained by WebHDP integration.
-- Future updates are planned to emphasize HDP component-driven pipeline composition.
+Reusable processing plans:
+- Guided submission uses registered native pipeline definitions and their enabled component steps.
+- The Component Constructor can compose, validate, and save reusable plans. Installed components and execution profiles determine available processing and resource requirements.
 
 Why this step is required:
 - Converts curated input into publication-ready deliverables in a controlled, traceable pipeline.
@@ -238,3 +247,5 @@ Why this phase matters:
 - Running production uploads before validating in sandbox
 
 For operational troubleshooting, see the [Troubleshooting Guide](troubleshooting.md).
+For focused single-record, batch, model-processing, and recovery tasks, see
+[Common Workflow Recipes](common-workflow-recipes.md).

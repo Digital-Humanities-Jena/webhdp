@@ -143,3 +143,54 @@ it('debounces edits on a reactive object and cancels the pending save on unmount
   await vi.advanceTimersByTimeAsync(3000)
   expect(saveFunction).toHaveBeenCalledTimes(1)
 })
+
+it('recovers edits made before the debounce timer when the view is reopened', async () => {
+  const key = 'webhdp:metadata-draft:1:42'
+  const saveFunction = vi.fn().mockResolvedValue(undefined)
+  const wrapper = mountAutoSaveHarness(saveFunction, { debounce: 3000, draftKey: key })
+  wrapper.vm.data.title = 'Unsent title'
+  wrapper.unmount()
+  expect(saveFunction).not.toHaveBeenCalled()
+  const reopened = mountAutoSaveHarness(saveFunction, { debounce: 3000, draftKey: key })
+  expect(reopened.vm.restoreDraft()).toBe(true)
+  expect(reopened.vm.data.title).toBe('Unsent title')
+  expect(reopened.vm.dirty).toBe(true)
+  expect(await reopened.vm.save()).toBe(true)
+  expect(sessionStorage.getItem(key)).toBe(null)
+  reopened.unmount()
+})
+
+it('keeps the newer local revision when an earlier save is acknowledged', async () => {
+  let acknowledge
+  const key = 'webhdp:metadata-draft:1:42'
+  const saveFunction = vi.fn().mockImplementationOnce(() => new Promise(resolve => { acknowledge = resolve })).mockResolvedValue(undefined)
+  const wrapper = mountAutoSaveHarness(saveFunction, { debounce: 3000, draftKey: key })
+  wrapper.vm.data.title = 'First revision'
+  const saving = wrapper.vm.save()
+  wrapper.vm.data.title = 'Latest revision'
+  acknowledge()
+  await saving
+  expect(wrapper.vm.dirty).toBe(true)
+  expect(JSON.parse(sessionStorage.getItem(key)).data.title).toBe('Latest revision')
+  await wrapper.vm.save()
+  expect(sessionStorage.getItem(key)).toBe(null)
+  wrapper.unmount()
+})
+
+it('requests unload protection even when scheduling is paused for an explicit save', () => {
+  const enabled = ref(true)
+  const wrapper = mountAutoSaveHarness(vi.fn(), { enabled, debounce: 3000, draftKey: 'webhdp:metadata-draft:1:42' })
+  const storage = vi.spyOn(sessionStorage, 'setItem').mockImplementation(() => { throw new Error('Quota exceeded') })
+  try {
+    wrapper.vm.data.title = 'Unsaved title'
+    expect(wrapper.vm.localDraftSaved).toBe(false)
+    expect(wrapper.vm.draftStorageError.message).toBe('Quota exceeded')
+    enabled.value = false
+    const event = new Event('beforeunload', { cancelable: true })
+    window.dispatchEvent(event)
+    expect(event.defaultPrevented).toBe(true)
+  } finally {
+    wrapper.unmount()
+    storage.mockRestore()
+  }
+})

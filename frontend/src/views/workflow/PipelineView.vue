@@ -33,7 +33,7 @@
             <div
               v-for="pipeline in availablePipelines"
               :key="pipeline.identifier"
-              @click="!submitting && (selectedPipeline = pipeline.identifier)"
+              @click="!submitting && !pipelineInputError(pipeline, workflowStore.selectedFiles) && (selectedPipeline = pipeline.identifier)"
               :class="[
                 'border-2 rounded-lg p-5 cursor-pointer transition-all',
                 selectedPipeline === pipeline.identifier
@@ -48,16 +48,25 @@
                   :id="pipeline.identifier"
                   :value="pipeline.identifier"
                   v-model="selectedPipeline"
+                  :disabled="Boolean(pipelineInputError(pipeline, workflowStore.selectedFiles))"
+                  :aria-describedby="`${pipeline.identifier}-outcome${pipelineInputError(pipeline, workflowStore.selectedFiles) ? ` ${pipeline.identifier}-input-error` : ''}`"
                   class="mt-1.5 h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500"
                 />
                 <div class="ml-4 min-w-0 flex-1">
                   <div class="flex flex-wrap items-center justify-between gap-2">
-                    <label :for="pipeline.identifier" class="text-lg font-bold text-gray-900 cursor-pointer">{{ pipeline.name }}</label>
+                    <label :for="pipeline.identifier" class="text-lg font-bold text-gray-900 cursor-pointer">{{ pipelineTaskLabel(pipeline) }}</label>
+                    <span v-if="recommendedPipeline?.identifier === pipeline.identifier" class="text-xs font-medium text-indigo-700" title="Compatible with your selection; favors fewer resources and a workflow without publication.">Recommended</span>
                   </div>
                   <p class="mt-1 text-sm text-gray-600 leading-relaxed">{{ pipeline.description }}</p>
 
+                  <p :id="`${pipeline.identifier}-outcome`" class="mt-2 text-sm font-medium text-slate-800">{{ pipelineGuidance(pipeline).outcome }}</p>
+                  <p v-if="pipelineInputError(pipeline, workflowStore.selectedFiles)" :id="`${pipeline.identifier}-input-error`" class="mt-1 text-sm text-amber-800">{{ pipelineInputError(pipeline, workflowStore.selectedFiles) }}</p>
                   <details class="mt-3 text-sm text-gray-600" @click.stop>
-                    <summary class="cursor-pointer font-medium text-indigo-700">Pipeline details</summary>
+                    <summary class="cursor-pointer font-medium text-indigo-700">Outputs and requirements</summary>
+                    <p v-if="pipelineGuidance(pipeline).outputs?.length" class="mt-2">Outputs: {{ pipelineGuidance(pipeline).outputs.join(', ') }}.</p>
+                    <p class="mt-2">Requires: {{ pipelineGuidance(pipeline).requirements.join('; ') || 'No HPC allocation required' }}.</p>
+                    <p v-if="pipelineGuidance(pipeline).source_extensions?.length" class="mt-2">Source formats: {{ pipelineGuidance(pipeline).source_extensions.join(', ') }}.</p>
+                    <p v-if="pipeline.identifier === 'mesh_optimization'" class="mt-2">Static GLB with embedded textures only. Detail budgets apply per material group; geometry is retained when reduction exceeds the error limit. Small files may grow after export.</p>
                     <p class="mt-2">Version {{ pipeline.version || 'not specified' }} · {{ pipeline.modality || 'generic' }}</p>
                     <p v-if="pipeline.identifier === 'model_georeferencing'" class="mt-2">
                       Use a batch with one upright, textured GLB and one 8-bit reference GeoTIFF per bundle.
@@ -110,7 +119,7 @@ import StepIndicator from '@/components/workflow/StepIndicator.vue'
 import LoadingSpinner from '@/components/ui/LoadingSpinner.vue'
 import Alert from '@/components/ui/Alert.vue'
 import { persistWorkflowState, restoreWorkflowContext, shouldRestoreWorkflowContext } from '@/utils/workflowState'
-import { georeferencingInputError } from '@/utils/georeferencingInputs'
+import { pipelineGuidance, pipelineInputError, recommendPipeline, pipelineTaskLabel } from '@/utils/pipelineGuidance'
 
 const route = useRoute()
 const router = useRouter()
@@ -123,14 +132,10 @@ const availablePipelines = ref([])
 const loadingPipelines = ref(true)
 const pipelineError = ref('')
 const saveError = ref('')
+const recommendedPipeline = computed(() => recommendPipeline(availablePipelines.value, workflowStore.selectedFiles))
 const inputCompatibilityError = computed(() => {
-  if (selectedPipeline.value === 'model_georeferencing') return georeferencingInputError(workflowStore.selectedFiles)
-  if (selectedPipeline.value !== 'mesh_optimization') return ''
-  const unsupported = workflowStore.selectedFiles.some(file => {
-    const name = file.filename || file.name || file.relative_path || file.absolute_path || ''
-    return name && !name.toLowerCase().endsWith('.glb')
-  })
-  return unsupported ? 'Mesh Optimization & Preview requires static GLB files with embedded textures. Go back to choose GLB files, or select a different pipeline.' : ''
+  const pipeline = availablePipelines.value.find(item => item.identifier === selectedPipeline.value)
+  return pipeline ? pipelineInputError(pipeline, workflowStore.selectedFiles) : ''
 })
 
 const loadPipelines = async () => {
@@ -166,7 +171,7 @@ const loadPipelines = async () => {
     if (availablePipelines.value.length > 0) {
       const savedIdentifier = selectedPipeline.value || workflowStore.selectedPipeline?.identifier
       selectedPipeline.value = availablePipelines.value.some(pipeline => pipeline.identifier === savedIdentifier)
-        ? savedIdentifier : availablePipelines.value[0].identifier
+        ? savedIdentifier : recommendedPipeline.value?.identifier || null
     } else {
       selectedPipeline.value = null
     }

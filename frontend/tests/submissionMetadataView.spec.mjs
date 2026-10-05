@@ -1,3 +1,4 @@
+import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -64,6 +65,7 @@ const schemaPayload = {
 
 describe('SubmissionMetadataView', () => {
   beforeEach(() => {
+    setActivePinia(createPinia())
     Object.values(mocked.router).forEach((fn) => fn.mockReset())
     Object.values(mocked.api).forEach((fn) => fn.mockReset())
     Object.values(mocked.workflowState).forEach((fn) => fn.mockClear?.())
@@ -144,5 +146,42 @@ describe('SubmissionMetadataView', () => {
     expect(mocked.workflowStore.nextStep).toHaveBeenCalledTimes(1)
     expect(mocked.workflowState.persistWorkflowState).toHaveBeenLastCalledWith(mocked.workflowStore, 'edm_selection')
     expect(mocked.router.push).toHaveBeenCalledWith('/workflow/edm-selection')
+  })
+
+  it('links complex-field errors to their original entry and single-object inputs', async () => {
+    mocked.workflowStore.sessionId = 42
+    mocked.api.get.mockImplementation((url) => {
+      if (url === '/metadata/zenodo-community-override') return Promise.resolve({ data: { config: { enabled: false } } })
+      if (url === '/metadata/schema') return Promise.resolve({ data: { ...schemaPayload, complex_fields: {
+        creators: { label: 'Creators', item_label: 'Creator', attributes: [
+          { key: 'name', label: 'Name', mandatory: true }, { key: 'affiliation', label: 'Affiliation' },
+        ] },
+        journal: { label: 'Journal', allow_multiple: false, attributes: [
+          { key: 'title', label: 'Journal title' }, { key: 'year', label: 'Year', mandatory: true },
+        ] },
+      } } })
+      if (url === '/metadata/user/42') return Promise.resolve({ data: { metadata: { zenodo_metadata_draft: {
+        title: 'Museum model', creators: [{}, { affiliation: 'Museum' }], journal: { title: 'Collection' },
+      } } } })
+      throw new Error(`Unexpected GET ${url}`)
+    })
+    const wrapper = mount(SubmissionMetadataView, {
+      attachTo: document.body,
+      global: { stubs: { StepIndicator: true, LoadingSpinner: true } },
+    })
+    try {
+      await flushPromises()
+      await wrapper.findAll('button').find(button => button.text().includes('Save & Continue')).trigger('click')
+      await flushPromises()
+      const creator = wrapper.get('#field-creators-1-name')
+      expect(document.activeElement).toBe(creator.element)
+      expect(creator.attributes('aria-describedby')).toBe('field-creators-1-name-error')
+      expect(wrapper.get('#field-creators-1-name-error').text()).toBe('Creator 2: Name is required.')
+      expect(wrapper.get('#field-journal-year').attributes('aria-describedby')).toBe('field-journal-year-error')
+      expect(wrapper.get('#field-journal-year-error').text()).toBe('Journal: Year is required.')
+      expect(mocked.api.put).not.toHaveBeenCalled()
+    } finally {
+      wrapper.unmount()
+    }
   })
 })

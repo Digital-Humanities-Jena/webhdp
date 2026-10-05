@@ -80,16 +80,17 @@
             </div>
           </div>
 
-          <!-- Sample Extracted Metadata -->
-          <div v-if="Object.keys(workflowStore.fileMetadataMap).length > 0">
-            <h3 class="text-lg font-semibold text-gray-900 mb-4">Sample Extracted Metadata</h3>
-            <div class="bg-gray-900 rounded-lg p-4 overflow-auto max-h-96">
-              <div v-for="(metadata, filename) in Object.fromEntries(Object.entries(workflowStore.fileMetadataMap).slice(0, 1))" :key="filename">
-                <h4 class="text-indigo-400 text-sm font-mono mb-2">// Sample for: {{ filename }}</h4>
-                <pre class="text-green-400 text-xs font-mono">{{ JSON.stringify(metadata, null, 2) }}</pre>
-              </div>
+          <div v-if="batchEntries.length">
+            <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+              <label for="metadata-sample" class="text-sm font-medium text-gray-900">Review a record</label>
+              <select id="metadata-sample" v-model="sampleFilename" class="max-w-full rounded-md border border-gray-300 px-3 py-2 text-sm">
+                <option v-if="!sampleFilename" :value="''">{{ batchEntries[0][0] }}</option>
+                <option v-for="[filename] in batchEntries" :key="filename" :value="filename">{{ filename }}</option>
+              </select>
             </div>
-            <p class="text-xs text-gray-500 mt-2">Showing metadata mapping for the first matched file. Similar mappings will be applied to all {{ Object.keys(workflowStore.fileMetadataMap).length }} matched files.</p>
+            <p class="mb-3 text-sm text-slate-600">{{ batchQuality.total }} matched records · {{ batchQuality.needsReview }} have missing descriptive fields.</p>
+            <p v-if="batchQuality.needsReview" class="mb-3 text-xs text-amber-800">Missing: {{ batchQuality.missing.title }} titles, {{ batchQuality.missing.description }} descriptions, {{ batchQuality.missing.creators }} creator entries. Correct the spreadsheet or mappings before processing; defaults may fill missing values.</p>
+            <MetadataReview :metadata="sampleMetadata" :source-name="sampleFilename || batchEntries[0][0]" />
           </div>
         </div>
 
@@ -102,9 +103,10 @@
 
           <div class="text-sm text-gray-500 mb-4 text-right">
             <span v-if="isSaving">Saving draft...</span>
-            <span v-else-if="saveError" role="alert" class="text-rose-700">Draft save failed. Your edits are still on this page. <button type="button" class="underline" @click="save">Retry save</button></span>
-            <span v-else-if="dirty">Unsaved changes</span>
+            <span v-else-if="saveError" role="alert" class="text-rose-700">Draft save failed. {{ localDraftSaved ? 'Your edits are retained in this browser tab.' : 'Keep this page open to retain your edits.' }} <button type="button" class="underline" @click="save">Retry save</button></span>
+            <span v-else-if="dirty">{{ restoredDraft ? 'Recovered draft · awaiting save' : localDraftSaved ? 'Draft retained in this browser tab · awaiting save' : 'Unsaved changes' }}</span>
             <span v-else-if="lastSaved">Draft saved at {{ lastSaved.toLocaleTimeString() }}</span>
+            <span v-if="draftStorageError && dirty" class="block text-rose-700">Browser draft recovery is unavailable. Save before leaving this page.</span>
           </div>
 
           <div class="space-y-6">
@@ -114,11 +116,13 @@
                   {{ field.label }}
                   <span v-if="isFieldRequired(field)" class="text-red-500">*</span>
                 </label>
-                <p v-if="field.notes" class="text-xs text-gray-500 mb-1">{{ field.notes }}</p>
+                <p :id="`field-${field.key}-notes`" v-if="field.notes" class="text-xs text-gray-500 mb-1">{{ field.notes }}</p>
 
                 <select
                   v-if="field.type === 'vocab'"
                   :id="`field-${field.key}`"
+                  :aria-invalid="Boolean(fieldErrors[`field-${field.key}`])"
+                  :aria-describedby="fieldDescription(`field-${field.key}`, field.notes)"
                   v-model="formData[field.key]"
                   class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
                 >
@@ -131,6 +135,8 @@
                 <textarea
                   v-else-if="field.type === 'textarea'"
                   :id="`field-${field.key}`"
+                  :aria-invalid="Boolean(fieldErrors[`field-${field.key}`])"
+                  :aria-describedby="fieldDescription(`field-${field.key}`, field.notes)"
                   v-model="formData[field.key]"
                   rows="4"
                   class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
@@ -139,6 +145,8 @@
                 <input
                   v-else-if="field.type === 'date'"
                   :id="`field-${field.key}`"
+                  :aria-invalid="Boolean(fieldErrors[`field-${field.key}`])"
+                  :aria-describedby="fieldDescription(`field-${field.key}`, field.notes)"
                   v-model="formData[field.key]"
                   type="date"
                   class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
@@ -147,6 +155,8 @@
                 <input
                   v-else-if="field.type === 'tags'"
                   :id="`field-${field.key}`"
+                  :aria-invalid="Boolean(fieldErrors[`field-${field.key}`])"
+                  :aria-describedby="fieldDescription(`field-${field.key}`, field.notes)"
                   v-model="formData[field.key]"
                   type="text"
                   class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
@@ -156,10 +166,13 @@
                 <input
                   v-else
                   :id="`field-${field.key}`"
+                  :aria-invalid="Boolean(fieldErrors[`field-${field.key}`])"
+                  :aria-describedby="fieldDescription(`field-${field.key}`, field.notes)"
                   v-model="formData[field.key]"
                   type="text"
                   class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
                 />
+                <p v-if="fieldErrors[`field-${field.key}`]" :id="`field-${field.key}-error`" class="mt-1 text-sm text-rose-700">{{ fieldErrors[`field-${field.key}`] }}</p>
               </div>
             </template>
           </div>
@@ -167,10 +180,11 @@
           <div class="space-y-8 mt-8 pt-6 border-t">
             <template v-for="(config, key) in schema.complex_fields" :key="key">
               <div v-if="isFieldVisible(config)" class="form-field-wrapper">
-                <h3 class="text-lg font-medium text-gray-900">
+                <h3 :id="`field-${key}`" :aria-describedby="fieldErrors[`field-${key}`] ? `field-${key}-error` : undefined" tabindex="-1" class="text-lg font-medium text-gray-900">
                   {{ config.label }}
                   <span v-if="isFieldRequired(config)" class="text-red-500">*</span>
                 </h3>
+                <p v-if="fieldErrors[`field-${key}`]" :id="`field-${key}-error`" class="mt-1 text-sm text-rose-700">{{ fieldErrors[`field-${key}`] }}</p>
                 <p v-if="config.notes" class="text-xs text-gray-500 mb-2">{{ config.notes }}</p>
 
                 <div v-if="config.allow_multiple !== false">
@@ -199,12 +213,13 @@
                               {{ attr.label }}
                               <span v-if="attr.mandatory" class="text-red-500">*</span>
                             </label>
-                            <p v-if="attr.notes" class="text-xs text-gray-500 mb-1">{{ attr.notes }}</p>
+                            <p :id="`field-${key}-${index}-${attr.key}-notes`" v-if="attr.notes" class="text-xs text-gray-500 mb-1">{{ attr.notes }}</p>
 
-                            <!-- FIXED: Use v-if/v-else instead of <component :is> -->
                             <select
                               v-if="attr.type === 'vocab'"
                               :id="`field-${key}-${index}-${attr.key}`"
+                              :aria-invalid="Boolean(fieldErrors[`field-${key}-${index}-${attr.key}`])"
+                              :aria-describedby="fieldDescription(`field-${key}-${index}-${attr.key}`, attr.notes)"
                               v-model="entry[attr.key]"
                               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
                             >
@@ -217,10 +232,13 @@
                             <input
                               v-else
                               :id="`field-${key}-${index}-${attr.key}`"
+                              :aria-invalid="Boolean(fieldErrors[`field-${key}-${index}-${attr.key}`])"
+                              :aria-describedby="fieldDescription(`field-${key}-${index}-${attr.key}`, attr.notes)"
                               :type="attr.type === 'date' ? 'date' : attr.type === 'number' ? 'number' : 'text'"
                               v-model="entry[attr.key]"
                               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
                             />
+                            <p v-if="fieldErrors[`field-${key}-${index}-${attr.key}`]" :id="`field-${key}-${index}-${attr.key}-error`" class="mt-1 text-sm text-rose-700">{{ fieldErrors[`field-${key}-${index}-${attr.key}`] }}</p>
                           </div>
                         </template>
                       </div>
@@ -245,12 +263,13 @@
                             {{ attr.label }}
                             <span v-if="attr.mandatory" class="text-red-500">*</span>
                           </label>
-                          <p v-if="attr.notes" class="text-xs text-gray-500 mb-1">{{ attr.notes }}</p>
+                          <p :id="`field-${key}-${attr.key}-notes`" v-if="attr.notes" class="text-xs text-gray-500 mb-1">{{ attr.notes }}</p>
 
-                          <!-- FIXED: Use v-if/v-else instead of <component :is> -->
                           <select
                             v-if="attr.type === 'vocab'"
                             :id="`field-${key}-${attr.key}`"
+                            :aria-invalid="Boolean(fieldErrors[`field-${key}-${attr.key}`])"
+                            :aria-describedby="fieldDescription(`field-${key}-${attr.key}`, attr.notes)"
                             v-model="formData[key][attr.key]"
                             class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
                           >
@@ -263,10 +282,13 @@
                           <input
                             v-else
                             :id="`field-${key}-${attr.key}`"
+                            :aria-invalid="Boolean(fieldErrors[`field-${key}-${attr.key}`])"
+                            :aria-describedby="fieldDescription(`field-${key}-${attr.key}`, attr.notes)"
                             :type="attr.type === 'date' ? 'date' : attr.type === 'number' ? 'number' : 'text'"
                             v-model="formData[key][attr.key]"
                             class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
                           />
+                          <p v-if="fieldErrors[`field-${key}-${attr.key}`]" :id="`field-${key}-${attr.key}-error`" class="mt-1 text-sm text-rose-700">{{ fieldErrors[`field-${key}-${attr.key}`] }}</p>
                         </div>
                       </template>
                     </div>
@@ -282,7 +304,8 @@
         <Alert v-model="showValidationErrors" variant="error" title="Validation Failed" class="mt-6">
           <ul class="list-disc pl-5 space-y-1">
             <li v-for="(err, index) in validationErrors" :key="index">
-              {{ err }}
+              <button v-if="validationTarget(err)" type="button" class="text-left underline" @click="focusField(validationTarget(err))">{{ err }}</button>
+              <span v-else>{{ err }}</span>
             </li>
           </ul>
         </Alert>
@@ -309,19 +332,23 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, computed } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { ref, reactive, onMounted, computed, nextTick } from 'vue'
+import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import { useWorkflowStore } from '@/stores/workflow'
+import { useAuthStore } from '@/stores/auth'
 import api from '@/services/api'
 import StepIndicator from '@/components/workflow/StepIndicator.vue'
 import LoadingSpinner from '@/components/ui/LoadingSpinner.vue'
 import Alert from '@/components/ui/Alert.vue'
 import { useAutoSave } from '@/composables/useAutoSave'
+import MetadataReview from '@/components/workflow/MetadataReview.vue'
+import { metadataQuality } from '@/utils/metadataReview'
 import { persistWorkflowState, restoreWorkflowContext, shouldRestoreWorkflowContext } from '@/utils/workflowState'
 
 const route = useRoute()
 const router = useRouter()
 const workflowStore = useWorkflowStore()
+const authStore = useAuthStore()
 
 const schema = ref(null)
 const formData = reactive({})
@@ -335,6 +362,15 @@ const communityOverride = ref({
 const schemaError = ref(null)
 const showSchemaError = ref(false)
 const validationErrors = ref([])
+const fieldErrors = ref({})
+const restoredDraft = ref(false)
+const sampleFilename = ref('')
+const batchEntries = computed(() => Object.entries(workflowStore.fileMetadataMap || {}))
+const batchQuality = computed(() => metadataQuality(batchEntries.value))
+const sampleMetadata = computed(() => (workflowStore.fileMetadataMap || {})[sampleFilename.value || batchEntries.value[0]?.[0]] || {})
+function validationTarget(message) { return Object.keys(fieldErrors.value).find(id => fieldErrors.value[id] === message) }
+function focusField(id) { document.getElementById(id)?.focus() }
+function fieldDescription(id, notes) { return [notes ? `${id}-notes` : '', fieldErrors.value[id] ? `${id}-error` : ''].filter(Boolean).join(' ') || undefined }
 const showValidationErrors = computed({
   get: () => validationErrors.value.length > 0,
   set: (value) => {
@@ -349,12 +385,13 @@ const showValidationErrors = computed({
 // --- Auto-save ---
 const saveDraft = async (data) => {
   if (!workflowStore.sessionId) throw new Error('A session is required to save this draft.')
-  await api.put(`/metadata/user/${workflowStore.sessionId}/draft`, preparePayloadForSubmission(data))
+  await api.put(`/metadata/user/${workflowStore.sessionId}/draft`, preparePayloadForSubmission(data), { timeout: 10000, suppressGlobalError: true })
 }
 
 
-const { isSaving, lastSaved, saveError, dirty, save, stopAutoSave, startAutoSave, waitForSave } = useAutoSave(saveDraft, formData, {
+const { isSaving, lastSaved, saveError, dirty, localDraftSaved, draftStorageError, restoreDraft, markSaved, save, stopAutoSave, startAutoSave, waitForSave } = useAutoSave(saveDraft, formData, {
   debounce: 3000,
+  draftKey: () => workflowStore.sessionId && authStore.user?.id ? `webhdp:metadata-draft:${authStore.user.id}:${workflowStore.sessionId}` : null,
   enabled: computed(() => !loading.value && !saving.value && !showSchemaError.value && !workflowStore.isBatchMode && Boolean(workflowStore.sessionId))
 })
 
@@ -418,6 +455,7 @@ onMounted(async () => {
     }
     // Initialize fields *after* loading or initializing
     initializeComplexFields(formData)
+    if (!workflowStore.isBatchMode) restoredDraft.value = restoreDraft()
 
   } catch (err) {
     console.error('Failed to load metadata setup:', err)
@@ -557,6 +595,8 @@ const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
 
 function validateForm() {
   const errors = [];
+  fieldErrors.value = {}
+  function addError(message, id) { errors.push(message); if (id) fieldErrors.value[id] = message }
   // CHANGE: Remove .value - formData is already reactive
   const data = formData; // Direct reference to reactive object
 
@@ -570,11 +610,11 @@ function validateForm() {
     if (!isFieldVisible(field)) return;
 
     if (isFieldRequired(field) && !data[field.key]) {
-      errors.push(`${field.label} is required.`);
+      addError(`${field.label} is required.`, `field-${field.key}`);
     }
 
     if (field.type === 'date' && data[field.key] && !dateRegex.test(data[field.key])) {
-      errors.push(`${field.label} must be in YYYY-MM-DD format.`);
+      addError(`${field.label} must be in YYYY-MM-DD format.`, `field-${field.key}`);
     }
 
     if (field.key === 'embargo_date' && data[field.key]) {
@@ -583,10 +623,10 @@ function validateForm() {
         const today = new Date();
         today.setUTCHours(0, 0, 0, 0);
         if (embargo <= today) {
-          errors.push("Embargo End Date must be in the future.");
+          addError("Embargo End Date must be in the future.", "field-embargo_date");
         }
       } catch (e) {
-        errors.push("Invalid Embargo End Date.");
+        addError("Invalid Embargo End Date.", "field-embargo_date");
       }
     }
   });
@@ -602,22 +642,23 @@ function validateForm() {
 
       // Filter out completely empty entries (all fields empty/null)
       const nonEmptyEntries = entries.filter(entry => {
-        return Object.values(entry).some(val => val !== null && val !== '' && val !== undefined);
+        return Object.entries(entry).some(([key, val]) => key !== '_uid' && val !== null && val !== '' && val !== undefined);
       });
 
       if (isFieldRequired(config) && nonEmptyEntries.length === 0) {
-        errors.push(`At least one ${config.item_label} is required.`);
+        addError(`At least one ${config.item_label} is required.`, `field-${key}`);
         continue; // Skip further validation if no entries exist
       }
 
       // Validate each non-empty entry
-      nonEmptyEntries.forEach((entry, index) => {
+      entries.forEach((entry, index) => {
+        if (!nonEmptyEntries.includes(entry)) return
         config.attributes.forEach(attr => {
           if (attr.mandatory && !entry[attr.key]) {
-            errors.push(`${config.item_label} ${index + 1}: ${attr.label} is required.`);
+            addError(`${config.item_label} ${index + 1}: ${attr.label} is required.`, `field-${key}-${index}-${attr.key}`);
           }
           if (attr.validation_regex && entry[attr.key] && !new RegExp(attr.validation_regex).test(entry[attr.key])) {
-            errors.push(`${config.item_label} ${index + 1}: ${attr.validation_message || `Invalid format for ${attr.label}`}`);
+            addError(`${config.item_label} ${index + 1}: ${attr.validation_message || `Invalid format for ${attr.label}`}`, `field-${key}-${index}-${attr.key}`);
           }
         });
       });
@@ -627,7 +668,7 @@ function validateForm() {
       let hasData = Object.values(entry).some(val => val !== null && val !== '' && val !== undefined);
 
       if (isFieldRequired(config) && !hasData) {
-        errors.push(`${config.label} is required.`);
+        addError(`${config.label} is required.`, `field-${key}`);
         continue;
       }
 
@@ -635,10 +676,10 @@ function validateForm() {
       if (hasData) {
         config.attributes.forEach(attr => {
           if (attr.mandatory && !entry[attr.key]) {
-            errors.push(`${config.label}: ${attr.label} is required.`);
+            addError(`${config.label}: ${attr.label} is required.`, `field-${key}-${attr.key}`);
           }
           if (attr.validation_regex && entry[attr.key] && !new RegExp(attr.validation_regex).test(entry[attr.key])) {
-            errors.push(`${config.label}: ${attr.validation_message || `Invalid format for ${attr.label}`}`);
+            addError(`${config.label}: ${attr.validation_message || `Invalid format for ${attr.label}`}`, `field-${key}-${attr.key}`);
           }
         });
       }
@@ -647,6 +688,17 @@ function validateForm() {
 
   return errors;
 }
+
+onBeforeRouteLeave(async () => {
+  if (workflowStore.isBatchMode || loading.value || showSchemaError.value || !dirty.value) return true
+  saving.value = true
+  stopAutoSave()
+  const saved = await save()
+  if (saved || localDraftSaved.value) return true
+  saving.value = false
+  startAutoSave()
+  return false
+})
 
 // --- Navigation ---
 const handleBack = async () => {
@@ -683,6 +735,8 @@ const handleNext = async () => {
   if (errors.length > 0) {
     validationErrors.value = errors
     saving.value = false
+    await nextTick()
+    focusField(validationTarget(errors[0]))
     return
   }
 
@@ -694,6 +748,7 @@ const handleNext = async () => {
 
     await api.put(`/metadata/user/${workflowStore.sessionId}`, cleanPayload)
 
+    markSaved()
     workflowStore.setSubmissionMetadata(cleanPayload)
     workflowStore.nextStep()
     persistWorkflowState(workflowStore, 'edm_selection').catch((err) => {

@@ -24,7 +24,7 @@ describe('App bootstrap', () => {
     mocked.authStore.logout.mockReset()
   })
 
-  it('fetches the current user on mount when a token exists and logs out on failure', async () => {
+  it('delegates user loading and expired authentication to the store', async () => {
     window.history.pushState({}, '', '/dashboard')
     mocked.authStore.token = 'token'
     mocked.authStore.fetchCurrentUser.mockRejectedValue(new Error('expired'))
@@ -41,7 +41,7 @@ describe('App bootstrap', () => {
     await flushPromises()
 
     expect(mocked.authStore.fetchCurrentUser).toHaveBeenCalledTimes(1)
-    expect(mocked.authStore.logout).toHaveBeenCalledTimes(1)
+    expect(mocked.authStore.logout).not.toHaveBeenCalled()
   })
 
   it('does not fetch the current user when there is no token', async () => {

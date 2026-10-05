@@ -64,6 +64,27 @@ The devcontainer intentionally mounts `frontend/node_modules` as a named volume 
 
 5. If the app loads but API calls fail, move to the API branch.
 
+If Vite or Vitest stalls before reporting startup, isolate configuration bundling
+with Vite's runner loader. From `frontend/`:
+
+```bash
+npm run test:unit -- --configLoader runner
+npm run build -- --configLoader runner
+```
+
+For browser checks against the resulting production build, start the preview in
+one terminal:
+
+```bash
+npm run preview -- --configLoader runner --host 127.0.0.1 --port 4173
+```
+
+Run `npm run test:e2e:core` in another terminal. Outside CI, the core suite reuses
+that preview. The runner loader uses the same application and test inputs;
+capture the original stalled command and runtime details when reporting the
+configuration-bundling issue. A passing override does not confirm that the
+default startup path is fixed.
+
 ## 4. API Is Unreachable
 
 1. Run the backend directly:

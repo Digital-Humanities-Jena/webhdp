@@ -1561,6 +1561,19 @@ class NativePipelineSystemService:
     def _serialize_pipeline_summary(self, definition: PipelineDefinition) -> Dict[str, Any]:
         version_row = self._get_active_pipeline_version_row(definition)
         config = _json_loads(version_row.config_json, {}) if version_row else {}
+        from services.pipeline_guidance import pipeline_guidance
+        manifests = {}
+        persisted_steps = {step.step_key: step for step in version_row.steps} if version_row else {}
+        for step in config.get('steps', []):
+            if not step.get('enabled', True):
+                continue
+            key = step.get('component_ref') or step.get('id')
+            try:
+                persisted = persisted_steps.get(step.get('id'))
+                component_version = db.session.get(ComponentVersion, persisted.component_version_id) if persisted and persisted.component_version_id else None
+                manifests[step['id']] = _json_loads(component_version.manifest_json, {}) if component_version else self._get_component_manifest_by_key(key, step.get('component_version'))
+            except ValidationError:
+                continue
         return {
             "identifier": definition.identifier,
             "name": definition.name,
@@ -1571,6 +1584,7 @@ class NativePipelineSystemService:
             "version": version_row.version if version_row else None,
             "tags": _json_loads(definition.tags_json, []),
             "config": config,
+            "guidance": pipeline_guidance(config, manifests),
         }
 
     def _serialize_pipeline_definition(self, definition: PipelineDefinition) -> Dict[str, Any]:

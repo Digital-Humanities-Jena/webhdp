@@ -40,6 +40,17 @@ describe('LOD preview reliability', () => {
     expect(wrapper.get('[role="alert"]').text()).toContain('Validation is unavailable')
     wrapper.unmount()
   })
+  it('keeps known metadata errors distinct from a concurrent validator outage', async () => {
+    await button('EDM-XML').trigger('click')
+    api.post.mockResolvedValue({ success: true, data: { xml: '<invalid/>', validation: {
+      valid: false, status: 'invalid', errors: ['Title is missing'], details: { remote: { valid: false, status: 'unavailable' } },
+    } } })
+    await button('Test Mapping').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Validation Failed')
+    expect(wrapper.text()).not.toContain('Unverified · validator unavailable')
+    wrapper.unmount()
+  })
   it('provides CIDOC and JSON-LD previews with shared mappings', async () => {
     await button('CIDOC-CRM').trigger('click')
     api.post.mockResolvedValue({ success: true, data: { xml: '<rdf/>', validation: { valid: true } } })

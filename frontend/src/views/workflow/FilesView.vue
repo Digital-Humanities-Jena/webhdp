@@ -131,14 +131,19 @@
           <p class="text-gray-500">Retrieving session files...</p>
         </div>
 
-        <div v-else-if="visibleUploadedFiles.length === 0" class="text-center py-12 text-gray-500 bg-gray-50 rounded-lg border-2 border-dashed border-gray-200">
+        <div v-if="filesError && !loading" role="alert" class="mb-4 rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
+          <p>{{ filesError }} {{ visibleUploadedFiles.length ? 'The previous list and your selection are retained.' : 'The file list is unavailable.' }}</p>
+          <button type="button" class="mt-2 font-medium underline" @click="fetchFiles">Try loading files again</button>
+        </div>
+
+        <div v-if="!loading && !filesError && visibleUploadedFiles.length === 0" class="text-center py-12 text-gray-500 bg-gray-50 rounded-lg border-2 border-dashed border-gray-200">
           <svg class="mx-auto h-12 w-12 text-gray-400 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
           </svg>
           <p>No bundles found in the scanned directory.</p>
         </div>
 
-        <div v-else class="space-y-6">
+        <div v-if="!loading && visibleUploadedFiles.length" class="space-y-6">
           <div
             v-for="rootFile in visibleUploadedFiles"
             :key="rootFile.file_id || rootFile.name"
@@ -308,6 +313,7 @@ const cloudDownloads = ref(null)
 const cloudDownloadsLoading = ref(false)
 const cloudDownloadsError = ref('')
 const downloadingMirrorId = ref(null)
+const filesError = ref('')
 const excludedPathSegments = new Set(['__macosx', '__pycache__'])
 
 const hasExcludedSegment = (value) => {
@@ -350,11 +356,13 @@ const fetchFiles = async () => {
   if (!workflowStore.sessionId) return
 
   loading.value = true
+  filesError.value = ''
   try {
-    const response = await fileService.getNodes(workflowStore.sessionId)
+    const response = await fileService.getNodes(workflowStore.sessionId, { suppressGlobalError: true })
     workflowStore.setUploadedFiles(sanitizeNodes(response.data.nodes || []))
     removeExcludedFromSelection()
   } catch (err) {
+    filesError.value = 'Could not refresh your files. Check your connection and try again.'
     console.error('Failed to fetch session files:', err)
   } finally {
     loading.value = false

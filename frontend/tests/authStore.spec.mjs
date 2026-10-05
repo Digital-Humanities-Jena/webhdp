@@ -138,6 +138,7 @@ describe('auth store', () => {
     const store = useAuthStore()
     store.token = 'stale-token'
     sessionStorage.setItem('token', 'stale-token')
+    sessionStorage.setItem('webhdp:metadata-draft:1:42', '{"title":"Unsent"}')
 
     await expect(store.fetchCurrentUser()).rejects.toThrow('token expired')
 
@@ -145,6 +146,9 @@ describe('auth store', () => {
     expect(store.user).toBeNull()
     expect(sessionStorage.getItem('token')).toBeNull()
     expect(localStorage.getItem('token')).toBeNull()
+    expect(sessionStorage.getItem('webhdp:metadata-draft:1:42')).not.toBeNull()
+    store.logout()
+    expect(sessionStorage.getItem('webhdp:metadata-draft:1:42')).toBeNull()
   })
 
   it('keeps registration unauthenticated and proxies account update helpers', async () => {

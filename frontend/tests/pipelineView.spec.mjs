@@ -183,7 +183,8 @@ describe('PipelineView', () => {
     const wrapper = mount(PipelineView, { global: { stubs: { StepIndicator: true, LoadingSpinner: true } } })
     await flushPromises()
     expect(wrapper.get('[data-testid="pipeline-continue"]').element.disabled).toBe(true)
-    expect(wrapper.get('[role="alert"]').text()).toContain('requires static GLB files')
+    expect(wrapper.get('input[type="radio"]').element.disabled).toBe(true)
+    expect(wrapper.text()).toContain('Requires .glb source files')
     expect(mocked.router.push).not.toHaveBeenCalled()
   })
 

@@ -792,17 +792,21 @@ class NativePipelineSystemTestCase(unittest.TestCase):
 
     def test_pipeline_component_version_does_not_follow_new_imports(self):
         with self.app.app_context():
-            manifest = {"metadata": {"name": "stable_component", "version": "1.0.0"}, "execution": {"profiles": [{"id": "local", "adapter": "local_cli", "entrypoint": ["old-command"]}]}}
+            manifest = {"metadata": {"name": "stable_component", "version": "1.0.0"}, "execution": {"profiles": [{"id": "local", "adapter": "local_cli", "entrypoint": ["old-command"]}]},
+                        "inputs": [{"name": "input_file", "type": "file_path"}],
+                        "ui": {"playground": {"fields": {"input_file": {"accept_extensions": [".glb"]}}}}}
             self.native_service.import_component_from_manifest(manifest)
             saved = self.native_service.create_pipeline_version_from_config("stable", {"identifier": "stable", "name": "Stable", "version": "1.0.0", "steps": [{"id": "stable", "name": "Stable", "component_ref": "stable_component", "execution_profile_ref": "local"}]})
             manifest["metadata"]["version"] = "2.0.0"
             manifest["execution"]["profiles"][0]["entrypoint"] = ["new-command"]
+            manifest["ui"]["playground"]["fields"]["input_file"]["accept_extensions"] = [".obj"]
             self.native_service.import_component_from_manifest(manifest)
             step = saved["config"]["steps"][0]
             selected = self.native_service._step_component_version(step)
             self.assertEqual(selected.version, "1.0.0")
             self.assertIn("old-command", selected.manifest_json)
             self.assertEqual(self.native_service.get_pipeline("stable")["components"][0]["version"], "1.0.0")
+            self.assertEqual(self.native_service.get_pipeline("stable")["guidance"]["source_extensions"], [".glb"])
 
     def test_repeated_original_version_chooses_next_unused_version(self):
         with self.app.app_context():

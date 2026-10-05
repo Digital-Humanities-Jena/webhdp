@@ -8,6 +8,7 @@ For an exhaustive inventory of UI, API, background job, native pipeline, and ope
 
 | Goal | Start Here | Complete When |
 |---|---|---|
+| Prepare and review a single record, batch, or model derivative | [Common Workflow Recipes](common-workflow-recipes.md) | Descriptive metadata, source mappings, pipeline outcome, and generated results are reviewed. |
 | Publish a new dataset | [End-to-End User Guide](end_to_end_user_guide.md) | The submission reaches `completed`, Zenodo links are present, and provenance/records match the intended source files. |
 | Review and repair MSF-driven batch metadata | [End-to-End User Guide](end_to_end_user_guide.md#step-2-msf-qa-batch-only) | Record-resolution actions are saved, blocking MSF issues are repaired or accepted, and the workflow can advance to file review. |
 | Retrieve an existing Zenodo account inventory | [Zenodo Account Deep Retrieval](zenodo_account_retrieval.md) | The retrieval job is `SUCCESS`, shard sessions are generated, and search/export/compaction options reflect the collection state. |

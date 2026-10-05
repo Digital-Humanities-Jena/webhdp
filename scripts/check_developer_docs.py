@@ -17,6 +17,7 @@ CHECKED_DOCS = [
     ROOT / "CONTRIBUTING.md",
     DOCS_ROOT / "README.md",
     DOCS_ROOT / "guides" / "workflows.md",
+    DOCS_ROOT / "guides" / "common-workflow-recipes.md",
     DOCS_ROOT / "development" / "onboarding.md",
     DOCS_ROOT / "development" / "devcontainer.md",
     DOCS_ROOT / "development" / "first_pr_walkthrough.md",

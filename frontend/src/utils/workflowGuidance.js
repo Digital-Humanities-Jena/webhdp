@@ -28,17 +28,17 @@ export const workflowGuidance = {
   4: {
     title: 'Describe the records people will find',
     hint: 'Check titles, creators, descriptions and licences. In a batch, review how spreadsheet columns fill these fields.',
-    detail: 'These descriptions accompany the files in Zenodo. Required fields must be filled before you continue. Saving this form prepares metadata; it does not publish a record.',
+    detail: 'These descriptions accompany the files in Zenodo. Errors beside a field link to that input. Draft edits are saved automatically and retained in this browser tab for reload recovery. Retry a failed save before closing the tab. In a batch, choose filenames to review individual descriptions.',
   },
   5: {
     title: 'Prepare metadata for reuse',
     hint: 'Choose a template, review the preview and resolve validation errors before continuing.',
-    detail: 'EDM means Europeana Data Model. LOD here means linked open data, not a lower-detail 3D model. The workflow can produce EDM, CIDOC-CRM, METS/MODS and JSON-LD; check the chosen pipeline for the outputs it generates. Use the default template unless your project needs another mapping.',
+    detail: 'EDM means Europeana Data Model. LOD means linked open data. Review titles, creators, rights, source labels and generated defaults before expanding technical output. Choose batch previews by filename; spreadsheet checks cover all source rows, but validation covers the selected preview. IIIF handles images, models and timed media; check the chosen pipeline for its enabled exports.',
   },
   6: {
     title: 'Choose the result you need',
     hint: 'A pipeline is the sequence of processing tasks. Review its steps before continuing to the final summary.',
-    detail: 'Choose rendering when you need thumbnail images of a 3D model. Metadata-only processing does not render thumbnails. Rendering on a server requires access to HPC (high-performance computing); readiness is checked before processing starts.',
+    detail: 'Read each outcome to distinguish local results, Zenodo draft creation, upload and publication. The recommendation favors compatible processing without publication or an HPC job. Expand Outputs and requirements for formats and resources. Rendering needs an HPC allocation; metadata-only processing needs a Zenodo credential. Readiness is checked before processing starts.',
   },
   7: {
     title: 'Check the destination before starting',

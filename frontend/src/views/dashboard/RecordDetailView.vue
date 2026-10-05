@@ -186,11 +186,12 @@
           <ul v-if="lodReport?.available" class="mt-3 space-y-3">
             <li v-for="(item, standard) in lodReport.formats" :key="standard" class="rounded-lg border p-3">
               <span class="font-medium">{{ standard.toUpperCase() }}</span>
-              <span class="ml-2 text-sm" :class="item.success ? 'text-green-700' : 'text-red-700'">{{ item.status === 'generated' ? 'Validated' : item.status === 'skipped_disabled' ? 'Disabled' : item.status === 'revalidation_required' ? 'Revalidation required' : 'Needs attention' }}</span>
+              <span class="ml-2 text-sm" :class="item.success ? 'text-green-700' : 'text-red-700'">{{ item.status === 'generated' ? 'Validated' : item.status === 'skipped_disabled' ? 'Disabled' : item.status === 'revalidation_required' ? 'Revalidation required' : item.validation?.status === 'unverified' ? 'Unverified · validator unavailable' : 'Needs attention' }}</span>
               <button v-if="item.status === 'generated'" type="button" :disabled="lodBusy" class="ml-3 text-sm text-indigo-700 underline" @click="downloadLod(standard)">Download {{ standard.toUpperCase() }}</button>
               <p v-if="item.error" class="mt-1 text-sm text-red-700">{{ item.error }}</p>
               <p v-if="item.minimum_viable_applied" class="mt-1 text-sm text-amber-700">Required fields were completed using record data or defaults. Review the export before sharing.</p>
-              <details v-if="item.validation" class="mt-2 text-sm"><summary class="cursor-pointer">Validation report</summary><pre class="mt-2 overflow-auto whitespace-pre-wrap">{{ JSON.stringify(item.validation, null, 2) }}</pre></details>
+              <details v-if="item.adjustments?.length" class="mt-2 text-sm"><summary class="cursor-pointer">Generated additions and corrections ({{ item.adjustments.length }})</summary><ul class="mt-2 space-y-2 break-words"><li v-for="(adjustment, index) in item.adjustments" :key="index">{{ adjustment.field }} · {{ adjustment.action }}<span v-if="adjustment.value != null">: {{ adjustment.value }}</span></li></ul></details>
+              <details v-if="item.validation" class="mt-2 text-sm"><summary class="cursor-pointer">Validation report</summary><p v-if="item.validation.details?.scope" class="mt-2 text-slate-600">{{ item.validation.details.scope }}</p><pre class="mt-2 overflow-auto whitespace-pre-wrap">{{ JSON.stringify(item.validation, null, 2) }}</pre></details>
             </li>
           </ul>
           <p v-else-if="!lodError && !lodBusy" class="mt-3 text-sm text-slate-500">No metadata generation report is available yet.</p>

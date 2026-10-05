@@ -27,6 +27,7 @@
     <details v-if="guidance" class="mt-3 text-sm text-gray-600">
       <summary class="cursor-pointer font-medium text-indigo-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600">Help with this step</summary>
       <p class="mt-2 max-w-3xl leading-relaxed">{{ guidance.detail }}</p>
+      <a href="/docs/common-workflow-recipes" target="_blank" rel="noopener" class="mt-2 inline-block text-indigo-700 underline">Workflow recipes<span class="sr-only"> (opens in a new tab)</span></a>
     </details>
   </div>
 </template>

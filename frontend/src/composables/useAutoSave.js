@@ -1,17 +1,68 @@
 import { ref, onMounted, onBeforeUnmount, toValue, watch } from 'vue'
 
 export function useAutoSave(saveFunction, data, options = {}) {
-  const { interval = 30000, debounce = null, immediate = false, enabled = true } = options
+  const { interval = 30000, debounce = null, immediate = false, enabled = true, draftKey = null } = options
   const isSaving = ref(false)
   const lastSaved = ref(null)
   const saveError = ref(null)
   const dirty = ref(false)
+  const localDraftSaved = ref(false)
+  const draftStorageError = ref(null)
   let timer
   let inFlight = null
   let revision = 0
   let queued = false
   let paused = false
   let disposed = false
+
+  function retainDraft() {
+    const key = toValue(draftKey)
+    if (!key || !dirty.value) return false
+    try {
+      sessionStorage.setItem(key, JSON.stringify({ version: 1, data: toValue(data) }))
+      localDraftSaved.value = true
+      draftStorageError.value = null
+      return true
+    } catch (error) {
+      localDraftSaved.value = false
+      draftStorageError.value = error
+      return false
+    }
+  }
+
+  function markSaved() {
+    dirty.value = false
+    localDraftSaved.value = false
+    const key = toValue(draftKey)
+    if (key) {
+      try { sessionStorage.removeItem(key) } catch (error) { draftStorageError.value = error }
+    }
+  }
+
+  function restoreDraft() {
+    dirty.value = false
+    const key = toValue(draftKey)
+    if (!key) return false
+    try {
+      const draft = JSON.parse(sessionStorage.getItem(key) || 'null')
+      if (draft?.version !== 1 || !draft.data || typeof draft.data !== 'object' || Array.isArray(draft.data)) return false
+      Object.assign(toValue(data), draft.data)
+      dirty.value = true
+      localDraftSaved.value = true
+      return true
+    } catch (error) {
+      draftStorageError.value = error
+      return false
+    }
+  }
+
+  function beforeUnload(event) {
+    const needsProtection = toValue(enabled) || localDraftSaved.value || draftStorageError.value
+    if (dirty.value && needsProtection && toValue(draftKey) && !retainDraft()) {
+      event.preventDefault()
+      event.returnValue = ''
+    }
+  }
 
   function stopAutoSave() {
     paused = true
@@ -40,6 +91,7 @@ export function useAutoSave(saveFunction, data, options = {}) {
           if (disposed) return false
           lastSaved.value = new Date()
           dirty.value = revision !== savedRevision
+          if (!dirty.value) markSaved()
         } catch (error) {
           if (!disposed) {
             saveError.value = error
@@ -75,18 +127,23 @@ export function useAutoSave(saveFunction, data, options = {}) {
   watch(() => toValue(data), () => {
     revision += 1
     dirty.value = true
+    if (toValue(enabled)) retainDraft()
     schedule()
   }, { deep: true, flush: 'sync' })
   watch(() => toValue(enabled), () => schedule())
   onMounted(() => {
+    window.addEventListener('beforeunload', beforeUnload)
     startAutoSave()
     if (immediate && toValue(enabled)) save()
   })
   onBeforeUnmount(() => {
+    if (dirty.value && (toValue(enabled) || localDraftSaved.value)) retainDraft()
+    window.removeEventListener('beforeunload', beforeUnload)
     disposed = true
     stopAutoSave()
   })
 
-  return { isSaving, lastSaved, saveError, dirty, save, startAutoSave, stopAutoSave,
+  return { isSaving, lastSaved, saveError, dirty, localDraftSaved, draftStorageError,
+    retainDraft, restoreDraft, markSaved, save, startAutoSave, stopAutoSave,
     waitForSave: () => inFlight || Promise.resolve(true) }
 }

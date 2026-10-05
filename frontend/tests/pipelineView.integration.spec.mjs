@@ -67,6 +67,8 @@ describe('PipelineView MSW integration', () => {
       selected_file_keys: ['1'],
     })
 
+    expect(wrapper.get('#metadata_only').element.checked).toBe(true)
+    await wrapper.get('#render').setValue(true)
     const continueButton = wrapper.findAll('button').find((button) => button.text().includes('Continue to Summary'))
     await continueButton.trigger('click')
     await flushPromises()

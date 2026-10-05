@@ -26,10 +26,8 @@ onMounted(() => {
   }
   // Fetch current user if token exists
   if (authStore.token) {
-    authStore.fetchCurrentUser().catch(() => {
-      // If token is invalid, logout
-      authStore.logout()
-    })
+    // The store clears expired authentication while retaining user-scoped drafts.
+    authStore.fetchCurrentUser().catch(() => {})
   }
 })
 </script>

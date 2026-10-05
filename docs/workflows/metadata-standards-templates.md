@@ -57,12 +57,22 @@ Entry points:
 
 Workflow:
 1. Load MSF columns or current draft metadata.
-2. Test mappings for Zenodo, EDM, IIIF, or METS output.
+2. Select a preview record by filename and test mappings for Zenodo, EDM, IIIF, METS, CIDOC-CRM, or JSON-LD output.
 3. Import or export mapping files where supported.
 4. Adjust mapping choices until generated payloads are acceptable.
 
 Complete when:
 - The target standard mapping produces the expected metadata payload.
+
+Readable previews show core descriptive fields and their sources. Technical
+metadata and generated output remain expandable. Spreadsheet checks summarize
+missing values and duplicate source names before defaults across all rows;
+successful preview validation applies to the selected row only. Review inferred
+titles and default creators even when structural validation passes.
+
+For task-oriented guidance and each format's validation limits, see
+[Common Workflow Recipes](../guides/common-workflow-recipes.md) and
+[Reliable Metadata Generation](../lod-generation-reliability.md).
 
 ## EDM, IIIF, METS, And LOD Output Review
 

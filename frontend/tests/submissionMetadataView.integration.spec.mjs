@@ -3,6 +3,7 @@ import { flushPromises } from '@vue/test-utils'
 import { http } from 'msw'
 
 import SubmissionMetadataView from '../src/views/workflow/SubmissionMetadataView.vue'
+import { useAuthStore } from '../src/stores/auth'
 import { useWorkflowStore } from '../src/stores/workflow'
 import { mountWithApp } from './helpers/app.mjs'
 import { activateTestPinia } from './helpers/pinia.mjs'
@@ -14,6 +15,7 @@ describe('SubmissionMetadataView MSW integration', () => {
   let workflowStateRequests
 
   beforeEach(() => {
+    sessionStorage.setItem('token', 'test-token')
     metadataSaveRequest = null
     workflowStateRequests = []
 
@@ -62,6 +64,7 @@ describe('SubmissionMetadataView MSW integration', () => {
 
   it('loads schema over the API client, saves metadata, and advances the workflow', async () => {
     const pinia = activateTestPinia()
+    useAuthStore(pinia).setUser({ id: 1 })
     const workflowStore = useWorkflowStore(pinia)
     workflowStore.setSessionId(42)
     workflowStore.setUploadedFiles([{ file_id: 1, name: 'asset.glb' }])
@@ -98,6 +101,7 @@ describe('SubmissionMetadataView MSW integration', () => {
   })
   it('saves an edited draft after the debounce and restores it on remount', async () => {
     const pinia = activateTestPinia()
+    useAuthStore(pinia).setUser({ id: 1 })
     const workflowStore = useWorkflowStore(pinia)
     workflowStore.setSessionId(42)
     workflowStore.setUploadedFiles([{ file_id: 1, name: 'asset.glb' }])
@@ -128,6 +132,7 @@ describe('SubmissionMetadataView MSW integration', () => {
 
   it('shows a failed autosave without a saved timestamp and permits retry', async () => {
     const pinia = activateTestPinia()
+    useAuthStore(pinia).setUser({ id: 1 })
     const workflowStore = useWorkflowStore(pinia)
     workflowStore.setSessionId(42)
     workflowStore.setUploadedFiles([{ file_id: 1, name: 'asset.glb' }])
@@ -145,6 +150,12 @@ describe('SubmissionMetadataView MSW integration', () => {
     await wrapper.findAll('button').find(button => button.text() === 'Retry save').trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('Draft saved at')
+    server.use(http.put(apiV1Url('/metadata/user/42/draft'), () => jsonResponse({ error: { message: 'Storage unavailable' } }, { status: 503 })))
+    await wrapper.get('#field-title').setValue('A newer unsaved revision')
+    await vi.advanceTimersByTimeAsync(3000)
+    await flushPromises()
+    expect(wrapper.text()).toContain('Draft save failed')
+    expect(wrapper.text()).not.toContain('Draft saved at')
     wrapper.unmount()
   })
 

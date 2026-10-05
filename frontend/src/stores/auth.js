@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import authService from '@/services/auth.service'
+import { clearBrowserDrafts } from '@/utils/browserDrafts'
 
 function parseCapabilitiesValue(value) {
   if (Array.isArray(value)) {
@@ -194,7 +195,8 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  function logout() {
+  function logout({ preserveDrafts = false } = {}) {
+    if (!preserveDrafts) clearBrowserDrafts()
     setUser(null)
     token.value = null
     sessionStorage.removeItem('token')
@@ -212,7 +214,7 @@ export const useAuthStore = defineStore('auth', () => {
       } catch (error) {
         console.error('Failed to fetch user - clearing invalid token:', error)
         // Clear invalid token
-        logout()
+        logout({ preserveDrafts: true })
         throw error
       }
     }

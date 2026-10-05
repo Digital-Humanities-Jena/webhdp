@@ -91,6 +91,7 @@ This documentation is organized by audience and task:
 - [Complete Workflow Inventory](workflows/README.md): exhaustive coverage map for UI, API, background job, native pipeline, and operator-script workflows
 - [Workflow Source Surface Coverage](workflows/source-surface-coverage.md): audit checklist mapping frontend routes, backend route families, Celery tasks, native pipelines, and scripts to workflow documents
 - [End-to-End User Guide](guides/end_to_end_user_guide.md): the primary seven-step upload-to-submit workflow
+- [Common Workflow Recipes](guides/common-workflow-recipes.md): single records, batch review, model derivatives, media-specific metadata, and recovery
 - [Zenodo Account Deep Retrieval](guides/zenodo_account_retrieval.md): account-wide published/draft retrieval into explorer-only `.hdpc` shards
 - [Zenodo OAI Harvest](guides/zenodo_oai_harvest.md): public OAI-PMH metadata harvesting into explorer-only `.hdpc` shards
 - [Zenodo API Keys](guides/zenodo_api_keys.md): credential setup needed before publication or retrieval
