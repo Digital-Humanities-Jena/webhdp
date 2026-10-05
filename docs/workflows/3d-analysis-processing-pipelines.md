@@ -95,6 +95,39 @@ Workflow:
 Complete when:
 - Generated derivatives and report artifacts are persisted, visible in run detail, and intentionally accepted or rejected by the operator.
 
+### Geometric detail levels
+
+Geometric LOD Generator 1.0.1 accepts a static, self-contained GLB with one scene.
+It runs on the CPU in its installed container. It rejects animation, skins,
+morph targets, external dependencies, and unsupported glTF extensions. Convert
+other source formats with an appropriate upstream component before binding its
+GLB output to the generator. The original source remains unchanged.
+
+The component returns high, medium, and low detail GLBs plus a report. The
+`lod_preview` binding aliases the medium output. At target ratio `r`, high targets
+`sqrt(r)`, medium `r`, and low `r²` of each original mesh's triangles. Counts must
+form a non-increasing ladder. The error limit defaults to `0.001` of each mesh's
+world-space bounding-box diagonal. Reduction is accepted only when bidirectional
+vertex, edge-midpoint, and triangle-centroid samples stay within the limit.
+Otherwise the preceding geometry is retained and the report explains why.
+Equal levels can therefore be an expected conservative result.
+
+Sampling is not a continuous surface-distance or appearance guarantee. Check
+textures, material boundaries, source/output hashes, and file sizes in the
+report, then review representative models in the intended viewer. Export can
+repack resources or increase bytes even when triangle counts decrease. The
+component declares one CPU, 8 GiB RAM, and a 600-second timeout; representative
+large models require resource measurements before changing deployment settings.
+
+The repository component README at
+`external_code/geometric_lod_generator/README.md` gives build instructions, CPU
+regression commands, and packaged-image acceptance checks. HPC Mesh Optimization
+& Preview is a separate workflow: static embedded GLB, an active GPU allocation,
+per-material geometry budgets, and renderer checks. Its corpus and acceptance
+commands are in `external_code/mesh_optimizer/validation/README.md`. A disconnected
+cluster leaves those GPU checks pending; local CPU results do not establish HPC
+readiness.
+
 ## Run 3D Point Cloud Readiness
 
 Primary actor: operator or publishing user validating point-cloud assets.

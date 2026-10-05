@@ -292,6 +292,16 @@ def _write_report(component: str, path: Path, payload: dict[str, Any], outputs: 
 
 
 def run_component(component: str, request: dict[str, Any]) -> dict[str, Any]:
+    if component == "geometric_lod_generator":
+        import importlib.util
+        runner_path = Path(__file__).with_name("geometric_lod_runner.py")
+        if not runner_path.exists():
+            runner_path = Path(__file__).parent.parent / "geometric_lod_generator" / "runner.py"
+        spec = importlib.util.spec_from_file_location("geometric_lod_runner", runner_path)
+        runner = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(runner)
+        inputs = {**(request.get("inputs") or {}), "input_file": str(_resolve_input((request.get("inputs") or {}).get("input_file")))}
+        return runner.execute({**request, "inputs": inputs})
     started = time.time()
     inputs = request.get("inputs") if isinstance(request.get("inputs"), dict) else {}
     parameters = request.get("parameters") if isinstance(request.get("parameters"), dict) else {}
@@ -318,10 +328,6 @@ def run_component(component: str, request: dict[str, Any]) -> dict[str, Any]:
         derivative = _copy_derivative(path, _output_root(), "canonical")
         outputs["canonical_asset"] = str(derivative)
         payload["normalization"] = {"mode": "copy_derivative", "mutated_original": False, "target_format": "glb"}
-    elif component == "geometric_lod_generator":
-        derivative = _copy_derivative(path, _output_root(), "lod_preview")
-        outputs["lod_preview"] = str(derivative)
-        payload["lod"] = {"generated_levels": ["preview"], "method": "copy_placeholder", "mutated_original": False}
     elif component == "point_cloud_analyzer":
         payload["point_cloud"] = {
             "is_point_cloud": facts.get("model_type") == "point_cloud" or facts.get("format") in {"ply", "las", "laz", "e57"},
@@ -388,6 +394,8 @@ def main() -> int:
     parser.add_argument("--apply-changes", action="store_true")
     parser.add_argument("--apply-repair", action="store_true")
     parser.add_argument("--target-up-axis")
+    parser.add_argument("--target-ratio", type=float)
+    parser.add_argument("--max-relative-error", type=float)
     args, _unknown = parser.parse_known_args()
     try:
         response = run_component(args.component, _read_request(args))

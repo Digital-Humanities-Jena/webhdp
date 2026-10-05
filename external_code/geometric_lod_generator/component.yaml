@@ -1,10 +1,10 @@
 metadata:
   name: geometric_lod_generator
   label: Geometric LOD Generator
-  description: Produces lightweight derivative placeholders and reports for web-viewing level-of-detail workflows.
+  description: Generate three GLB detail levels on the CPU, retaining preceding geometry when sampled surface error exceeds the limit. Static embedded GLB only.
   tags: [3d, lod, optimization, derivative]
   category: 3D Processing
-  version: "1.0.0"
+  version: "1.0.1"
   status: alpha
   component_schema: "0.1.0-alpha.1"
 
@@ -24,6 +24,9 @@ outputs:
     type: file_path
   - name: lod_preview
     type: file_path
+  - {name: lod_high, label: High detail GLB, type: file_path}
+  - {name: lod_medium, label: Medium detail GLB, type: file_path}
+  - {name: lod_low, label: Low detail GLB, type: file_path}
 
 parameter_groups:
   - title: Optimization
@@ -32,8 +35,15 @@ parameter_groups:
         label: Target Ratio
         type: number
         default: 0.5
+        description: Fraction of source triangles targeted by the medium level, strictly between 0 and 1. High uses its square root; low uses its square.
+      - name: max_relative_error
+        label: Surface error limit
+        type: number
+        default: 0.001
+        description: Sampled error as a fraction of each mesh bounding-box diagonal, strictly between 0 and 0.1. Geometry is retained when this limit is exceeded.
 
 execution:
+  timeout: 600
   profiles:
     - id: local_docker
       adapter: container_cli
@@ -45,7 +55,7 @@ execution:
       resources:
         gpu_count: 0
         cpus: 1
-        memory_mb: 2048
+        memory_mb: 8192
 
 compatibility:
   playground:
@@ -60,7 +70,7 @@ install:
   test:
     files:
       - name: sample.glb
-        content_base64: "Z2xURgIAAAAwAAAAHAAAAEpTT057ImFzc2V0Ijp7InZlcnNpb24iOiIyLjAifX0g"
+        content_base64: "Z2xURgIAAACoAQAAaAEAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAic2NlbmUiOiAwLCAic2NlbmVzIjogW3sibm9kZXMiOiBbMF19XSwgIm5vZGVzIjogW3sibWVzaCI6IDB9XSwgIm1lc2hlcyI6IFt7InByaW1pdGl2ZXMiOiBbeyJhdHRyaWJ1dGVzIjogeyJQT1NJVElPTiI6IDB9fV19XSwgImJ1ZmZlcnMiOiBbeyJieXRlTGVuZ3RoIjogMzZ9XSwgImJ1ZmZlclZpZXdzIjogW3siYnVmZmVyIjogMCwgImJ5dGVMZW5ndGgiOiAzNn1dLCAiYWNjZXNzb3JzIjogW3siYnVmZmVyVmlldyI6IDAsICJjb21wb25lbnRUeXBlIjogNTEyNiwgInR5cGUiOiAiVkVDMyIsICJjb3VudCI6IDMsICJtaW4iOiBbMCwgMCwgMF0sICJtYXgiOiBbMSwgMSwgMF19XX0kAAAAQklOAAAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAA=="
     inputs:
       input_file: sample.glb
     parameters:
@@ -71,11 +81,15 @@ ui:
     fields:
       input_file:
         widget: model_input
-        accept_extensions: [.glb, .gltf, .obj, .ply]
+        accept_extensions: [.glb]
+        help_text: Static GLB with embedded textures and one scene. Animations, skins and external dependencies are rejected. Originals remain unchanged.
       target_ratio:
+        widget: number_input
+      max_relative_error:
         widget: number_input
     result:
       artifact_views:
+        - {id: lod-models, label: Detail levels, widget: file_download, extensions: [.glb]}
         - id: lod-report
           label: LOD Report
           widget: file_download
