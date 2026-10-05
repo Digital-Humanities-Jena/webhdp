@@ -448,6 +448,26 @@ Institution tokens are also encrypted at rest and returned only as masked previe
 
 ## 9. Execute First Submit and Record-Based Rerun
 
+### Check selected sources before execution
+
+```bash
+curl -X POST "$BASE_URL_V2/pipelines/<pipeline_id>/readiness" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "session_id": 42,
+    "local_file_paths": ["/data/session/uploads/model_a.glb"],
+    "is_sandbox": true,
+    "abort_on_critical_error": false
+  }'
+```
+
+Inspect `data.ready`, `data.blockers`, and `data.unverified`. When ready, pass
+`data.readiness_token` as `readiness_token` and `data.pipeline_version` as
+`expected_version` with the same selection and settings to execution. The check
+has no remote effects; runtime and generated-output checks remain deferred.
+Repeat the check after edits or after one hour before starting a new request.
+
 ### First submit on selected files
 ```bash
 curl -X POST "$BASE_URL_V2/pipelines/<pipeline_id>/execute" \

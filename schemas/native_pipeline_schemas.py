@@ -269,6 +269,9 @@ class PipelineExecutionRequestSchema(BaseModel):
     is_sandbox: bool = True
     async_execution: bool = False
     abort_on_critical_error: bool = False
+    expected_version: Optional[str] = None
+    preflight_token: Optional[str] = None
+    readiness_token: Optional[str] = None
 
     @model_validator(mode="after")
     def validate_targets(self) -> "PipelineExecutionRequestSchema":

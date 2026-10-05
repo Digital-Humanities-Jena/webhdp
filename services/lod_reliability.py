@@ -78,12 +78,18 @@ def resolve_template(standard, template_id=None):
     return template
 
 
-def snapshot_templates(metadata):
+def snapshot_templates(metadata, *, bootstrap=True, allow_missing=False):
     from database.lod_template_bootstrap import ensure_default_lod_templates
-    ensure_default_lod_templates()
+    if bootstrap:
+        ensure_default_lod_templates()
     result = {}
     for standard in ('edm', 'iiif', 'mets'):
-        template = resolve_template(standard, metadata.get(f'{standard}_template_id'))
+        try:
+            template = resolve_template(standard, metadata.get(f'{standard}_template_id'))
+        except ValueError:
+            if allow_missing:
+                continue
+            raise
         result[standard] = {key: getattr(template, key) for key in ('id', 'name', 'content')}
         result[standard]['standard'] = standard
         result[standard]['sha256'] = digest(template.content)
@@ -140,7 +146,7 @@ class MetadataRows:
         return len(self.rows)
 
 
-def capture_session_lod(session_id):
+def capture_session_lod(session_id, *, bootstrap_templates=True, allow_missing_templates=False):
     from database.models import UserMetadata, BatchFileMetadata, Session
     from database.database import db
     fields = {}
@@ -160,7 +166,7 @@ def capture_session_lod(session_id):
     if isinstance(msf_path, str) and os.path.isfile(msf_path):
         with open(msf_path, 'rb') as stream:
             msf_hash = digest(stream.read())
-    return {'metadata': metadata, 'profile': profile, 'msf_sha256': msf_hash, 'templates': snapshot_templates(metadata),
+    return {'metadata': metadata, 'profile': profile, 'msf_sha256': msf_hash, 'templates': snapshot_templates(metadata, bootstrap=bootstrap_templates, allow_missing=allow_missing_templates),
             'batch': {row.filename: json.loads(row.metadata_json) for row in BatchFileMetadata.query.filter_by(session_id=session_id).all()}}
 
 

@@ -197,6 +197,20 @@ def preflight_pipeline_constructor_v2():
     return APIResponse.success(data=payload)
 
 
+@pipeline_v2_bp.route("/pipelines/<identifier>/readiness", methods=["POST"])
+@jwt_required()
+def submission_readiness_v2(identifier):
+    data = request.get_json() or {}
+    payload = PipelineExecutionRequestSchema.model_validate({**data, 'pipeline_identifier': identifier}).model_dump(mode='python')
+    _, _, error_response = get_session_with_permission(payload['session_id'], permission='edit', require_mutable=True)
+    if error_response:
+        return error_response
+    result = current_app.native_pipeline_service.check_submission_readiness(
+        identifier, payload['session_id'], payload, int(get_jwt_identity()),
+    )
+    return APIResponse.success(data=result)
+
+
 @pipeline_v2_bp.route("/pipelines/<identifier>/execute", methods=["POST"])
 @jwt_required()
 def execute_pipeline_v2(identifier):
@@ -211,6 +225,7 @@ def execute_pipeline_v2(identifier):
         "request_id": request_id,
         "expected_version": data.get("expected_version"),
         "preflight_token": data.get("preflight_token"),
+        "readiness_token": data.get("readiness_token"),
         "session_id": data.get("session_id"),
         "local_file_paths": data.get("local_file_paths") or [],
         "record_ids": data.get("record_ids") or [],
@@ -220,6 +235,7 @@ def execute_pipeline_v2(identifier):
         "abort_on_critical_error": bool(data.get("abort_on_critical_error", False)),
     }
     request_model = PipelineExecutionRequestSchema.model_validate(payload)
+    payload = request_model.model_dump(mode='python')
     session_row, _, error_response = get_session_with_permission(
         request_model.session_id,
         permission="edit",
@@ -268,6 +284,10 @@ def execute_pipeline_v2(identifier):
             message="Native pipeline execution started",
         )
 
+    pending_run = current_app.native_pipeline_service.create_pending_run(
+        identifier, session_id=request_model.session_id,
+        initiated_by_user_id=int(user_id) if user_id else None, request_payload=payload,
+    )
     execution_output = execute_submission_pipeline(
         identifier=identifier,
         local_file_paths=request_model.local_file_paths,
@@ -276,6 +296,7 @@ def execute_pipeline_v2(identifier):
         abort_on_critical_error=request_model.abort_on_critical_error,
         record_ids=request_model.record_ids,
         execution_items=[item.model_dump(mode="python") for item in request_model.execution_items],
+        precreated_run_public_id=pending_run['run_id'],
     )
     session_row.status = "completed" if execution_output["result"].get("success", True) else "failed"
     session_row.timings = json.dumps(execution_output["timings"])

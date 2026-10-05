@@ -205,7 +205,9 @@ def test_killed_execution_process_is_reconciled_without_reexecution(tmp_path):
         db.session.add(session)
         db.session.commit()
         service = NativePipelineSystemService()
-        queued = service.create_pending_run('render', session_id=session.id, initiated_by_user_id=user.id, request_payload={})
+        # This fixture exercises worker recovery; source readiness is covered separately.
+        with patch.object(service, 'require_submission_readiness', return_value={'_state': None}):
+            queued = service.create_pending_run('render', session_id=session.id, initiated_by_user_id=user.id, request_payload={})
         script = '''
 import sys
 from flask import Flask

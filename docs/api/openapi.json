@@ -13201,6 +13201,50 @@
         ]
       }
     },
+    "/api/v2/pipelines/{identifier}/readiness": {
+      "post": {
+        "operationId": "post_pipeline_v2_submission_readiness_v2",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response. WebHDP API responses generally use {success, data, message, metadata}."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "pipeline_v2 submission_readiness_v2",
+        "tags": [
+          "pipelines"
+        ]
+      }
+    },
     "/api/v2/pipelines/{identifier}/versions": {
       "post": {
         "operationId": "post_pipeline_v2_create_pipeline_version_v2",

@@ -7,6 +7,7 @@ from pathlib import Path
 import fcntl
 import os
 from contextvars import ContextVar
+from datetime import datetime
 
 from exceptions import AppException
 
@@ -86,7 +87,19 @@ def guard_submission_execution(function):
             if run:
                 run.status = PipelineRunStatus.RUNNING
                 db.session.commit()
-            return function(*args, **kwargs)
+            try:
+                return function(*args, **kwargs)
+            except Exception as exc:
+                if run and not isinstance(exc, PipelineAlreadyRunning):
+                    db.session.rollback()
+                    db.session.refresh(run)
+                    if run.status == PipelineRunStatus.RUNNING:
+                        run.status = PipelineRunStatus.FAILED
+                        run.error_message = str(exc)
+                        run.completed_at = datetime.utcnow()
+                        run.result_json = json.dumps({'success': False, 'status': 'failed', 'error': str(exc)})
+                        db.session.commit()
+                raise
         if session is None or not session.hdpc_path:
             return execute_once()
         run_id = arguments.get("precreated_run_public_id")

@@ -69,6 +69,11 @@ class NativePipelineSystemTestCase(unittest.TestCase):
             self.other_user_id = self.other_user.id
             self.native_service.ensure_seeded()
 
+    def _reserve_run(self, *args, **kwargs):
+        # Reservation lifecycle fixtures isolate readiness, which has integration coverage.
+        with patch.object(self.native_service, 'require_submission_readiness', return_value={'_state': None}):
+            return self.native_service.create_pending_run(*args, **kwargs)
+
     def tearDown(self):
         shutil.rmtree(self.temp_dir)
         with self.app.app_context():
@@ -577,14 +582,14 @@ class NativePipelineSystemTestCase(unittest.TestCase):
             _, _, session = self._prepare_generic_pipeline_session("queued_version")
             original = self.native_service.get_pipeline("render")
             payload = {"request_id": str(uuid4()), "session_id": session.id, "local_file_paths": ["sample.glb"], "expected_version": original["active_version"]}
-            pending = self.native_service.create_pending_run("render", session_id=session.id, initiated_by_user_id=self.user_id, request_payload=payload)
+            pending = self._reserve_run("render", session_id=session.id, initiated_by_user_id=self.user_id, request_payload=payload)
             updated = {**original["config"], "name": "New renderer revision"}
             self.native_service.create_pipeline_version_from_config("render", updated)
-            retry = self.native_service.create_pending_run("render", session_id=session.id, initiated_by_user_id=self.user_id, request_payload=payload)
+            retry = self._reserve_run("render", session_id=session.id, initiated_by_user_id=self.user_id, request_payload=payload)
             self.assertEqual(pending["run_id"], retry["run_id"])
             self.assertTrue(retry["reused"])
             with self.assertRaises(OperationConflict):
-                self.native_service.create_pending_run("render", session_id=session.id, initiated_by_user_id=self.user_id, request_payload={**payload, "local_file_paths": ["other.glb"]})
+                self._reserve_run("render", session_id=session.id, initiated_by_user_id=self.user_id, request_payload={**payload, "local_file_paths": ["other.glb"]})
             with patch.object(self.native_service, "_run_native_pipeline", return_value={"success": True}) as execute:
                 result = self.native_service.execute_registered_submission("render", {"db_session_id": session.id}, existing_run_public_id=pending["run_id"])
             self.assertEqual(result["pipeline_version"], original["active_version"])
@@ -601,7 +606,7 @@ class NativePipelineSystemTestCase(unittest.TestCase):
         with self.app.app_context():
             _, _, session = self._prepare_generic_pipeline_session("interrupted")
             payload = {"request_id": str(uuid4()), "session_id": session.id}
-            queued = self.native_service.create_pending_run("render", session_id=session.id, initiated_by_user_id=self.user_id, request_payload=payload)
+            queued = self._reserve_run("render", session_id=session.id, initiated_by_user_id=self.user_id, request_payload=payload)
             with patch.object(self.native_service, "_run_native_pipeline", side_effect=SystemExit("worker terminated")) as execute:
                 with self.assertRaises(SystemExit):
                     self.native_service.execute_registered_submission("render", {"db_session_id": session.id}, existing_run_public_id=queued["run_id"])
@@ -611,12 +616,12 @@ class NativePipelineSystemTestCase(unittest.TestCase):
                 self.assertEqual(recovered["status"], "failed")
                 self.assertTrue(recovered["result"]["interrupted"])
                 self.assertNotIn("_dispatch", recovered["request"])
-                retry = self.native_service.create_pending_run("render", session_id=session.id, initiated_by_user_id=self.user_id, request_payload=payload)
+                retry = self._reserve_run("render", session_id=session.id, initiated_by_user_id=self.user_id, request_payload=payload)
                 self.assertTrue(retry["reused"])
                 result = self.native_service.execute_registered_submission("render", {"db_session_id": session.id}, existing_run_public_id=queued["run_id"])
                 self.assertFalse(result["success"])
                 execute.assert_called_once()
-            new = self.native_service.create_pending_run("render", session_id=session.id, initiated_by_user_id=self.user_id, request_payload={"request_id": str(uuid4()), "session_id": session.id})
+            new = self._reserve_run("render", session_id=session.id, initiated_by_user_id=self.user_id, request_payload={"request_id": str(uuid4()), "session_id": session.id})
             self.assertNotEqual(new["run_id"], queued["run_id"])
 
     def test_live_worker_lock_prevents_false_interruption(self):
@@ -624,7 +629,7 @@ class NativePipelineSystemTestCase(unittest.TestCase):
         from database.models import PipelineRunStatus
         with self.app.app_context():
             _, _, session = self._prepare_generic_pipeline_session("live_worker")
-            queued = self.native_service.create_pending_run("render", session_id=session.id, initiated_by_user_id=self.user_id, request_payload={})
+            queued = self._reserve_run("render", session_id=session.id, initiated_by_user_id=self.user_id, request_payload={})
             row = PipelineRun.query.filter_by(public_id=queued["run_id"]).one()
             row.status = PipelineRunStatus.RUNNING
             db.session.commit()
@@ -635,14 +640,14 @@ class NativePipelineSystemTestCase(unittest.TestCase):
     def test_interruption_before_dispatch_can_be_recovered(self):
         with self.app.app_context():
             _, _, session = self._prepare_generic_pipeline_session("interrupted_dispatch")
-            queued = self.native_service.create_pending_run("render", session_id=session.id, initiated_by_user_id=self.user_id, request_payload={})
+            queued = self._reserve_run("render", session_id=session.id, initiated_by_user_id=self.user_id, request_payload={})
             with patch("services.pipeline_run_recovery.owner_alive", return_value=False):
                 self.assertEqual(self.native_service.get_pipeline_run(queued["run_id"])["status"], "failed")
 
     def test_unknown_task_monitor_does_not_fail_queued_run(self):
         with self.app.app_context():
             _, _, session = self._prepare_generic_pipeline_session("unknown_dispatch")
-            queued = self.native_service.create_pending_run("render", session_id=session.id, initiated_by_user_id=self.user_id, request_payload={})
+            queued = self._reserve_run("render", session_id=session.id, initiated_by_user_id=self.user_id, request_payload={})
             self.assertEqual(self.native_service.get_pipeline_run(queued["run_id"])["status"], "pending")
 
     def test_queued_run_reserves_session_against_synchronous_execution(self):
@@ -650,7 +655,7 @@ class NativePipelineSystemTestCase(unittest.TestCase):
         from services.submission_pipeline_service import execute_submission_pipeline
         with self.app.app_context():
             _, _, session = self._prepare_generic_pipeline_session('reserved_session')
-            queued = self.native_service.create_pending_run('render', session_id=session.id, initiated_by_user_id=self.user_id, request_payload={})
+            queued = self._reserve_run('render', session_id=session.id, initiated_by_user_id=self.user_id, request_payload={})
             with patch.object(self.native_service, '_run_native_pipeline') as execute:
                 with self.assertRaises(PipelineAlreadyRunning):
                     self.native_service.execute_registered_submission('render', {'db_session_id': session.id})
@@ -665,9 +670,9 @@ class NativePipelineSystemTestCase(unittest.TestCase):
         with self.app.app_context():
             _, _, session = self._prepare_generic_pipeline_session('active_retry')
             payload = {'request_id': str(uuid4())}
-            queued = self.native_service.create_pending_run('render', session_id=session.id, initiated_by_user_id=self.user_id, request_payload=payload)
+            queued = self._reserve_run('render', session_id=session.id, initiated_by_user_id=self.user_id, request_payload=payload)
             with locked_by_other_process(session.hdpc_path):
-                reused = self.native_service.create_pending_run('render', session_id=session.id, initiated_by_user_id=self.user_id, request_payload=payload)
+                reused = self._reserve_run('render', session_id=session.id, initiated_by_user_id=self.user_id, request_payload=payload)
                 self.assertTrue(reused['reused'])
                 self.assertEqual(reused['run_id'], queued['run_id'])
 
@@ -678,7 +683,7 @@ class NativePipelineSystemTestCase(unittest.TestCase):
         from types import SimpleNamespace
         with self.app.app_context():
             _, _, session = self._prepare_generic_pipeline_session('uncertain_dispatch')
-            queued = self.native_service.create_pending_run('render', session_id=session.id, initiated_by_user_id=self.user_id, request_payload={})
+            queued = self._reserve_run('render', session_id=session.id, initiated_by_user_id=self.user_id, request_payload={})
             def accepted_but_response_lost(**kwargs):
                 row = PipelineRun.query.filter_by(public_id=queued['run_id']).one()
                 self.assertEqual(json.loads(row.request_json)['_dispatch']['task_id'], kwargs['task_id'])
@@ -699,7 +704,7 @@ class NativePipelineSystemTestCase(unittest.TestCase):
         from test_workflow_transition_reliability import locked_by_other_process
         with self.app.app_context():
             _, _, session = self._prepare_generic_pipeline_session('accepted_dispatch')
-            queued = self.native_service.create_pending_run('render', session_id=session.id, initiated_by_user_id=self.user_id, request_payload={})
+            queued = self._reserve_run('render', session_id=session.id, initiated_by_user_id=self.user_id, request_payload={})
             run = PipelineRun.query.filter_by(public_id=queued['run_id']).one()
             run.status = PipelineRunStatus.RUNNING
             db.session.commit()
@@ -718,7 +723,7 @@ class NativePipelineSystemTestCase(unittest.TestCase):
         from database.models import PipelineRunStatus
         with self.app.app_context():
             _, _, session = self._prepare_generic_pipeline_session('retired_hostname')
-            queued = self.native_service.create_pending_run('render', session_id=session.id, initiated_by_user_id=self.user_id, request_payload={})
+            queued = self._reserve_run('render', session_id=session.id, initiated_by_user_id=self.user_id, request_payload={})
             run = PipelineRun.query.filter_by(public_id=queued['run_id']).one()
             payload = json.loads(run.request_json)
             payload['_dispatch']['owner']['host'] = 'previous-container'
@@ -728,14 +733,14 @@ class NativePipelineSystemTestCase(unittest.TestCase):
             self.assertEqual(self.native_service.get_pipeline_run(run.public_id)['status'], 'failed')
             self.assertEqual(run.status, PipelineRunStatus.FAILED)
             self.assertEqual(session.status, 'failed')
-            replacement = self.native_service.create_pending_run('render', session_id=session.id, initiated_by_user_id=self.user_id, request_payload={})
+            replacement = self._reserve_run('render', session_id=session.id, initiated_by_user_id=self.user_id, request_payload={})
             self.assertNotEqual(replacement['run_id'], run.public_id)
 
     def test_cancelled_pipeline_reservation_is_not_replayed(self):
         from services.pipeline_run_recovery import cancel_pending_run
         with self.app.app_context():
             _, _, session = self._prepare_generic_pipeline_session('cancelled_reservation')
-            queued = self.native_service.create_pending_run('render', session_id=session.id, initiated_by_user_id=self.user_id, request_payload={})
+            queued = self._reserve_run('render', session_id=session.id, initiated_by_user_id=self.user_id, request_payload={})
             run = PipelineRun.query.filter_by(public_id=queued['run_id']).one()
             cancel_pending_run(run)
             self.assertTrue(self.native_service.get_pipeline_run(run.public_id)['result']['cancelled'])
@@ -770,7 +775,7 @@ class NativePipelineSystemTestCase(unittest.TestCase):
             db.session.add(UserMetadata(session_id=session.id, field_name="zenodo_metadata_draft", field_value='{"title":"Changed title"}'))
             db.session.commit()
             with self.assertRaises(OperationConflict):
-                self.native_service.create_pending_run("metadata_checked", session_id=session.id, initiated_by_user_id=self.user_id, request_payload={"preflight_token": checked["preflight_token"], "session_id": session.id, "local_file_paths": [str(source)]})
+                self._reserve_run("metadata_checked", session_id=session.id, initiated_by_user_id=self.user_id, request_payload={"preflight_token": checked["preflight_token"], "session_id": session.id, "local_file_paths": [str(source)]})
 
     def test_publication_rejects_unpinned_container_artifacts(self):
         with self.app.app_context():
@@ -785,7 +790,7 @@ class NativePipelineSystemTestCase(unittest.TestCase):
     def test_run_details_require_access_to_its_session(self):
         with self.app.app_context():
             _, _, session = self._prepare_generic_pipeline_session("private_run")
-            queued = self.native_service.create_pending_run("render", session_id=session.id, initiated_by_user_id=self.user_id, request_payload={})
+            queued = self._reserve_run("render", session_id=session.id, initiated_by_user_id=self.user_id, request_payload={})
             self.assertEqual(self.native_service.get_pipeline_run(queued["run_id"], self.user_id)["run_id"], queued["run_id"])
             with self.assertRaises(ResourceNotFoundError):
                 self.native_service.get_pipeline_run(queued["run_id"], self.other_user_id)

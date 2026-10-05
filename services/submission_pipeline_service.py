@@ -671,8 +671,9 @@ def _normalize_execution_items(execution_items: Optional[List[Dict[str, Any]]]) 
 def _validate_execution_items_against_resolution_state(
     session_row: DBSession,
     execution_items: List[Dict[str, Any]],
+    *, analysis=None,
 ) -> Dict[str, Dict[str, Any]]:
-    analysis = analyze_session_record_resolution(session_row)
+    analysis = analysis if analysis is not None else analyze_session_record_resolution(session_row)
     candidates_by_key = {
         str(item.get("decision_key") or "").strip(): item
         for item in analysis.get("candidates") or []
@@ -684,6 +685,9 @@ def _validate_execution_items_against_resolution_state(
         candidate = candidates_by_key.get(decision_key)
         if candidate is None:
             raise FileProcessingError(f"Record resolution decision '{decision_key}' is no longer valid for this session.")
+        candidate_path = candidate.get("candidate_source_file")
+        if candidate_path and os.path.realpath(candidate_path) != os.path.realpath(item["source_file_path"]):
+            raise FileProcessingError(f"Source for '{decision_key}' no longer matches the saved session plan.")
         selected_action = str(candidate.get("selected_action") or "").strip().lower()
         if selected_action != str(item.get("action") or "").strip().lower():
             raise FileProcessingError(f"Record resolution decision '{decision_key}' no longer matches the saved session plan.")
@@ -695,6 +699,8 @@ def _validate_execution_items_against_resolution_state(
                 raise FileProcessingError(f"Version target for '{decision_key}' no longer matches the saved session plan.")
             if int(selected_target.get("local_record_id") or 0) != int(item.get("target_local_record_id") or 0):
                 raise FileProcessingError(f"Version target for '{decision_key}' no longer matches the saved session plan.")
+            if str(selected_target.get("concept_rec_id") or "") != str(item.get("target_concept_rec_id") or ""):
+                raise FileProcessingError(f"Version lineage for '{decision_key}' no longer matches the saved session plan.")
         if selected_action == "force_create_fresh":
             saved_reason = str(candidate.get("forced_override_reason") or "").strip()
             if saved_reason != str(item.get("forced_override_reason") or "").strip():
@@ -723,112 +729,16 @@ def _resolve_version_target_record(target_session_id: int, target_local_record_i
     return target_record
 
 
-@guard_submission_execution
-def execute_submission_pipeline(
-    identifier: str,
-    local_file_paths: Optional[List[str]],
-    db_session_id: int,
-    is_sandbox: bool = True,
-    abort_on_critical_error: bool = False,
-    progress_callback: Optional[ProgressCallback] = None,
-    record_ids: Optional[List[int]] = None,
-    execution_items: Optional[List[Dict[str, Any]]] = None,
-    precreated_run_public_id: Optional[str] = None,
-) -> Dict[str, Any]:
-    """
-    Execute a submission pipeline and emit optional progress updates.
+def record_submission_metadata(record):
+    payload = record.get('record_metadata') or {}
+    return _merge_non_empty_metadata({}, payload.get('metadata', payload))
 
-    Returns:
-        Dict with keys: result, timings, progress_summary
-    """
-    project_service = current_app.project_service
-    local_file_paths = list(local_file_paths or [])
-    record_ids = [int(record_id) for record_id in (record_ids or []) if record_id is not None]
-    execution_items = _normalize_execution_items(execution_items)
 
-    pipeline_timings = {
-        "project_loading": 0,
-        "record_registration": 0,
-        "batch_render": 0,
-        "record_processing": [],
-        "total_execution": 0,
-    }
-    main_start = time.time()
-
-    db_session = db.session.get(DBSession, db_session_id)
-    if not db_session:
-        raise FileProcessingError("Session not found in database")
-
+def prepare_submission_sources(db_session, local_file_paths, execution_items, record_ids, *, lod_snapshot=None):
+    """Resolve source identity and metadata without registering records or writing bundles."""
     hdpc_path = db_session.hdpc_path
-    if not hdpc_path:
-        raise FileProcessingError("Session has no .hdpc file path")
-    using_execution_items = bool(execution_items)
-    using_existing_record_ids = bool(record_ids) and not using_execution_items
-    session_default_environment = str(getattr(db_session, "default_zenodo_environment", "sandbox") or "sandbox").strip().lower()
-    session_default_is_sandbox = session_default_environment != "production"
-    effective_is_sandbox = session_default_is_sandbox if using_execution_items else bool(is_sandbox)
-    if using_execution_items and bool(is_sandbox) != effective_is_sandbox:
-        raise FileProcessingError(
-            "Batch record-resolution plans must run in the session's default Zenodo environment.",
-            details={
-                "session_id": db_session.id,
-                "session_default_environment": session_default_environment,
-                "requested_environment": "sandbox" if bool(is_sandbox) else "production",
-            },
-        )
-    zenodo_environment = "sandbox" if effective_is_sandbox else "production"
-    token_context = publishing_context_service.resolve_token_for_session(db_session, zenodo_environment)
-    access_token = token_context.get("token")
-    session_description = publishing_context_service.describe_session(db_session)
-    publishing_context = {
-        "environment": token_context.get("environment") or zenodo_environment,
-        "credential_source": token_context.get("source") or session_description.get("effective_credential_source"),
-        "owner_type": token_context.get("owner_type"),
-        "owner_id": token_context.get("owner_id"),
-        "credential_id": token_context.get("credential_id"),
-        "masked_preview": token_context.get("masked_preview"),
-        "workspace_type": session_description.get("workspace_type"),
-        "credential_preference": session_description.get("credential_preference"),
-        "institution_id": session_description.get("institution_id"),
-        "publishing_user_id": session_description.get("publishing_user_id"),
-        "community_policy": {
-            "default_communities": session_description.get("default_communities", []),
-            "primary_submission_community": session_description.get("primary_submission_community"),
-            "moderation_default_communities": session_description.get("moderation_default_communities", []),
-            "use_institution_default_communities": bool(
-                session_description.get("use_institution_default_communities", False)
-            ),
-        },
-    }
-
-    total_requested = (
-        len(execution_items)
-        if using_execution_items
-        else len(record_ids)
-        if using_existing_record_ids
-        else len(local_file_paths)
-    )
-    _emit_progress(
-        progress_callback,
-        {
-            "current_stage": "loading_project",
-            "status_message": "Loading project context",
-            "current_index": 0,
-            "total_files": total_requested,
-            "processed_count": 0,
-            "failed_count": 0,
-        },
-    )
-
-    load_start = time.time()
-    try:
-        inspect_data = inspect_hdpc_project(hdpc_path, show_files=True)
-        file_id_map = get_hdpc_file_id_map(hdpc_path)
-    except Exception as exc:
-        raise FileProcessingError(f"Could not read local project .hdpc at {hdpc_path}: {exc}") from exc
-
-    pipeline_timings["project_loading"] = time.time() - load_start
-
+    inspect_data = inspect_hdpc_project(hdpc_path, show_files=True)
+    file_id_map = get_hdpc_file_id_map(hdpc_path)
     if not file_id_map:
         raise FileProcessingError("Could not find any files in the project .hdpc")
     normalized_file_id_map = {
@@ -853,13 +763,7 @@ def execute_submission_pipeline(
         basename_to_relative_paths.setdefault(basename, []).append(relative_path)
 
     from services.lod_reliability import capture_session_lod, MetadataRows
-    lod_snapshot = None
-    if precreated_run_public_id:
-        from database.models import PipelineRun
-        queued_run = PipelineRun.query.filter_by(public_id=precreated_run_public_id).first()
-        if queued_run:
-            lod_snapshot = json.loads(queued_run.request_json or '{}').get('lod_snapshot')
-    lod_snapshot = lod_snapshot or capture_session_lod(db_session_id)
+    lod_snapshot = lod_snapshot or capture_session_lod(db_session.id)
     shared_zenodo_metadata = lod_snapshot['metadata']
     batch_metadata_map = MetadataRows(lod_snapshot['batch'].items(), normalized_file_id_map)
     has_batch_metadata = bool(batch_metadata_map)
@@ -924,23 +828,6 @@ def execute_submission_pipeline(
 
     if not uses_per_file_metadata and not shared_zenodo_metadata and not record_ids and not execution_items:
         raise FileProcessingError("No metadata found. Please fill in metadata before running the pipeline.")
-
-    _emit_progress(
-        progress_callback,
-        {
-            "current_stage": "registering_records",
-            "status_message": "Registering records",
-            "current_index": 0,
-            "total_files": total_requested,
-            "processed_count": 0,
-            "failed_count": 0,
-        },
-    )
-
-    record_ids_to_process: List[int] = []
-    record_info_list: List[Tuple[int, str, Dict[str, Any]]] = []
-    skipped_files: List[str] = []
-    record_resolution_by_record_id: Dict[int, Dict[str, Any]] = {}
 
     uploads_dir = os.path.join(os.path.dirname(hdpc_path), "uploads")
     input_dir = None
@@ -1042,16 +929,14 @@ def execute_submission_pipeline(
             and not k.startswith("_")
             and k not in INTERNAL_ZENODO_KEYS
         }
+        fallback_creators = _derive_batch_fallback_creators(zenodo_metadata, batch_item_defaults) if uses_per_file_metadata else None
+        supplied_creators = normalize_zenodo_metadata(raw_submission_metadata, apply_defaults=False).get('creators') or fallback_creators or []
         zenodo_submission_metadata = normalize_zenodo_metadata(
             raw_submission_metadata,
             apply_defaults=True,
             fallback_title=_derive_batch_fallback_title(zenodo_metadata, filename),
             fallback_description=NEUTRAL_ITEM_DESCRIPTION if uses_per_file_metadata else None,
-            fallback_creators=(
-                _derive_batch_fallback_creators(zenodo_metadata, batch_item_defaults)
-                if uses_per_file_metadata
-                else None
-            ),
+            fallback_creators=fallback_creators,
         )
         lod_base_metadata = _merge_non_empty_metadata(zenodo_metadata, zenodo_submission_metadata)
 
@@ -1069,25 +954,189 @@ def execute_submission_pipeline(
         if not paths_to_associate:
             paths_to_associate = [effective_file_path]
 
-        source_bundle = create_source_bundle(
-            effective_file_path, inspect_data.get("file_tree", []),
-            os.path.join(os.path.dirname(hdpc_path), "outputs", "source-bundles"),
-        )
-        if source_bundle:
-            names = [os.path.basename(path).casefold() for path in paths_to_associate]
-            if len(names) != len(set(names)):
-                paths_to_associate = [effective_file_path]
-            paths_to_associate.append(source_bundle)
-
         return {
             "file_id": file_id,
             "filename": filename,
             "effective_file_path": effective_file_path,
             "resolved_relative_path": resolved_relative_path,
             "zenodo_submission_metadata": zenodo_submission_metadata,
+            "supplied_creators": supplied_creators,
             "lod_base_metadata": lod_base_metadata,
             "paths_to_associate": paths_to_associate,
         }
+
+    return {"inspect_data": inspect_data, "resolve": resolve_execution_source,
+            "lod_snapshot": lod_snapshot,
+            "batch_metadata_map": batch_metadata_map, "shared_zenodo_metadata": shared_zenodo_metadata,
+            "batch_shared_zenodo_metadata": batch_shared_zenodo_metadata, "batch_item_defaults": batch_item_defaults,
+            "lod_mapping_config": lod_mapping_config, "msf_rows_by_filename": msf_rows_by_filename,
+            "resolved_lod_msf_path": resolved_lod_msf_path, "normalized_file_id_map": normalized_file_id_map,
+            "file_id_to_relative_path": file_id_to_relative_path, "bundle_file_paths_by_relative": bundle_file_paths_by_relative,
+            "basename_to_relative_paths": basename_to_relative_paths, "relative_to_absolute_path": relative_to_absolute_path,
+            "absolute_to_relative_path": absolute_to_relative_path}
+
+
+@guard_submission_execution
+def execute_submission_pipeline(
+    identifier: str,
+    local_file_paths: Optional[List[str]],
+    db_session_id: int,
+    is_sandbox: bool = True,
+    abort_on_critical_error: bool = False,
+    progress_callback: Optional[ProgressCallback] = None,
+    record_ids: Optional[List[int]] = None,
+    execution_items: Optional[List[Dict[str, Any]]] = None,
+    precreated_run_public_id: Optional[str] = None,
+    readiness_payload: Optional[Dict[str, Any]] = None,
+    readiness_user_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    Execute a submission pipeline and emit optional progress updates.
+
+    Returns:
+        Dict with keys: result, timings, progress_summary
+    """
+    project_service = current_app.project_service
+    local_file_paths = list(local_file_paths or [])
+    record_ids = [int(record_id) for record_id in (record_ids or []) if record_id is not None]
+    execution_items = _normalize_execution_items(execution_items)
+
+    pipeline_timings = {
+        "project_loading": 0,
+        "record_registration": 0,
+        "batch_render": 0,
+        "record_processing": [],
+        "total_execution": 0,
+    }
+    main_start = time.time()
+
+    db_session = db.session.get(DBSession, db_session_id)
+    if not db_session:
+        raise FileProcessingError("Session not found in database")
+
+    hdpc_path = db_session.hdpc_path
+    if not hdpc_path:
+        raise FileProcessingError("Session has no .hdpc file path")
+    queued_run = None
+    lod_snapshot = None
+    if precreated_run_public_id:
+        from database.models import PipelineRun, PipelineVersion
+        from services.submission_readiness import SubmissionReadiness
+        queued_run = PipelineRun.query.filter_by(public_id=precreated_run_public_id).first()
+        if queued_run is None or queued_run.session_id != db_session_id:
+            raise FileProcessingError('The queued run is unavailable for this session.')
+        if queued_run:
+            saved = json.loads(queued_run.request_json or '{}')
+            lod_snapshot = saved.get('lod_snapshot')
+            readiness = SubmissionReadiness(current_app.native_pipeline_service)
+            report = readiness.check(identifier, db_session, saved, queued_run.initiated_by_user_id,
+                                     version=db.session.get(PipelineVersion, queued_run.pipeline_version_id),
+                                     lod_snapshot=lod_snapshot, own_run_id=queued_run.public_id)
+            readiness.require(report, saved_state=saved.get('_readiness_state'))
+    else:
+        readiness_payload = readiness_payload or {
+            'local_file_paths': local_file_paths, 'record_ids': record_ids, 'execution_items': execution_items,
+            'is_sandbox': is_sandbox, 'abort_on_critical_error': abort_on_critical_error,
+        }
+        current_app.native_pipeline_service.require_submission_readiness(
+            identifier, db_session_id, readiness_payload, readiness_user_id or db_session.user_id,
+        )
+    using_execution_items = bool(execution_items)
+    using_existing_record_ids = bool(record_ids) and not using_execution_items
+    session_default_environment = str(getattr(db_session, "default_zenodo_environment", "sandbox") or "sandbox").strip().lower()
+    session_default_is_sandbox = session_default_environment != "production"
+    effective_is_sandbox = session_default_is_sandbox if using_execution_items else bool(is_sandbox)
+    if using_execution_items and bool(is_sandbox) != effective_is_sandbox:
+        raise FileProcessingError(
+            "Batch record-resolution plans must run in the session's default Zenodo environment.",
+            details={
+                "session_id": db_session.id,
+                "session_default_environment": session_default_environment,
+                "requested_environment": "sandbox" if bool(is_sandbox) else "production",
+            },
+        )
+    zenodo_environment = "sandbox" if effective_is_sandbox else "production"
+    token_context = publishing_context_service.resolve_token_for_session(db_session, zenodo_environment)
+    access_token = token_context.get("token")
+    session_description = publishing_context_service.describe_session(db_session)
+    publishing_context = {
+        "environment": token_context.get("environment") or zenodo_environment,
+        "credential_source": token_context.get("source") or session_description.get("effective_credential_source"),
+        "owner_type": token_context.get("owner_type"),
+        "owner_id": token_context.get("owner_id"),
+        "credential_id": token_context.get("credential_id"),
+        "masked_preview": token_context.get("masked_preview"),
+        "workspace_type": session_description.get("workspace_type"),
+        "credential_preference": session_description.get("credential_preference"),
+        "institution_id": session_description.get("institution_id"),
+        "publishing_user_id": session_description.get("publishing_user_id"),
+        "community_policy": {
+            "default_communities": session_description.get("default_communities", []),
+            "primary_submission_community": session_description.get("primary_submission_community"),
+            "moderation_default_communities": session_description.get("moderation_default_communities", []),
+            "use_institution_default_communities": bool(
+                session_description.get("use_institution_default_communities", False)
+            ),
+        },
+    }
+
+    total_requested = (
+        len(execution_items)
+        if using_execution_items
+        else len(record_ids)
+        if using_existing_record_ids
+        else len(local_file_paths)
+    )
+    _emit_progress(
+        progress_callback,
+        {
+            "current_stage": "loading_project",
+            "status_message": "Loading project context",
+            "current_index": 0,
+            "total_files": total_requested,
+            "processed_count": 0,
+            "failed_count": 0,
+        },
+    )
+
+    load_start = time.time()
+    sources = prepare_submission_sources(db_session, local_file_paths, execution_items, record_ids, lod_snapshot=lod_snapshot)
+    lod_snapshot = sources['lod_snapshot']
+    inspect_data = sources["inspect_data"]
+    pipeline_timings["project_loading"] = time.time() - load_start
+
+    _emit_progress(
+        progress_callback,
+        {
+            "current_stage": "registering_records",
+            "status_message": "Registering records",
+            "current_index": 0,
+            "total_files": total_requested,
+            "processed_count": 0,
+            "failed_count": 0,
+        },
+    )
+
+    record_ids_to_process: List[int] = []
+    record_info_list: List[Tuple[int, str, Dict[str, Any]]] = []
+    skipped_files: List[str] = []
+    record_resolution_by_record_id: Dict[int, Dict[str, Any]] = {}
+
+    def resolve_execution_source(file_path):
+        source_context = sources["resolve"](file_path)
+        if source_context is None:
+            return None
+        paths_to_associate = source_context["paths_to_associate"]
+        source_bundle = create_source_bundle(
+            source_context["effective_file_path"], inspect_data.get("file_tree", []),
+            os.path.join(os.path.dirname(hdpc_path), "outputs", "source-bundles"),
+        )
+        if source_bundle:
+            names = [os.path.basename(path).casefold() for path in paths_to_associate]
+            if len(names) != len(set(names)):
+                paths_to_associate = [source_context["effective_file_path"]]
+            paths_to_associate.append(source_bundle)
+        return {**source_context, "paths_to_associate": paths_to_associate}
 
     reg_start = time.time()
     if using_execution_items:
@@ -1232,7 +1281,7 @@ def execute_submission_pipeline(
                     record_id_to_associate=int(record_id),
                     pipeline_name="ingestion", step_name="source_bundle",
                 )
-            source_metadata = session_record.get("record_metadata") if isinstance(session_record.get("record_metadata"), dict) else {}
+            source_metadata = record_submission_metadata(session_record)
             record_ids_to_process.append(int(record_id))
             record_info_list.append((int(record_id), source_file_path, _merge_non_empty_metadata({}, source_metadata)))
             _emit_progress(
@@ -1329,7 +1378,11 @@ def execute_submission_pipeline(
     outputs_dir = os.path.join(session_dir, "outputs")
     os.makedirs(outputs_dir, exist_ok=True)
 
-    pipeline_config = current_app.native_pipeline_service.get_pipeline(identifier).get("config", {})
+    if queued_run:
+        from database.models import PipelineVersion
+        pipeline_config = json.loads(db.session.get(PipelineVersion, queued_run.pipeline_version_id).config_json)
+    else:
+        pipeline_config = current_app.native_pipeline_service.get_pipeline(identifier).get("config", {})
     steps_map = {step["id"]: step for step in pipeline_config.get("steps", [])}
     if not current_app.config.get("ENABLE_RENDERER", True) and steps_map.get("fast_renderer"):
         steps_map["fast_renderer"]["enabled"] = False
@@ -1357,21 +1410,21 @@ def execute_submission_pipeline(
         "skipped_files": skipped_files,
         "record_resolution_by_record_id": record_resolution_by_record_id,
         "outputs_dir": outputs_dir,
-        "batch_metadata_map": batch_metadata_map,
-        "shared_zenodo_metadata": shared_zenodo_metadata,
-        "batch_shared_zenodo_metadata": batch_shared_zenodo_metadata,
-        "batch_item_defaults": batch_item_defaults,
-        "lod_mapping_config": lod_mapping_config,
-        "resolved_lod_msf_path": resolved_lod_msf_path,
-        "msf_rows_by_filename": msf_rows_by_filename,
-        "lod_source_paths": absolute_to_relative_path,
+        "batch_metadata_map": sources['batch_metadata_map'],
+        "shared_zenodo_metadata": sources['shared_zenodo_metadata'],
+        "batch_shared_zenodo_metadata": sources['batch_shared_zenodo_metadata'],
+        "batch_item_defaults": sources['batch_item_defaults'],
+        "lod_mapping_config": sources['lod_mapping_config'],
+        "resolved_lod_msf_path": sources['resolved_lod_msf_path'],
+        "msf_rows_by_filename": sources['msf_rows_by_filename'],
+        "lod_source_paths": sources['absolute_to_relative_path'],
         "lod_templates": lod_snapshot["templates"],
-        "normalized_file_id_map": normalized_file_id_map,
-        "file_id_to_relative_path": file_id_to_relative_path,
-        "bundle_file_paths_by_relative": bundle_file_paths_by_relative,
-        "basename_to_relative_paths": basename_to_relative_paths,
-        "relative_to_absolute_path": relative_to_absolute_path,
-        "absolute_to_relative_path": absolute_to_relative_path,
+        "normalized_file_id_map": sources['normalized_file_id_map'],
+        "file_id_to_relative_path": sources['file_id_to_relative_path'],
+        "bundle_file_paths_by_relative": sources['bundle_file_paths_by_relative'],
+        "basename_to_relative_paths": sources['basename_to_relative_paths'],
+        "relative_to_absolute_path": sources['relative_to_absolute_path'],
+        "absolute_to_relative_path": sources['absolute_to_relative_path'],
         "steps_map": steps_map,
     }
     exec_data = current_app.native_pipeline_service.execute_registered_submission(

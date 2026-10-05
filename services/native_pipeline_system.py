@@ -1013,6 +1013,19 @@ class NativePipelineSystemService:
         comparable.pop("version", None)
         return _hash_payload(comparable)
 
+    def check_submission_readiness(self, identifier, session_id, payload, user_id):
+        from services.submission_readiness import SubmissionReadiness
+        session = db.session.get(DBSession, session_id)
+        readiness = SubmissionReadiness(self)
+        return readiness.public(readiness.check(identifier, session, payload, user_id))
+
+    def require_submission_readiness(self, identifier, session_id, payload, user_id, **options):
+        from services.submission_readiness import SubmissionReadiness
+        session = db.session.get(DBSession, session_id)
+        readiness = SubmissionReadiness(self)
+        report = readiness.check(identifier, session, payload, user_id, **options)
+        return readiness.require(report, payload.get('readiness_token'))
+
     @serialize_registry("native-registry")
     @guard_run_reservation
     def create_pending_run(
@@ -1043,8 +1056,10 @@ class NativePipelineSystemService:
         if request_payload.get("expected_version") and version_row.version != request_payload["expected_version"]:
             raise OperationConflict("The active pipeline version changed. Reload it and repeat preflight.")
         from services.lod_reliability import capture_session_lod
-        lod_snapshot = capture_session_lod(session_id) if session_id else None
+        lod_snapshot = capture_session_lod(session_id, bootstrap_templates=False, allow_missing_templates=True) if session_id else None
         self._verify_preflight(request_payload, _json_loads(version_row.config_json, {}), initiated_by_user_id, lod_snapshot=lod_snapshot)
+        readiness = self.require_submission_readiness(identifier, session_id, request_payload, initiated_by_user_id,
+                                                      version=version_row, lod_snapshot=lod_snapshot)
         active_run = PipelineRun.query.filter(PipelineRun.session_id == session_id, PipelineRun.status.in_([PipelineRunStatus.PENDING, PipelineRunStatus.RUNNING])).first()
         if active_run:
             reconcile_run(active_run)
@@ -1057,7 +1072,8 @@ class NativePipelineSystemService:
             session_id=session_id,
             initiated_by_user_id=initiated_by_user_id,
             status=PipelineRunStatus.PENDING,
-            request_json=_json_dumps({**request_payload, "request_fingerprint": _hash_payload(request_payload), "lod_snapshot": lod_snapshot, "_dispatch": {"state": "preparing", "owner": process_owner()}}),
+            request_json=_json_dumps({**request_payload, "request_fingerprint": _hash_payload(request_payload), "lod_snapshot": lod_snapshot,
+                                     "_readiness_state": readiness['_state'], "_dispatch": {"state": "preparing", "owner": process_owner()}}),
             started_at=datetime.utcnow(),
         )
         db.session.add(pipeline_run)

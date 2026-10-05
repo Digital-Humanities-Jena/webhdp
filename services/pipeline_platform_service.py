@@ -33,6 +33,7 @@ def get_pipeline_platform_contract() -> dict[str, Any]:
             "pipelines_list": "/api/v2/pipelines",
             "pipelines_validate": "/api/v2/pipelines/validate",
             "pipeline_versions_create": "/api/v2/pipelines/<identifier>/versions",
+            "pipeline_readiness": "/api/v2/pipelines/<identifier>/readiness",
             "pipeline_execute": "/api/v2/pipelines/<identifier>/execute",
             "pipeline_run_status": "/api/v2/runs/<run_id>",
             "playground_execute": "/api/v2/playground/execute",

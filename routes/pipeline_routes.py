@@ -96,6 +96,13 @@ def execute_pipeline(identifier):
         return error_response
     if not db_session.hdpc_path:
         return APIResponse.validation_error("Session has no .hdpc file path")
+    from flask_jwt_extended import get_jwt_identity
+    readiness_payload = {'local_file_paths': local_file_paths, 'record_ids': [], 'execution_items': [],
+                         'is_sandbox': is_sandbox, 'abort_on_critical_error': abort_on_critical_error,
+                         'expected_version': data.get('expected_version'), 'readiness_token': data.get('readiness_token')}
+    current_app.native_pipeline_service.require_submission_readiness(
+        identifier, db_session_id, readiness_payload, int(get_jwt_identity()),
+    )
 
     submission = Submission(session_id=db_session_id, pipeline_id=identifier, status="processing")
     db.session.add(submission)
@@ -159,6 +166,8 @@ def execute_pipeline(identifier):
             db_session_id=db_session_id,
             is_sandbox=is_sandbox,
             abort_on_critical_error=abort_on_critical_error,
+            readiness_payload=readiness_payload,
+            readiness_user_id=int(get_jwt_identity()),
         )
         result_success = bool(execution_output.get("result", {}).get("success", True))
         submission.status = "completed" if result_success else "failed"

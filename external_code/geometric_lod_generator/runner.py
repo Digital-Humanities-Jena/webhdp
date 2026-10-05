@@ -66,15 +66,20 @@ def _triangle_count(document):
     return count
 
 
-def execute(request):
+def validate_parameters(parameters):
+    return (_number(parameters.get('target_ratio', 0.5), 'Target ratio', 1),
+            _number(parameters.get('max_relative_error', 0.001), 'Relative error limit', 0.1))
+
+
+def validate_request(request):
+    """Check source and parameters without Blender, output writes, or processes."""
     if not isinstance(request, dict) or not isinstance(request.get('inputs'), dict) or not isinstance(request.get('parameters', {}), dict):
         raise ValueError('A component request must contain input and parameter objects.')
     source = Path((request.get('inputs') or {}).get('input_file') or '').resolve()
     if not source.is_file() or source.suffix.lower() != '.glb':
         raise ValueError('Geometric LOD requires a static, self-contained GLB. Export other formats as GLB first.')
     parameters = request.get('parameters') or {}
-    ratio = _number(parameters.get('target_ratio', 0.5), 'Target ratio', 1)
-    error_limit = _number(parameters.get('max_relative_error', 0.001), 'Relative error limit', 0.1)
+    ratio, error_limit = validate_parameters(parameters)
     contract = _contract()
     source_info = contract.inspect_glb(source)
     document = _document(source)
@@ -82,6 +87,12 @@ def execute(request):
         raise ValueError('Geometric LOD supports one scene. Export the intended scene as a separate GLB.')
     if any(primitive.get('targets') for mesh in document.get('meshes', []) for primitive in mesh.get('primitives', [])):
         raise ValueError('Geometric LOD does not support morph targets. Export a static GLB first.')
+    return source, ratio, error_limit, source_info
+
+
+def execute(request):
+    source, ratio, error_limit, source_info = validate_request(request)
+    contract = _contract()
     blender = os.environ.get('WEBHDP_BLENDER_BIN') or shutil.which('blender')
     if not blender:
         raise RuntimeError('Blender is required for geometric LOD generation. Install the component image before running it.')

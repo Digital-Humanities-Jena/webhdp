@@ -476,6 +476,7 @@ Headers used by `/stream`:
 
 | Method | Path | Auth | Access | Purpose |
 |---|---|---|---|---|
+| POST | `/pipelines/<identifier>/readiness` | Yes | Session edit + mutable | Check every selected source and saved requirement without creating records or contacting remote services |
 | POST | `/pipelines/<identifier>/execute` | Yes | Session edit + mutable | Execute the native submit pipeline on selected files or existing records |
 | GET | `/runs/<run_id>` | Yes | Session view | Poll a native pipeline run |
 | POST | `/runs/<run_id>/cancel` | Yes | Session edit + mutable | Cancel an unstarted native run |
@@ -486,6 +487,9 @@ Headers used by `/stream`:
 Execution notes:
 - First submit uses `local_file_paths`.
 - Record-based rerun/reprocess uses `record_ids`.
+- Readiness accepts the same source selection and execution settings. HTTP 200 carries `ready`, actionable `blockers`, deferred `unverified` checks, counts, `pipeline_version`, and `readiness_token` when ready. Local success does not verify remote runtimes, credentials, or generated exports.
+- Pass `readiness_token` and `expected_version` unchanged to execution. The token expires after one hour for a new request; changed sources or settings return HTTP 409 with `error.details.readiness_stale`. Local blockers return HTTP 400 with `error.details.readiness`. Compatibility callers without a token still receive mandatory execution checks.
+- Native asynchronous submission accepts a UUID `request_id`. Retry an uncertain accepted request with the identical payload and ID to reconnect, including after token expiry. A queued worker uses its captured pipeline/metadata settings and rechecks source contents before creating records or drafts.
 - Session-aware native execution carries resolved publishing context, including environment and credential source.
 - Submit-time LOD generation uses explicit `required`, `optional`, or `disabled` policy. `required` failures block Zenodo upload for the affected record.
 - Playground accepts `async_execution: true` with a stable UUID `request_id` and returns HTTP 202 with `data.playground_run`. Repeating the same request returns its persisted run. Changed payloads with the same ID return HTTP 409.

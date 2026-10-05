@@ -20,6 +20,7 @@ Supported core capabilities:
 - `/api/v2/pipelines`
 - `/api/v2/pipelines/validate`
 - `/api/v2/pipelines/<identifier>/versions`
+- `/api/v2/pipelines/<identifier>/readiness`
 - `/api/v2/pipelines/<identifier>/execute`
 - `/api/v2/runs/<run_id>`
 - `/api/v2/playground/execute`
@@ -33,6 +34,33 @@ These remain supported as wrappers over the native platform:
 - `/api/v1/pipelines/<identifier>`
 - `/api/v1/pipelines/<identifier>/execute_on_local_files`
 - `/api/v1/pipelines/executions/<execution_uuid>/status`
+
+## Submission readiness
+
+`POST /api/v2/pipelines/<identifier>/readiness` requires session edit permission
+and a mutable session. It accepts the execution selection (`session_id` and
+`local_file_paths`, `record_ids`, or `execution_items`), `is_sandbox`,
+`abort_on_critical_error`, and optional `expected_version`. It returns HTTP 200
+for a completed check, including a blocked result, with `ready`, `blockers`,
+`unverified`, selected/skipped counts, scope, pipeline version, and a signed
+`readiness_token` when ready. Blockers carry an existing workflow `route` and
+optional source/step labels. The token contains hashes rather than source paths
+or descriptive metadata.
+
+The check is read-only and invokes no remote service, subprocess, or allocation.
+Source resolution and component contracts are shared with execution. Known
+local failures block; inputs produced by earlier steps and remote requirements
+are deferred explicitly. Generated exports retain their separate validation and
+upload-eligibility checks.
+
+Native synchronous and asynchronous execution repeat readiness for new requests.
+`readiness_token` is optional for compatibility callers but, when supplied, must
+match current state and be at most one hour old. Blockers return HTTP 400 with
+`error.details.readiness`; invalid, expired, or changed tokens return HTTP 409
+with `error.details.readiness_stale`. Accepted identical `request_id` retries
+reconnect to the persisted run before these checks. Queued workers retain the
+pipeline version and metadata snapshot and check saved source hashes before
+registration. Private readiness state is excluded from run API payloads.
 
 ## Retired HDP-Server families
 
