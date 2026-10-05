@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises } from '@vue/test-utils'
 import { http } from 'msw'
 
@@ -96,4 +96,56 @@ describe('SubmissionMetadataView MSW integration', () => {
 
     wrapper.unmount()
   })
+  it('saves an edited draft after the debounce and restores it on remount', async () => {
+    const pinia = activateTestPinia()
+    const workflowStore = useWorkflowStore(pinia)
+    workflowStore.setSessionId(42)
+    workflowStore.setUploadedFiles([{ file_id: 1, name: 'asset.glb' }])
+    workflowStore.setSelectedFiles([{ file_id: 1, name: 'asset.glb' }])
+    let draft = {}
+    server.use(
+      http.put(apiV1Url('/metadata/user/42/draft'), async ({ request }) => {
+        draft = await readJsonBody(request)
+        return jsonResponse({ data: { ok: true } })
+      }),
+      http.get(apiV1Url('/metadata/user/42'), () => jsonResponse({ data: { metadata: { zenodo_metadata_draft: draft } } })),
+    )
+    let mounted = await mountWithApp(SubmissionMetadataView, { pinia, route: '/workflow/metadata' })
+    await flushPromises()
+    vi.useFakeTimers()
+    await mounted.wrapper.get('#field-title').setValue('Recoverable draft')
+    await vi.advanceTimersByTimeAsync(3000)
+    await flushPromises()
+    expect(draft.title).toBe('Recoverable draft')
+    expect(mounted.wrapper.text()).toContain('Draft saved at')
+    mounted.wrapper.unmount()
+    vi.useRealTimers()
+    mounted = await mountWithApp(SubmissionMetadataView, { pinia, route: '/workflow/metadata' })
+    await flushPromises()
+    expect(mounted.wrapper.get('#field-title').element.value).toBe('Recoverable draft')
+    mounted.wrapper.unmount()
+  })
+
+  it('shows a failed autosave without a saved timestamp and permits retry', async () => {
+    const pinia = activateTestPinia()
+    const workflowStore = useWorkflowStore(pinia)
+    workflowStore.setSessionId(42)
+    workflowStore.setUploadedFiles([{ file_id: 1, name: 'asset.glb' }])
+    workflowStore.setSelectedFiles([{ file_id: 1, name: 'asset.glb' }])
+    server.use(http.put(apiV1Url('/metadata/user/42/draft'), () => jsonResponse({ error: { message: 'Storage unavailable' } }, { status: 503 })))
+    const { wrapper } = await mountWithApp(SubmissionMetadataView, { pinia, route: '/workflow/metadata' })
+    await flushPromises()
+    vi.useFakeTimers()
+    await wrapper.get('#field-title').setValue('Unsaved title')
+    await vi.advanceTimersByTimeAsync(3000)
+    await flushPromises()
+    expect(wrapper.text()).toContain('Draft save failed')
+    expect(wrapper.text()).not.toContain('Draft saved at')
+    server.use(http.put(apiV1Url('/metadata/user/42/draft'), () => jsonResponse({ data: { ok: true } })))
+    await wrapper.findAll('button').find(button => button.text() === 'Retry save').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Draft saved at')
+    wrapper.unmount()
+  })
+
 })

@@ -98,9 +98,12 @@
         </div>
 
         <form v-else-if="!loading" @submit.prevent="handleNext">
+          <fieldset :disabled="saving" class="min-w-0">
 
           <div class="text-sm text-gray-500 mb-4 text-right">
             <span v-if="isSaving">Saving draft...</span>
+            <span v-else-if="saveError" role="alert" class="text-rose-700">Draft save failed. Your edits are still on this page. <button type="button" class="underline" @click="save">Retry save</button></span>
+            <span v-else-if="dirty">Unsaved changes</span>
             <span v-else-if="lastSaved">Draft saved at {{ lastSaved.toLocaleTimeString() }}</span>
           </div>
 
@@ -273,6 +276,7 @@
             </template>
           </div>
 
+          </fieldset>
         </form>
 
         <Alert v-model="showValidationErrors" variant="error" title="Validation Failed" class="mt-6">
@@ -286,6 +290,7 @@
         <div class="mt-8 flex justify-between">
           <button
             @click="handleBack"
+            :disabled="saving || loading"
             class="px-6 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 transition-colors"
           >
             ← Back
@@ -304,7 +309,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, computed, watch } from 'vue'
+import { ref, reactive, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useWorkflowStore } from '@/stores/workflow'
 import api from '@/services/api'
@@ -343,31 +348,15 @@ const showValidationErrors = computed({
 
 // --- Auto-save ---
 const saveDraft = async (data) => {
-  if (!workflowStore.sessionId) return
-  try {
-    // Use the same filtering logic for drafts
-    const cleanPayload = preparePayloadForSubmission()
-    await api.put(`/metadata/user/${workflowStore.sessionId}/draft`, cleanPayload)
-  } catch (err) {
-    console.error('Draft save failed:', err)
-  }
+  if (!workflowStore.sessionId) throw new Error('A session is required to save this draft.')
+  await api.put(`/metadata/user/${workflowStore.sessionId}/draft`, preparePayloadForSubmission(data))
 }
 
 
-const { isSaving, lastSaved, save } = useAutoSave(saveDraft, formData, {
-  interval: 3600000, // 1 hour (effectively disabled)
-  enabled: false      // Start disabled
+const { isSaving, lastSaved, saveError, dirty, save, stopAutoSave, startAutoSave, waitForSave } = useAutoSave(saveDraft, formData, {
+  debounce: 3000,
+  enabled: computed(() => !loading.value && !saving.value && !showSchemaError.value && !workflowStore.isBatchMode && Boolean(workflowStore.sessionId))
 })
-
-let editingTimeout = null
-watch(() => formData, () => {
-  if (isSaving.value) return
-
-  clearTimeout(editingTimeout)
-  editingTimeout = setTimeout(() => {
-    save()
-  }, 3000)
-}, { deep: true })
 
 // --- Form Initialization ---
 onMounted(async () => {
@@ -660,7 +649,16 @@ function validateForm() {
 }
 
 // --- Navigation ---
-const handleBack = () => {
+const handleBack = async () => {
+  if (saving.value) return
+  saving.value = true
+  stopAutoSave()
+  await waitForSave()
+  if (!workflowStore.isBatchMode && dirty.value && !await save()) {
+    startAutoSave()
+    saving.value = false
+    return
+  }
   workflowStore.prevStep()
   persistWorkflowState(workflowStore, 'files').catch((err) => {
     console.warn('Failed to persist file-review workflow state:', err)
@@ -690,10 +688,9 @@ const handleNext = async () => {
 
   try {
     // Prepare clean payload with only visible/relevant fields
+    stopAutoSave()
+    await waitForSave()
     const cleanPayload = preparePayloadForSubmission()
-
-    // DEBUG - log the cleaned payload
-    console.log('Clean payload being sent:', JSON.stringify(cleanPayload, null, 2))
 
     await api.put(`/metadata/user/${workflowStore.sessionId}`, cleanPayload)
 
@@ -706,10 +703,11 @@ const handleNext = async () => {
 
   } catch (err) {
     console.error('Failed to save metadata:', err)
-    if (err.details?.errors) {
-      validationErrors.value = err.details.errors
+    startAutoSave()
+    if (err.error?.details?.errors || err.details?.errors) {
+      validationErrors.value = err.error?.details?.errors || err.details.errors
     } else {
-      validationErrors.value = [err.error || 'An unexpected error occurred.']
+      validationErrors.value = [err.error?.message || err.message || 'Metadata could not be saved. Your edits remain on this page.']
     }
   } finally {
     saving.value = false
@@ -737,13 +735,13 @@ function stripInternalProperties(data) {
   return cleaned
 }
 
-function preparePayloadForSubmission() {
+function preparePayloadForSubmission(data = formData) {
   const payload = {}
 
   // 1. Filter standard fields based on mandatory_rule visibility
   schema.value?.standard_fields.forEach(field => {
-    if (isFieldVisible(field) && formData[field.key] !== undefined && formData[field.key] !== '') {
-      let value = formData[field.key]
+    if (isFieldVisible(field) && data[field.key] !== undefined && data[field.key] !== '') {
+      let value = data[field.key]
 
       // If it's a tags field, split by comma and trim
       if (field.type === 'tags' && typeof value === 'string') {
@@ -766,7 +764,7 @@ function preparePayloadForSubmission() {
 
       if (config.allow_multiple !== false) {
         // Multi-entry array (creators, communities, etc.)
-        const entries = formData[key] || []
+        const entries = data[key] || []
 
         // Filter out completely empty entries and remove _uid
         const cleanedEntries = entries
@@ -788,7 +786,7 @@ function preparePayloadForSubmission() {
         }
       } else {
         // Single-entry object (journal, etc.)
-        const entry = formData[key] || {}
+        const entry = data[key] || {}
 
         // Check if object has any data
         const hasData = Object.values(entry).some(val =>

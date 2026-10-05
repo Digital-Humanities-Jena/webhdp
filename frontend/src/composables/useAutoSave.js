@@ -1,72 +1,92 @@
-import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { ref, onMounted, onBeforeUnmount, toValue, watch } from 'vue'
 
 export function useAutoSave(saveFunction, data, options = {}) {
-  const {
-    interval = 30000, // 30 seconds
-    immediate = false,
-    enabled = true
-  } = options
-
+  const { interval = 30000, debounce = null, immediate = false, enabled = true } = options
   const isSaving = ref(false)
   const lastSaved = ref(null)
   const saveError = ref(null)
-  let intervalId = null
+  const dirty = ref(false)
+  let timer
+  let inFlight = null
+  let revision = 0
+  let queued = false
+  let paused = false
+  let disposed = false
 
-  const save = async () => {
-    if (!enabled || isSaving.value) return
+  function stopAutoSave() {
+    paused = true
+    queued = false
+    clearTimeout(timer)
+    clearInterval(timer)
+    timer = null
+  }
 
+  function save() {
+    if (disposed) return Promise.resolve(false)
+    if (inFlight) {
+      queued = true
+      return inFlight
+    }
+    clearTimeout(timer)
     isSaving.value = true
-    saveError.value = null
-
-    try {
-      await saveFunction(data.value)
-      lastSaved.value = new Date()
-    } catch (error) {
-      console.error('Auto-save failed:', error)
-      saveError.value = error
-    } finally {
-      isSaving.value = false
-    }
+    inFlight = (async () => {
+      do {
+        queued = false
+        const savedRevision = revision
+        saveError.value = null
+        try {
+          const snapshot = JSON.parse(JSON.stringify(toValue(data)))
+          await saveFunction(snapshot)
+          if (disposed) return false
+          lastSaved.value = new Date()
+          dirty.value = revision !== savedRevision
+        } catch (error) {
+          if (!disposed) {
+            saveError.value = error
+            dirty.value = true
+          }
+          return false
+        }
+      } while (queued && !disposed)
+      return true
+    })().finally(() => {
+      inFlight = null
+      if (!disposed) isSaving.value = false
+      if (debounce == null) schedule()
+    })
+    return inFlight
   }
 
-  const startAutoSave = () => {
-    if (intervalId) return
-
-    if (immediate) save()
-
-    intervalId = setInterval(save, interval)
+  function schedule() {
+    clearTimeout(timer)
+    clearInterval(timer)
+    timer = null
+    if (disposed || paused || !toValue(enabled)) return
+    timer = debounce == null
+      ? setInterval(() => { if (dirty.value) save() }, interval)
+      : setTimeout(() => { if (dirty.value) save() }, debounce)
   }
 
-  const stopAutoSave = () => {
-    if (intervalId) {
-      clearInterval(intervalId)
-      intervalId = null
-    }
+  function startAutoSave() {
+    paused = false
+    schedule()
   }
 
-  // Watch for data changes to trigger save
-  watch(data, () => {
-    // Debounced save on change
-    if (enabled) {
-      stopAutoSave()
-      startAutoSave()
-    }
-  }, { deep: true })
-
+  watch(() => toValue(data), () => {
+    revision += 1
+    dirty.value = true
+    schedule()
+  }, { deep: true, flush: 'sync' })
+  watch(() => toValue(enabled), () => schedule())
   onMounted(() => {
-    if (enabled) startAutoSave()
+    startAutoSave()
+    if (immediate && toValue(enabled)) save()
   })
-
-  onUnmounted(() => {
+  onBeforeUnmount(() => {
+    disposed = true
     stopAutoSave()
   })
 
-  return {
-    isSaving,
-    lastSaved,
-    saveError,
-    save,
-    startAutoSave,
-    stopAutoSave
-  }
+  return { isSaving, lastSaved, saveError, dirty, save, startAutoSave, stopAutoSave,
+    waitForSave: () => inFlight || Promise.resolve(true) }
 }

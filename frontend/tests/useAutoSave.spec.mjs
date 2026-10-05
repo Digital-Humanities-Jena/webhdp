@@ -79,3 +79,67 @@ describe('useAutoSave', () => {
     wrapper.unmount()
   })
 })
+
+it('allows manual saves while automatic scheduling is disabled', async () => {
+  const saveFunction = vi.fn().mockResolvedValue(undefined)
+  const wrapper = mountAutoSaveHarness(saveFunction, { enabled: false })
+  wrapper.vm.data.title = 'Manual draft'
+  await nextTick()
+  expect(await wrapper.vm.save()).toBe(true)
+  expect(saveFunction).toHaveBeenCalledWith({ title: 'Manual draft' })
+  wrapper.unmount()
+})
+
+it('serializes overlapping saves and takes an immutable snapshot of each revision', async () => {
+  let acknowledge
+  const saveFunction = vi.fn().mockImplementationOnce(() => new Promise(resolve => { acknowledge = resolve })).mockResolvedValue(undefined)
+  const wrapper = mountAutoSaveHarness(saveFunction, { enabled: false })
+  const first = wrapper.vm.save()
+  wrapper.vm.data.title = 'Newest revision'
+  await nextTick()
+  const second = wrapper.vm.save()
+  expect(saveFunction).toHaveBeenCalledTimes(1)
+  expect(saveFunction.mock.calls[0][0].title).toBe('Draft')
+  acknowledge()
+  await Promise.all([first, second])
+  expect(saveFunction).toHaveBeenCalledTimes(2)
+  expect(saveFunction.mock.calls[1][0].title).toBe('Newest revision')
+  expect(wrapper.vm.dirty).toBe(false)
+  wrapper.unmount()
+})
+
+it('keeps failed edits unsaved until a successful retry', async () => {
+  const saveFunction = vi.fn().mockRejectedValueOnce(new Error('network unavailable')).mockResolvedValue(undefined)
+  const wrapper = mountAutoSaveHarness(saveFunction, { enabled: false })
+  expect(await wrapper.vm.save()).toBe(false)
+  expect(wrapper.vm.lastSaved).toBe(null)
+  expect(wrapper.vm.dirty).toBe(true)
+  expect(await wrapper.vm.save()).toBe(true)
+  expect(wrapper.vm.saveError).toBe(null)
+  expect(wrapper.vm.dirty).toBe(false)
+  wrapper.unmount()
+})
+
+it('debounces edits on a reactive object and cancels the pending save on unmount', async () => {
+  vi.useFakeTimers()
+  const { reactive } = await import('vue')
+  const saveFunction = vi.fn().mockResolvedValue(undefined)
+  const wrapper = mount(defineComponent({
+    setup() { const data = reactive({ title: 'Draft' }); return { data, ...useAutoSave(saveFunction, data, { debounce: 3000 }) } },
+    template: '<div />',
+  }))
+  wrapper.vm.data.title = 'First edit'
+  await nextTick()
+  await vi.advanceTimersByTimeAsync(2000)
+  wrapper.vm.data.title = 'Final edit'
+  await nextTick()
+  await vi.advanceTimersByTimeAsync(2999)
+  expect(saveFunction).not.toHaveBeenCalled()
+  await vi.advanceTimersByTimeAsync(1)
+  expect(saveFunction).toHaveBeenCalledWith({ title: 'Final edit' })
+  wrapper.vm.data.title = 'Abandoned edit'
+  await nextTick()
+  wrapper.unmount()
+  await vi.advanceTimersByTimeAsync(3000)
+  expect(saveFunction).toHaveBeenCalledTimes(1)
+})

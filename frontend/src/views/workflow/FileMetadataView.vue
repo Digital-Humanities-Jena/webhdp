@@ -2,8 +2,10 @@
   <div class="min-h-screen bg-gray-50 py-8">
     <div class="max-w-4xl mx-auto px-4">
       <!-- Auto-Save Indicator -->
-      <div v-if="autoSaving || lastSaved" class="mb-4 text-sm text-gray-500">
+      <div v-if="autoSaving || lastSaved || saveError || dirty" class="mb-4 text-sm text-gray-500">
         <span v-if="autoSaving">Saving draft...</span>
+        <span v-else-if="saveError" role="alert" class="text-rose-700">Draft save failed. Your edits are still on this page. <button type="button" class="underline" @click="save">Retry save</button></span>
+        <span v-else-if="dirty">Unsaved changes</span>
         <span v-else-if="lastSaved">Last saved: {{ formatTime(lastSaved) }}</span>
       </div>
 
@@ -36,7 +38,7 @@
               <input
                 v-model="fileMetadata[index].title"
                 type="text"
-                :disabled="loadingMetadata"
+                :disabled="loadingMetadata || saving"
                 class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
                 placeholder="Enter file title"
               />
@@ -49,7 +51,7 @@
               <textarea
                 v-model="fileMetadata[index].description"
                 rows="3"
-                :disabled="loadingMetadata"
+                :disabled="loadingMetadata || saving"
                 class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
                 placeholder="Enter file description"
               ></textarea>
@@ -62,7 +64,7 @@
               <input
                 v-model="fileMetadata[index].keywords"
                 type="text"
-                :disabled="loadingMetadata"
+                :disabled="loadingMetadata || saving"
                 class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
                 placeholder="keyword1, keyword2, keyword3"
               />
@@ -80,6 +82,7 @@
       <div class="mt-8 flex justify-between">
         <button
           @click="handleBack"
+          :disabled="saving || loadingMetadata"
           class="px-6 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 transition-colors"
         >
           ← Back
@@ -97,7 +100,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useAutoSave } from '@/composables/useAutoSave'
 import { useRouter } from 'vue-router'
 import { useWorkflowStore } from '@/stores/workflow'
@@ -135,21 +138,18 @@ const fileMetadata = ref(
 // Auto-save functionality
 const saveMetadataDraft = async (metadata) => {
   const fileIds = workflowStore.selectedFiles.map(getFileId)
-  if (fileIds.length === 0 || fileIds.some((fileId) => !fileId)) return
-
-  try {
-    await Promise.all(
-      metadata.map((item, index) => api.post(`/metadata/file/${fileIds[index]}`, { metadata: item }))
-    )
-  } catch (err) {
-    console.error('Failed to auto-save metadata:', err)
-  }
+  if (fileIds.length === 0 || fileIds.some((fileId) => !fileId)) throw new Error('Selected files need backend file IDs to save metadata.')
+  const results = await Promise.allSettled(
+    metadata.map((item, index) => api.post(`/metadata/file/${fileIds[index]}`, { metadata: item }))
+  )
+  const failure = results.find(result => result.status === 'rejected')
+  if (failure) throw failure.reason
 }
 
-const { isSaving: autoSaving, lastSaved } = useAutoSave(
+const { isSaving: autoSaving, lastSaved, saveError, dirty, save, stopAutoSave, startAutoSave, waitForSave } = useAutoSave(
   saveMetadataDraft,
   fileMetadata,
-  { interval: 30000, enabled: true }
+  { debounce: 3000, enabled: computed(() => !loadingMetadata.value && !saving.value && !loadError.value) }
 )
 
 onMounted(async () => {
@@ -181,7 +181,16 @@ onMounted(async () => {
   }
 })
 
-const handleBack = () => {
+const handleBack = async () => {
+  if (saving.value) return
+  saving.value = true
+  stopAutoSave()
+  await waitForSave()
+  if (dirty.value && !await save()) {
+    startAutoSave()
+    saving.value = false
+    return
+  }
   workflowStore.prevStep()
   router.push('/workflow/files')
 }
@@ -192,6 +201,8 @@ const handleNext = async () => {
   loadError.value = ''
 
   try {
+    stopAutoSave()
+    await waitForSave()
     for (let i = 0; i < fileMetadata.value.length; i++) {
       const file = workflowStore.selectedFiles[i]
       const fileId = getFileId(file)
@@ -206,13 +217,12 @@ const handleNext = async () => {
 
     success.value = 'Metadata saved successfully!'
 
-    setTimeout(() => {
-      workflowStore.goToStep(4)
-      router.push('/workflow/metadata')
-    }, 800)
+    workflowStore.goToStep(4)
+    router.push('/workflow/metadata')
 
   } catch (err) {
     console.error('Failed to save metadata:', err)
+    startAutoSave()
     loadError.value = err?.error?.message || err?.message || 'Failed to save file metadata.'
   } finally {
     saving.value = false
