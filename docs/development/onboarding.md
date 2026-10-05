@@ -97,8 +97,14 @@ npm run build
 Use Playwright when browser routing, auth flow, storage, modals, or multi-step workflow behavior changes:
 
 ```bash
-npm run test:e2e
+npx playwright install chromium firefox
+npm run test:e2e:core
+npm run test:e2e:backend
 ```
+
+Both suites are required in CI and `scripts/release_check.sh`. The backend suite starts an isolated Flask API with temporary databases and exercises the production permission, reservation, dispatch, cancellation, and worker-finalization paths. Broker delivery and component computation use fixtures. It requires the repository's `.venv`, created by `uv sync --frozen --group dev`. Use `npm run test:e2e` for the remaining browser scenarios.
+
+Remote HPC validation is separate: when Draco is available, verify allocation readiness, remote session path mapping, job timeout and disconnection behavior, artifact retrieval, and the handling of worker interruption while a scheduler job remains active. Local contract and recovery tests do not contact Draco.
 
 ### Full Local Stack
 

@@ -16,7 +16,9 @@
     "test:coverage": "NODE_OPTIONS=--no-experimental-webstorage vitest run --coverage",
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed",
-    "test:e2e:report": "playwright show-report"
+    "test:e2e:report": "playwright show-report",
+    "test:e2e:core": "playwright test auth.spec.ts workflow.spec.ts workflow-usability.spec.ts resume-and-access.spec.ts workflow-transition-recovery.spec.ts lod-recovery.spec.ts component-constructor-reliability.spec.ts operation-recovery.spec.ts",
+    "test:e2e:backend": "WEBHDP_BROWSER_TESTING=1 playwright test --config playwright.backend.config.ts"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.16.2",

@@ -130,6 +130,8 @@ Entry points:
 - `scripts/cleanup_legacy_workflow_state.py`
 - `scripts/validate_hdp_components.py`
 
+`scripts/release_check.sh` always runs core Chromium/Firefox workflow tests and the isolated backend browser suite. Install both Playwright browsers first. `RUN_E2E=true` additionally runs the complete browser suite.
+
 Workflow:
 1. Check readiness or release state.
 2. Run backup, restore, or retention operations.

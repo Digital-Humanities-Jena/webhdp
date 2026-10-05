@@ -57,6 +57,12 @@ echo "==> Frontend production build"
 echo "==> Frontend production dependency audit"
 (cd frontend && npm audit --omit=dev --audit-level=moderate)
 
+echo "==> Core browser workflow tests"
+(cd frontend && npm run test:e2e:core)
+
+echo "==> Browser tests against isolated backend routes"
+(cd frontend && npm run test:e2e:backend)
+
 if enabled "${RUN_E2E:-false}"; then
   echo "==> Frontend browser E2E tests"
   (cd frontend && npm run test:e2e)
