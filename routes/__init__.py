@@ -10,6 +10,7 @@ def register_routes(app):
     from .metadata_routes import metadata_bp
     from .pipeline_routes import pipeline_bp
     from .session_routes import session_bp
+    from .single_file_routes import single_file_bp
     from .submission_routes import submission_bp
     from .setup_routes import setup_bp
     from .msf_routes import msf_bp
@@ -29,6 +30,7 @@ def register_routes(app):
     app.register_blueprint(auth_bp, url_prefix="/api/v1/auth")
     app.register_blueprint(institution_bp, url_prefix="/api/v1/institutions")
     app.register_blueprint(session_bp, url_prefix="/api/v1/sessions")
+    app.register_blueprint(single_file_bp, url_prefix="/api/v1/sessions")
     app.register_blueprint(metadata_bp, url_prefix="/api/v1/metadata")
     app.register_blueprint(pipeline_bp, url_prefix="/api/v1/pipelines")
     app.register_blueprint(admin_bp, url_prefix="/api/v1/admin")

@@ -194,6 +194,22 @@ Use `docker-compose.dev.yml`, `docker-compose.low-resource.yml`, `docker-compose
 | Compose/deployment | `docker compose config --quiet`; production compose check when production files change |
 | Docs-only | Verify links/commands manually; run code tests only if docs describe changed executable behavior |
 
+Run `cd frontend && npm run test:e2e:core` for workflow guidance/recovery changes,
+and `npm run test:e2e:backend` for changes across upload, metadata, readiness or
+processing. The latter runs Chromium and Firefox against the isolated Flask
+fixture in `tests/browser_api.py`, using real HTTP routes and persistence with
+only external execution/delivery replaced. It checks reload/lost acknowledgement,
+partial failure, saved-record continuation and verified derivative previews.
+It does not establish acceptance of an installed compute component.
+
+Measure local batch readiness with
+`uv run python scripts/benchmark_submission_readiness.py --counts 10 100 1000 --inventory-size 10000`.
+The benchmark scans real small GLBs and measures progress/elapsed time while
+injecting unrelated inventory records. Inventory is loaded once per check, and
+source hashes remain fresh. Large-model and deployment storage throughput need
+separate measurement. CPU LOD corpus and disconnected deployment gates are in
+[`external_code/geometric_lod_generator/validation/README.md`](../../external_code/geometric_lod_generator/validation/README.md).
+
 ## 10. Common Contribution Recipes
 
 ### Add A WebHDP API Endpoint

@@ -104,6 +104,16 @@ describe('api service interceptors', () => {
     expect(handlers.response.onFulfilled({ data: { ok: true } })).toEqual({ ok: true })
   })
 
+  it('preserves structured errors when a streaming request receives a JSON error response', async () => {
+    const { attachInterceptors } = await import('../src/services/api.js')
+    const { client, handlers } = createClientHarness()
+    const showError = vi.fn()
+    attachInterceptors(client, { showError })
+    const data = { error: { message: 'Readiness service unavailable' } }
+    await expect(handlers.response.onRejected({ config: { suppressGlobalError: true }, response: { status: 503, data: JSON.stringify(data) } })).rejects.toEqual(data)
+    expect(showError).not.toHaveBeenCalled()
+  })
+
   it('clears auth state, redirects, and shows a toast for 401 responses', async () => {
     ;({ attachInterceptors, createApiClient, apiV1 } = await import('../src/services/api.js'))
     const { client, handlers } = createClientHarness()

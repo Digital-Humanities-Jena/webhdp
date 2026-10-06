@@ -1,4 +1,5 @@
 import { apiV2 } from './api'
+import { readinessStream } from '@/utils/readinessStream'
 
 // Load pipeline ID from environment variable for default use across the app.
 // Example: VITE_PIPELINE_ID=glb_simple in your .env file
@@ -79,11 +80,21 @@ export default {
     })
   },
 
-  checkSubmissionReadiness(identifier, payload) {
-    return requestV2({
-      method: 'post', url: `/pipelines/${identifier}/readiness`, data: payload,
-      timeout: 60000, suppressGlobalError: true,
+  async checkSubmissionReadiness(identifier, payload, options = {}) {
+    const stream = readinessStream(options.onProgress)
+    let streamError
+    const response = await requestV2({
+      method: 'post', url: `/pipelines/${identifier}/readiness?stream=1`, data: payload,
+      timeout: 600000, suppressGlobalError: true, responseType: 'text', signal: options.signal,
+      onDownloadProgress: event => {
+        const text = event.event?.target?.responseText
+        if (text && !streamError) {
+          try { stream.consume(text) } catch (error) { streamError = error }
+        }
+      },
     })
+    if (streamError) throw streamError
+    return stream.consume(response, true)
   },
 
   // Execute pipeline on existing record IDs for a specific session.
@@ -106,7 +117,8 @@ export default {
         request_id: options.requestId,
         expected_version: options.expectedVersion,
         preflight_token: options.preflightToken,
-        readiness_token: options.readinessToken
+        readiness_token: options.readinessToken,
+        resume_from_run_id: options.resumeFromRunId
       }
     })
   },
@@ -164,6 +176,10 @@ export default {
       timeout: 15000,
       suppressGlobalError: true
     })
+  },
+
+  getPipelineRecovery(runId) {
+    return requestV2({ method: 'get', url: `/runs/${runId}/recovery`, suppressGlobalError: true })
   },
 
   // Execute pipeline on local files through the native v2 execution surface.

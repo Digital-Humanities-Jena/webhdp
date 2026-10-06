@@ -559,7 +559,7 @@ class NativePipelineSystemService:
                 raise ResourceNotFoundError("Run session is unavailable")
             self._assert_user_can_access_session(session, user_id)
         reconcile_run(run)
-        return self._serialize_pipeline_run(run)
+        return self._serialize_pipeline_run(run, user_id=user_id)
 
     def get_playground_run(self, run_public_id: str, user_id: Optional[int] = None) -> Dict[str, Any]:
         run = PlaygroundRun.query.filter_by(public_id=run_public_id).first()
@@ -1054,7 +1054,14 @@ class NativePipelineSystemService:
             raise FileProcessingError(f"Pipeline '{identifier}' has no active version")
 
         if request_payload.get("expected_version") and version_row.version != request_payload["expected_version"]:
-            raise OperationConflict("The active pipeline version changed. Reload it and repeat preflight.")
+            if not request_payload.get('resume_from_run_id'):
+                raise OperationConflict("The active pipeline version changed. Reload it and repeat preflight.")
+        if request_payload.get('resume_from_run_id'):
+            from services.pipeline_checkpoints import validate_recovery
+            previous = validate_recovery(self, request_payload, initiated_by_user_id)
+            if previous.pipeline_definition_id != definition.id:
+                raise ValidationError('Continuation must keep the original pipeline.')
+            version_row = db.session.get(PipelineVersion, previous.pipeline_version_id)
         from services.lod_reliability import capture_session_lod
         lod_snapshot = capture_session_lod(session_id, bootstrap_templates=False, allow_missing_templates=True) if session_id else None
         self._verify_preflight(request_payload, _json_loads(version_row.config_json, {}), initiated_by_user_id, lod_snapshot=lod_snapshot)
@@ -1089,7 +1096,7 @@ class NativePipelineSystemService:
         run = PipelineRun.query.filter_by(public_id=run_public_id).first()
         if run is None or run.status not in {PipelineRunStatus.PENDING, PipelineRunStatus.RUNNING}:
             return
-        run.result_json = _json_dumps({"status": "running", "progress": progress_payload})
+        run.result_json = _json_dumps({**_json_loads(run.result_json, {}), "status": "running", "progress": progress_payload})
         if run.status == PipelineRunStatus.PENDING:
             run.status = PipelineRunStatus.RUNNING
         db.session.commit()
@@ -1611,11 +1618,24 @@ class NativePipelineSystemService:
         summary["components"] = [self._serialize_component_version(db.session.get(ComponentDefinition, row.component_definition_id), row) for row in {step.component_version_id: db.session.get(ComponentVersion, step.component_version_id) for step in version_row.steps if step.component_version_id}.values()] if version_row else []
         return summary
 
-    def _serialize_pipeline_run(self, run: PipelineRun) -> Dict[str, Any]:
+    def _serialize_pipeline_run(self, run: PipelineRun, user_id=None) -> Dict[str, Any]:
+        from services.submission_outcomes import summarize_outcomes
+        version = db.session.get(PipelineVersion, run.pipeline_version_id)
+        config = _json_loads(version.config_json, {})
+        session = db.session.get(DBSession, run.session_id)
+        editable = bool(session and is_session_mutable(session) and (user_id is None or can_edit_session(session, db.session.get(User, user_id))))
+        result = _json_loads(run.result_json, {})
+        outcomes = summarize_outcomes(result, session, run_id=run.public_id, config=config,
+                                      recoverable=bool(editable and run.status == PipelineRunStatus.FAILED and _json_loads(run.request_json, {}).get('_checkpoints')))
         return {
             "run_id": run.public_id,
+            "session_id": run.session_id,
+            "can_edit": editable,
+            "pipeline_identifier": config.get('identifier'),
+            "pipeline_config": config,
+            "outcomes": outcomes,
             "can_cancel": run.status == PipelineRunStatus.PENDING,
-            "pipeline_version": db.session.get(PipelineVersion, run.pipeline_version_id).version,
+            "pipeline_version": version.version,
             "status": run.status.value if hasattr(run.status, "value") else run.status,
             "started_at": run.started_at.isoformat() + "Z" if run.started_at else None,
             "completed_at": run.completed_at.isoformat() + "Z" if run.completed_at else None,
@@ -3488,6 +3508,10 @@ class NativePipelineSystemService:
         execution_context["steps_map"] = merged_steps_map
 
         record_contexts: List[Dict[str, Any]] = []
+        from services import pipeline_checkpoints as checkpoints
+        saved_request = _json_loads(pipeline_run.request_json, {})
+        previous_run = PipelineRun.query.filter_by(public_id=saved_request.get('resume_from_run_id')).first() if saved_request.get('resume_from_run_id') else None
+        previous = checkpoints.journal(previous_run) if previous_run else {}
         record_resolution_by_record_id = execution_context.get("record_resolution_by_record_id") or {}
         for index, (record_id, file_path, file_zenodo_metadata) in enumerate(record_info_list, start=1):
             filename = os.path.basename(file_path)
@@ -3530,6 +3554,8 @@ class NativePipelineSystemService:
                     "record_resolution": copy.deepcopy(record_resolution_by_record_id.get(int(record_id)) or {}),
                     "index": index,
                     "total_records": total_records,
+                    "_session_root": execution_context['db_session'].session_dir,
+                    "_rerun_steps": [],
                 }
             )
 
@@ -3538,12 +3564,26 @@ class NativePipelineSystemService:
         failed_count = 0
         processed_count = 0
         successful_count = 0
+        checkpoints.persist(pipeline_run, record_contexts)
 
         for step in enabled_steps:
+            pending = []
+            for context in record_contexts:
+                context['_generated_before_step'] = list(context['generated_files'])
+                context['_step_signature'] = checkpoints.signature(self, step, context, execution_context)
+                if previous and checkpoints.reuse(self, previous, step, context, execution_context):
+                    checkpoints.persist(pipeline_run, [context], step['id'])
+                else:
+                    context['_rerun_steps'].append(step['id'])
+                    pending.append(context)
             if step.get("scope") == "batch":
-                self._execute_batch_step(step, version_row, pipeline_run, execution_context, record_contexts)
+                try:
+                    if pending:
+                        self._execute_batch_step(step, version_row, pipeline_run, execution_context, pending)
+                finally:
+                    checkpoints.persist(pipeline_run, pending, step['id'])
                 continue
-            for record_context in record_contexts:
+            for record_context in pending:
                 try:
                     trigger_resolution = self._resolve_step_trigger(step, record_context)
                     if trigger_resolution["action"] != "run":
@@ -3570,6 +3610,8 @@ class NativePipelineSystemService:
                         raise
                 except Exception as exc:
                     record_context["record_status"]["error"] = legacy._format_pipeline_exception(exc)
+                finally:
+                    checkpoints.persist(pipeline_run, [record_context], step['id'])
 
         zenodo_upload_step = execution_context["steps_map"].get("zenodo_upload")
         for record_context in record_contexts:
@@ -4446,6 +4488,10 @@ class NativePipelineSystemService:
                 )
         db.session.flush()
 
+        if record_context.get('_session_root'):
+            from services.pipeline_checkpoints import persist
+            persist(pipeline_run, [record_context], step_id)
+
     def _create_step_run(
         self,
         pipeline_run: PipelineRun,
@@ -4469,7 +4515,7 @@ class NativePipelineSystemService:
             started_at=datetime.utcnow(),
         )
         db.session.add(row)
-        db.session.flush()
+        db.session.commit()
         return row
 
     def _finish_step_run(

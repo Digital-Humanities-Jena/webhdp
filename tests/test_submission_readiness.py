@@ -102,6 +102,30 @@ def test_readiness_is_read_only_and_never_contacts_compute_or_zenodo(workspace):
     app.project_service.assert_not_called()
 
 
+def test_streamed_readiness_uses_one_inventory_for_the_complete_batch(workspace):
+    from services import dataset_integrity_service as integrity
+    app, native, session, user, source, _, payload, headers = workspace
+    paths = [str(source)]
+    for index in range(30):
+        path = source.with_name(f'model-{index}.glb')
+        path.write_bytes(source.read_bytes())
+        paths.append(str(path))
+    create_and_scan_hdpc_project(hdpc_path=session.hdpc_path, data_in_path=str(source.parent),
+        data_out_path=str(source.parents[1] / 'outputs'), project_name='Batch', short_code='BATCH',
+        modalities=['3d_model'], scan_options={'extensions': ['.glb'], 'primarysourceext': '.glb'})
+    with patch.object(integrity, 'collect_dataset_records', wraps=integrity.collect_dataset_records) as inventory:
+        response = app.test_client().post('/api/v2/pipelines/guarded_lod/readiness?stream=1',
+            json={**payload, 'local_file_paths': paths}, headers=headers)
+        events = [json.loads(line) for line in response.text.splitlines()]
+    assert response.mimetype == 'application/x-ndjson'
+    assert inventory.call_count == 1
+    assert [event['checked'] for event in events if event['type'] == 'progress'] == list(range(32))
+    report = events[-1]['report']
+    assert report['ready'] and report['selected_count'] == 31
+    assert '_state' not in report
+    assert PipelineRun.query.count() == 0
+
+
 @pytest.mark.parametrize('damage', ['truncated', 'animation', 'morph', 'extra_scene'])
 def test_invalid_model_blocks_execution_before_drafts_or_dispatch(workspace, damage):
     app, _, _, _, source, _, payload, headers = workspace

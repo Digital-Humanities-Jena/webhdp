@@ -1390,6 +1390,22 @@ def collect_dataset_records(user_id: int | None = None, *, include_all_sessions:
     return all_records, sessions
 
 
+class RecordInventorySnapshot:
+    """One request's inventory, indexed without weakening mutation-time checks."""
+
+    def __init__(self, records=None):
+        self.records = collect_dataset_records(include_all_sessions=True)[0] if records is None else records
+        self.by_dataset = {}
+        self.by_session = {}
+        for record in self.records:
+            key = (record.get('dataset_key_lower'), bool(record.get('is_sandbox')))
+            self.by_dataset.setdefault(key, []).append(record)
+            self.by_session.setdefault(int(record.get('session_id') or 0), {})[int(record.get('local_record_id') or 0)] = record
+
+    def matching(self, candidate):
+        return self.by_dataset.get((normalize_dataset_key_lower(candidate.dataset_key), bool(candidate.is_sandbox)), [])
+
+
 def collect_records_for_dataset(
     dataset_key: str,
     user_id: int | None = None,
@@ -2060,16 +2076,17 @@ def analyze_session_record_resolution(
     *,
     policy_override: Any = None,
     include_all_sessions: bool = True,
+    inventory: RecordInventorySnapshot | None = None,
 ) -> dict[str, Any]:
     saved_state = get_session_record_resolution_state(session_row.id)
     effective_preset = normalize_record_resolution_preset(policy_override) or saved_state.get("policy_override")
     effective_config = VersionDetectionPolicyService.get_effective_config(effective_preset)
     candidates = scan_candidate_files_for_session(session_row)
-    all_records, _ = collect_dataset_records(None, include_all_sessions=include_all_sessions)
+    inventory = inventory or RecordInventorySnapshot(collect_dataset_records(None, include_all_sessions=include_all_sessions)[0])
     analyzed_candidates = [
         analyze_candidate_record_resolution(
             candidate,
-            all_records,
+            inventory.matching(candidate),
             config=effective_config,
             exclude_record=(session_row.id, int(candidate.local_record_id))
             if candidate.local_record_id is not None
@@ -2393,6 +2410,7 @@ def ensure_fresh_record_creation_allowed(
     source_file_path: str,
     is_sandbox: bool,
     concept_rec_id: str = "",
+    inventory: RecordInventorySnapshot | None = None,
 ) -> None:
     dataset_key = normalize_dataset_key(extract_dataset_key(source_file_path, *(get_session_dataset_context(session_row).values())))
     # Arbitrary uploaded filenames have no named dataset root. Give them the
@@ -2407,7 +2425,7 @@ def ensure_fresh_record_creation_allowed(
         concept_rec_id=str(concept_rec_id or "").strip(),
         session_id=session_row.id,
     )
-    all_records, _ = collect_dataset_records(include_all_sessions=True)
+    all_records = inventory.matching(candidate) if inventory else collect_dataset_records(include_all_sessions=True)[0]
     result = classify_candidate(candidate, all_records)
     if result["classification"] in {"blocker", "allowed_versioning"}:
         raise DatasetIntegrityConflictError(
@@ -2422,9 +2440,10 @@ def ensure_record_operation_allowed(
     local_record_id: int,
     allow_allowed_versioning: bool = False,
     exclude_current_record: bool = True,
+    inventory: RecordInventorySnapshot | None = None,
 ) -> None:
-    session_records = read_session_records(session_row)
-    record = next((item for item in session_records if int(item.get("local_record_id") or 0) == int(local_record_id)), None)
+    record = (inventory.by_session.get(session_row.id, {}).get(int(local_record_id)) if inventory else
+              next((item for item in read_session_records(session_row) if int(item.get("local_record_id") or 0) == int(local_record_id)), None))
     if not record:
         raise DatasetIntegrityConflictError(
             "Record could not be found for duplicate detection.",
@@ -2454,7 +2473,7 @@ def ensure_record_operation_allowed(
         session_id=session_row.id,
         local_record_id=int(local_record_id),
     )
-    all_records, _ = collect_dataset_records(include_all_sessions=True)
+    all_records = inventory.matching(candidate) if inventory else collect_dataset_records(include_all_sessions=True)[0]
     result = classify_candidate(
         candidate,
         all_records,

@@ -270,6 +270,11 @@ const routes = [
         component: () => import('@/views/dashboard/SubmissionDetailView.vue'),
       },
       {
+        path: 'runs/:runId',
+        name: 'PipelineRunDetail',
+        component: () => import('@/views/dashboard/SubmissionDetailView.vue'),
+      },
+      {
         path: 'sessions/:sessionId/records',
         name: 'SessionRecords',
         component: () => import('@/views/dashboard/SessionRecordsView.vue'),

@@ -1916,6 +1916,8 @@ def _build_session_record_payload(session_row: DBSession, base_record: dict[str,
 
 
 def _build_session_records_payload(session_row: DBSession, inventory: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    from database.models import PipelineRun
+    recent_runs = PipelineRun.query.filter_by(session_id=session_row.id).order_by(PipelineRun.started_at.desc()).limit(10).all()
     visible_records = inventory.get("visible_records") or []
     records_payload: list[dict[str, Any]] = []
     records_with_warnings = 0
@@ -1951,6 +1953,8 @@ def _build_session_records_payload(session_row: DBSession, inventory: dict[str, 
     return {
         "source_state": "ok",
         "session": _serialize_session_context(session_row),
+        "recent_runs": [{'run_id': run.public_id, 'status': run.status.value,
+                         'started_at': run.started_at.isoformat() + 'Z'} for run in recent_runs],
         "submission": context.get("submission"),
         "summary": {
             "total_records": len(records_payload),

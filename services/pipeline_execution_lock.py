@@ -97,7 +97,7 @@ def guard_submission_execution(function):
                         run.status = PipelineRunStatus.FAILED
                         run.error_message = str(exc)
                         run.completed_at = datetime.utcnow()
-                        run.result_json = json.dumps({'success': False, 'status': 'failed', 'error': str(exc)})
+                        run.result_json = json.dumps({**json.loads(run.result_json or '{}'), 'success': False, 'status': 'failed', 'error': str(exc)})
                         db.session.commit()
                 raise
         if session is None or not session.hdpc_path:

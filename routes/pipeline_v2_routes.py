@@ -3,7 +3,7 @@ import json
 import os
 from functools import wraps
 
-from flask import Blueprint, current_app, request, send_file
+from flask import Blueprint, current_app, request, send_file, Response, stream_with_context
 from flask_jwt_extended import get_jwt_identity, jwt_required
 
 from api_utils import APIResponse
@@ -202,9 +202,26 @@ def preflight_pipeline_constructor_v2():
 def submission_readiness_v2(identifier):
     data = request.get_json() or {}
     payload = PipelineExecutionRequestSchema.model_validate({**data, 'pipeline_identifier': identifier}).model_dump(mode='python')
-    _, _, error_response = get_session_with_permission(payload['session_id'], permission='edit', require_mutable=True)
+    session_row, _, error_response = get_session_with_permission(payload['session_id'], permission='edit', require_mutable=True)
     if error_response:
         return error_response
+    if request.args.get('stream') == '1':
+        from services.submission_readiness import SubmissionReadiness
+        readiness = SubmissionReadiness(current_app.native_pipeline_service)
+        user_id = int(get_jwt_identity())
+
+        @stream_with_context
+        def events():
+            try:
+                for event in readiness.events(identifier, session_row, payload, user_id):
+                    if event['type'] == 'result':
+                        event = {'type': 'result', 'report': readiness.public(event['report'])}
+                    yield json.dumps(event) + '\n'
+            except Exception:
+                logger.exception('Streaming readiness failed')
+                yield json.dumps({'type': 'error', 'message': 'Readiness could not be completed. Check again.'}) + '\n'
+
+        return Response(events(), mimetype='application/x-ndjson', headers={'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no'})
     result = current_app.native_pipeline_service.check_submission_readiness(
         identifier, payload['session_id'], payload, int(get_jwt_identity()),
     )
@@ -226,6 +243,7 @@ def execute_pipeline_v2(identifier):
         "expected_version": data.get("expected_version"),
         "preflight_token": data.get("preflight_token"),
         "readiness_token": data.get("readiness_token"),
+        "resume_from_run_id": data.get("resume_from_run_id"),
         "session_id": data.get("session_id"),
         "local_file_paths": data.get("local_file_paths") or [],
         "record_ids": data.get("record_ids") or [],
@@ -334,6 +352,37 @@ def cancel_pipeline_run_v2(run_id):
         return error_response
     cancel_pending_run(run)
     return APIResponse.success(data={'run': current_app.native_pipeline_service.get_pipeline_run(run_id, int(get_jwt_identity()))})
+
+
+@pipeline_v2_bp.route('/runs/<run_id>/recovery', methods=['GET'])
+@jwt_required()
+def get_pipeline_recovery_v2(run_id):
+    from services.pipeline_checkpoints import recovery_plan
+    return APIResponse.success(data=recovery_plan(current_app.native_pipeline_service, run_id, int(get_jwt_identity())))
+
+
+@pipeline_v2_bp.route('/sessions/<int:session_id>/records/<int:record_id>/derivatives', methods=['GET'])
+@jwt_required()
+def get_record_derivatives_v2(session_id, record_id):
+    from services.derivative_review import detail_sets
+    session, _, error_response = get_session_with_permission(session_id, permission='view')
+    if error_response:
+        return error_response
+    return APIResponse.success(data={'sets': detail_sets(session, record_id)})
+
+
+@pipeline_v2_bp.route('/sessions/<int:session_id>/records/<int:record_id>/derivatives/<int:step_run_id>/<level>', methods=['GET'])
+@jwt_required()
+def get_record_derivative_file_v2(session_id, record_id, step_run_id, level):
+    from services.derivative_review import verified_model
+    session, _, error_response = get_session_with_permission(session_id, permission='view')
+    if error_response:
+        return error_response
+    path, checksum = verified_model(session, record_id, step_run_id, level)
+    response = send_file(path, mimetype='model/gltf-binary', conditional=False)
+    response.headers['Cache-Control'] = 'no-store'
+    response.headers['X-Content-SHA256'] = checksum
+    return response
 
 
 @pipeline_v2_bp.route("/playground/execute", methods=["POST"])

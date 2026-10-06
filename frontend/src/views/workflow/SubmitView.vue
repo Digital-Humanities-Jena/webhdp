@@ -12,6 +12,14 @@
 
         <div v-if="!processing && !success">
           <h2 class="text-xl font-semibold text-gray-900 mb-6">Submission Summary</h2>
+          <div v-if="recoveryPlan" class="mb-4 rounded-lg border border-indigo-200 bg-indigo-50 p-4 text-sm text-indigo-900">
+            <p>Continue {{ recoveryPlan.record_ids.length }} record{{ recoveryPlan.record_ids.length === 1 ? '' : 's' }} using pipeline version {{ recoveryPlan.pipeline_version }}. Unchanged, verified outputs are reused; failed work and affected dependencies run again.</p>
+            <p v-if="recoveryPlan.whole_batch" class="mt-1">This batch component needs the original record group.</p>
+            <p v-if="recoveryPlan.unregistered_sources?.length" class="mt-2">{{ recoveryPlan.unregistered_sources.length }} source{{ recoveryPlan.unregistered_sources.length === 1 ? ' was' : 's were' }} not registered before the interruption. <RouterLink :to="`/workflow/files?sessionId=${recoveryPlan.session_id}&resume=workflow`" class="underline">Review unregistered sources in Files</RouterLink>.</p>
+            <p v-if="recoveryPlan.unregistered_record_ids?.length" class="mt-2">{{ recoveryPlan.unregistered_record_ids.length }} selected record{{ recoveryPlan.unregistered_record_ids.length === 1 ? ' was' : 's were' }} not prepared before the interruption. <RouterLink :to="`/sessions/${recoveryPlan.session_id}/records`" class="underline">Review the remaining records in Session Records</RouterLink>.</p>
+            <p v-for="record in recoveryPlan.records.filter(record => !record.eligible)" :key="record.record_id" class="mt-2">{{ record.reason }} <RouterLink :to="record.route" class="underline">Review record {{ record.record_id }}</RouterLink></p>
+          </div>
+          <SubmissionOutcomes v-if="submissionOutcomes && !recoveryPlan" :outcomes="submissionOutcomes" class="mb-6" />
           <div v-if="error && error !== readinessError" role="alert" class="mb-4 rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
             <p>{{ error }}</p>
             <ul v-if="recordFailures.length" class="mt-2 list-inside list-disc space-y-1">
@@ -255,7 +263,7 @@
               <h3 id="readiness-title" class="text-sm font-medium text-gray-900">Submission readiness</h3>
               <button type="button" class="min-h-11 text-sm text-indigo-700 underline disabled:opacity-50" :disabled="loadingPipeline || !pipelineConfig || readinessBusy || submitting" @click="checkReadiness">Check again</button>
             </div>
-            <p class="text-sm text-slate-700" role="status" aria-live="polite">{{ readinessBusy ? 'Checking all selected sources and saved settings…' : readinessResult?.ready ? `Local checks passed for ${readinessResult.selected_count} selected source${readinessResult.selected_count === 1 ? '' : 's'}.` : readinessResult?.blockers?.length ? 'Resolve the items below before processing.' : 'Readiness is unverified. Use Check again before processing.' }}</p>
+            <p class="text-sm text-slate-700" role="status" aria-live="polite">{{ readinessBusy ? readinessProgress ? `Checked ${readinessProgress.checked} of ${readinessProgress.total} selected sources…` : 'Checking selected sources and saved settings…' : readinessResult?.ready ? `Local checks passed for ${readinessResult.selected_count} selected source${readinessResult.selected_count === 1 ? '' : 's'}.` : readinessResult?.blockers?.length ? 'Resolve the items below before processing.' : 'Readiness is unverified. Use Check again before processing.' }}</p>
             <ul v-if="readinessResult?.blockers?.length" class="mt-3 space-y-2 text-sm text-rose-800">
               <li v-for="(item, index) in readinessResult.blockers" :key="index" class="break-words">
                 <span v-if="item.source" class="font-medium break-all">{{ item.source }}: </span><span v-if="item.step">{{ item.step }} — </span>{{ item.message }}
@@ -389,6 +397,7 @@
               : usesZenodo ? `Processing finished. Review the generated files and Zenodo record status ${effectiveExecutionEnvironmentIsSandbox ? '(Sandbox)' : ''}.` : 'Processing finished. Open a record in Session Records to download its optimized model, report and previews.' }}
           </p>
 
+          <SubmissionOutcomes :outcomes="submissionOutcomes" class="mb-6" />
           <div v-if="hasConverterWarnings" class="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6 text-left">
             <h4 class="text-xs font-semibold text-amber-800 uppercase tracking-wider mb-2">Converter Issues</h4>
             <ul class="space-y-1 text-sm text-amber-800">
@@ -507,6 +516,7 @@
 
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import SubmissionOutcomes from '@/components/workflow/SubmissionOutcomes.vue'
 import { isPermanentProgressError, progressRetryDelay } from '@/utils/progressMonitoring'
 import { useRoute, useRouter } from 'vue-router'
 import { useWorkflowStore } from '@/stores/workflow'
@@ -549,6 +559,8 @@ const converterRuntimeWarnings = ref([])
 const converterWarnings = ref([])
 const pipelineWarnings = ref([])
 const recordFailures = ref([])
+const submissionOutcomes = ref(null)
+const recoveryPlan = ref(null)
 const submissionResult = ref(null)
 const sessionContext = ref(null)
 const submissionPlan = ref(deriveSubmissionPlan())
@@ -660,6 +672,8 @@ const loadingPipeline = ref(true)
 const readinessResult = ref(null)
 const readinessError = ref('')
 const readinessBusy = ref(false)
+const readinessProgress = ref(null)
+let readinessController
 let readinessGeneration = 0
 let readinessTimer
 const readinessArea = (path) => ({ '/workflow/files': 'files and record decisions', '/workflow/metadata': 'metadata', '/workflow/edm-selection': 'metadata mappings', '/workflow/pipeline': 'pipeline', '/workflow/submit': 'run status' }[path?.split('?')[0]] || 'settings')
@@ -671,9 +685,17 @@ const readinessInputs = computed(() => JSON.stringify({
   profile: workflowStore.msfProfile, parser: workflowStore.msfParseOptions,
   batchMode: workflowStore.isBatchMode, lod: workflowStore.lodMinimumViablePrefs,
   sandbox: effectiveExecutionEnvironmentIsSandbox.value, abort: abortOnCriticalError.value,
+  recovery: recoveryPlan.value?.run_id,
 }))
 
 async function prepareSubmissionRequest() {
+  if (recoveryPlan.value) {
+    if (!recoveryPlan.value.record_ids.length) throw new Error('Resolve the record blockers before continuing this run.')
+    return { kind: 'records', sessionId: recoveryPlan.value.session_id, identifier: recoveryPlan.value.pipeline_identifier,
+      targets: recoveryPlan.value.record_ids, isSandbox: recoveryPlan.value.is_sandbox,
+      options: { asyncExecution: true, abortOnCriticalError: abortOnCriticalError.value,
+        expectedVersion: recoveryPlan.value.pipeline_version, resumeFromRunId: recoveryPlan.value.run_id } }
+  }
   const selectedFiles = workflowStore.selectedFiles || []
   const sessionId = workflowStore.sessionId
   const { rerunRecordIds, executionPlan } = await refreshSubmissionPlan(sessionId, selectedFiles)
@@ -692,18 +714,25 @@ async function prepareSubmissionRequest() {
 }
 
 async function checkReadiness() {
+  readinessController?.abort()
+  const controller = new AbortController()
+  readinessController = controller
   const generation = ++readinessGeneration
   const checkedInputs = readinessInputs.value
   readinessBusy.value = true
   readinessResult.value = null
   readinessError.value = ''
+  readinessProgress.value = null
   try {
     const prepared = await prepareSubmissionRequest()
     const response = await pipelineService.checkSubmissionReadiness(prepared.identifier, {
       session_id: prepared.sessionId, is_sandbox: prepared.isSandbox,
       abort_on_critical_error: prepared.options.abortOnCriticalError, expected_version: prepared.options.expectedVersion,
+      resume_from_run_id: prepared.options.resumeFromRunId,
       [prepared.kind === 'plan' ? 'execution_items' : prepared.kind === 'records' ? 'record_ids' : 'local_file_paths']: prepared.targets,
-    })
+    }, { signal: controller.signal, onProgress: progress => {
+      if (!disposed && generation === readinessGeneration) readinessProgress.value = progress
+    } })
     if (disposed || generation !== readinessGeneration || checkedInputs !== readinessInputs.value) return null
     const result = response.data
     if (typeof result?.ready !== 'boolean' || !Array.isArray(result.blockers) || (result.ready && !result.readiness_token)) {
@@ -1358,6 +1387,7 @@ const refreshSubmissionPlan = async (sessionId, selectedFiles) => {
 }
 
 const handleCompletedProcessingPayload = (payload) => {
+  submissionOutcomes.value = payload?.outcomes || null
   stopProgressPolling()
   clearPendingRun()
   executionTimings.value = payload?.timings || null
@@ -1387,6 +1417,7 @@ const handleCompletedProcessingPayload = (payload) => {
 }
 
 const handleFailedSubmissionPayload = (payload) => {
+  submissionOutcomes.value = payload?.outcomes || null
   stopProgressPolling()
   clearPendingRun()
   processing.value = false
@@ -1539,6 +1570,7 @@ const startProgressPolling = () => {
 }
 
 watch(readinessInputs, () => {
+  readinessController?.abort()
   readinessGeneration++
   readinessResult.value = null
   readinessBusy.value = false
@@ -1548,7 +1580,45 @@ watch(readinessInputs, () => {
   }
 })
 
+async function loadRecovery(runId) {
+  loadingPipeline.value = true
+  stopProgressPolling()
+  success.value = false
+  processing.value = false
+  error.value = ''
+  try {
+    const [planResponse, runResponse] = await Promise.all([pipelineService.getPipelineRecovery(runId), pipelineService.getPipelineRun(runId)])
+    const plan = planResponse.data
+    const run = runResponse.data.run
+    recoveryPlan.value = plan
+    workflowStore.sessionId = plan.session_id
+    workflowStore.isBatchMode = false
+    workflowStore.setSelectedFiles(plan.records.filter(record => record.eligible).map(record => ({ local_record_id: record.record_id, absolute_path: record.file_path, name: record.file_path.split('/').pop() })))
+    workflowStore.setSelectedPipeline({ identifier: plan.pipeline_identifier, name: run.pipeline_config.name })
+    pipelineConfig.value = run.pipeline_config
+    pipelineVersion.value = plan.pipeline_version
+    isSandbox.value = plan.is_sandbox
+    await refreshSessionContext(plan.session_id)
+    try { pendingRun.value = JSON.parse(sessionStorage.getItem(pendingRunKey()) || 'null') } catch { pendingRun.value = null }
+    if (pendingRun.value?.request?.options?.resumeFromRunId === runId) {
+      pipelineRunId.value = pendingRun.value.runId
+      processing.value = true
+      startProgressPolling()
+    }
+  } catch (err) {
+    error.value = err?.error?.message || err?.message || 'The recovery plan is unavailable. Review this run from Session Records.'
+  } finally {
+    loadingPipeline.value = false
+    if (!error.value && !processing.value) await checkReadiness()
+  }
+}
+
+watch(() => route.query.recoverRunId, (value, previous) => {
+  if (value && value !== previous) loadRecovery(String(value))
+})
+
 onMounted(async () => {
+  if (route.query.recoverRunId) { await loadRecovery(String(route.query.recoverRunId)); return }
   loadingPipeline.value = true
   try {
     const resumeSessionId = Number.parseInt(route.query.sessionId, 10)
@@ -1950,6 +2020,7 @@ onBeforeUnmount(() => {
   disposed = true
   readinessGeneration++
   clearTimeout(readinessTimer)
+  readinessController?.abort()
   stopProgressPolling()
 })
 </script>

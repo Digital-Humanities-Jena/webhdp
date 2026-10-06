@@ -120,6 +120,10 @@
       </div>
 
       <div v-else-if="payload" class="space-y-6">
+        <details v-if="payload.recent_runs?.length" class="rounded-xl border border-slate-200 bg-white p-4">
+          <summary class="cursor-pointer text-sm font-semibold text-slate-800">Recent processing runs</summary>
+          <ul class="mt-2 space-y-1 text-sm"><li v-for="run in payload.recent_runs" :key="run.run_id"><RouterLink :to="`/runs/${run.run_id}`" class="inline-flex min-h-11 items-center text-indigo-700 underline">{{ formatDate(run.started_at) }} · {{ run.status }}</RouterLink></li></ul>
+        </details>
         <div v-if="warnings.length > 0" class="bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-4">
           <p class="text-sm font-semibold">Data availability warning</p>
           <p class="text-sm mt-1">{{ warnings[0] }}</p>

@@ -38,10 +38,14 @@ export function attachInterceptors(client, {
       const suppressError = error.config?.suppressGlobalError
       const requestUrl = String(error.config?.url || '')
       const isInteractiveAuthRequest = requestUrl.includes('/auth/login') || requestUrl.includes('/auth/register')
+      let responseData = error.response?.data
+      if (typeof responseData === 'string') {
+        try { responseData = JSON.parse(responseData) } catch { /* Non-JSON errors use the transport message. */ }
+      }
 
       if (error.response) {
         const status = error.response.status
-        const data = error.response.data
+        const data = responseData
         const message = data?.error?.message || data?.message || error.message || 'An unexpected error occurred'
 
         if (status === 401 && !isInteractiveAuthRequest) {
@@ -57,7 +61,7 @@ export function attachInterceptors(client, {
         showError(error.message || 'Request failed')
       }
 
-      return Promise.reject(error.response?.data || error)
+      return Promise.reject(responseData || error)
     }
   )
 

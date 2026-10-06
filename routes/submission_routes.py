@@ -4,7 +4,7 @@ import logging
 import os
 import sqlite3
 
-from flask import Blueprint
+from flask import Blueprint, current_app
 from flask_jwt_extended import get_jwt_identity, jwt_required
 
 from api_utils import APIResponse
@@ -265,6 +265,7 @@ def get_user_submission_detail(submission_id):
                 },
                 "metadata": metadata_json,  # This is the user-submitted draft
                 "zenodo_response": zenodo_response_data,  # This is the final record
+                "outcomes": _submission_outcomes(submission, session, submission_result, user.id),
             }
         )
     except Exception as e:
@@ -272,6 +273,15 @@ def get_user_submission_detail(submission_id):
             conn.close()  # Ensure connection is closed on general error
         logger.error(f"Failed to get submission detail for sub {submission_id}: {e}", exc_info=True)
         return APIResponse.server_error("Failed to retrieve submission details")
+
+
+def _submission_outcomes(submission, session, result, user_id):
+    from database.models import PipelineRun
+    from services.submission_outcomes import summarize_outcomes
+    run = PipelineRun.query.filter_by(submission_id=submission.id).order_by(PipelineRun.started_at.desc()).first()
+    if run:
+        return current_app.native_pipeline_service.get_pipeline_run(run.public_id, user_id)['outcomes']
+    return summarize_outcomes(result if isinstance(result, dict) else {}, session)
 
 
 @submission_bp.route("/<int:submission_id>/progress", methods=["GET"])

@@ -1122,6 +1122,11 @@ def execute_submission_pipeline(
     skipped_files: List[str] = []
     record_resolution_by_record_id: Dict[int, Dict[str, Any]] = {}
 
+    def remember_registration(record_id, file_path, metadata, *, source_file_path=None):
+        if queued_run:
+            from services.pipeline_checkpoints import persist_registration
+            persist_registration(queued_run, record_id, file_path, metadata, source_file_path=source_file_path)
+
     def resolve_execution_source(file_path):
         source_context = sources["resolve"](file_path)
         if source_context is None:
@@ -1239,6 +1244,7 @@ def execute_submission_pipeline(
 
                 record_ids_to_process.append(int(local_record_id))
                 record_info_list.append((int(local_record_id), source_context["effective_file_path"], source_context["lod_base_metadata"]))
+                remember_registration(local_record_id, source_context['effective_file_path'], source_context['lod_base_metadata'], source_file_path=file_path)
                 record_resolution_by_record_id.setdefault(
                     int(local_record_id),
                     {
@@ -1284,6 +1290,7 @@ def execute_submission_pipeline(
             source_metadata = record_submission_metadata(session_record)
             record_ids_to_process.append(int(record_id))
             record_info_list.append((int(record_id), source_file_path, _merge_non_empty_metadata({}, source_metadata)))
+            remember_registration(record_id, source_file_path, source_metadata)
             _emit_progress(
                 progress_callback,
                 {
@@ -1339,6 +1346,7 @@ def execute_submission_pipeline(
 
                 record_ids_to_process.append(local_record_id)
                 record_info_list.append((local_record_id, source_context["effective_file_path"], source_context["lod_base_metadata"]))
+                remember_registration(local_record_id, source_context['effective_file_path'], source_context['lod_base_metadata'], source_file_path=file_path)
 
                 add_local_source_files(
                     hdpc_path,
@@ -1409,6 +1417,7 @@ def execute_submission_pipeline(
         "record_info_list": record_info_list,
         "skipped_files": skipped_files,
         "record_resolution_by_record_id": record_resolution_by_record_id,
+        "resume_from_run_id": json.loads(queued_run.request_json or '{}').get('resume_from_run_id') if queued_run else None,
         "outputs_dir": outputs_dir,
         "batch_metadata_map": sources['batch_metadata_map'],
         "shared_zenodo_metadata": sources['shared_zenodo_metadata'],

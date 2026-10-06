@@ -1,8 +1,8 @@
 <template>
   <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
     <div class="mb-6">
-      <router-link to="/submissions" class="text-indigo-600 hover:text-indigo-800">
-        &larr; Back to Submissions
+      <router-link :to="route.params.runId && details?.submission.session_id ? `/sessions/${details.submission.session_id}/records` : '/submissions'" class="text-indigo-600 hover:text-indigo-800">
+        &larr; {{ route.params.runId && details?.submission.session_id ? 'Back to Session Records' : 'Back to Submissions' }}
       </router-link>
     </div>
 
@@ -17,7 +17,7 @@
       <div class="bg-white shadow rounded-lg p-6">
         <div class="flex justify-between items-start mb-6">
           <div>
-            <h2 class="text-2xl font-bold text-gray-900">Submission #{{ details.submission.id }}</h2>
+            <h2 class="text-2xl font-bold text-gray-900">{{ route.params.runId ? 'Processing Run' : `Submission #${details.submission.id}` }}</h2>
             <p class="mt-1 text-sm text-gray-500">
               Submitted {{ formatDate(details.submission.created_at) }}
             </p>
@@ -99,6 +99,9 @@
           </button>
         </div>
 
+        <SubmissionOutcomes :outcomes="details.outcomes" :can-edit="details.can_edit !== false" />
+        <details class="mt-4">
+          <summary class="cursor-pointer text-sm text-slate-600">Technical processing result</summary>
         <div v-if="details.submission.status === 'completed' && zenodoLink">
           <p class="text-sm text-gray-700">
             Successfully processed.
@@ -122,6 +125,7 @@
           </div>
         </div>
         <pre v-else class="bg-gray-50 p-4 rounded-lg overflow-auto text-sm text-gray-700">{{ formatJson(details.submission.result) }}</pre>
+        </details>
       </div>
 
       <!-- Performance Metrics Section -->
@@ -137,7 +141,8 @@
         </div>
       </div>
 
-      <div class="bg-white shadow rounded-lg p-6">
+      <details class="bg-white shadow rounded-lg p-6">
+        <summary class="cursor-pointer font-semibold text-gray-900">Zenodo response details</summary>
         <div class="flex justify-between items-center mb-4">
           <h3 class="text-lg font-semibold text-gray-900">Zenodo Response</h3>
         </div>
@@ -154,19 +159,19 @@
           </p>
         </div>
         <pre v-else class="bg-gray-50 p-4 rounded-lg overflow-auto text-sm text-gray-700">{{ formatJson(details.zenodo_response) }}</pre>
-      </div>
+      </details>
 
-      <div class="bg-white shadow rounded-lg p-6">
-        <h3 class="text-lg font-semibold text-gray-900 mb-4">Submitted Metadata</h3>
+      <details class="bg-white shadow rounded-lg p-6">
+        <summary class="cursor-pointer font-semibold text-gray-900 mb-4">Submitted metadata details</summary>
         <pre class="bg-gray-50 p-4 rounded-lg overflow-auto text-sm text-gray-700">{{ formatJson(details.metadata) }}</pre>
-      </div>
+      </details>
 
       <div class="bg-white shadow rounded-lg p-6">
         <div class="flex items-start justify-between gap-4 mb-4">
           <div>
-            <h3 class="text-lg font-semibold text-gray-900">Processed Files ({{ details.files.length }})</h3>
+            <h3 class="text-lg font-semibold text-gray-900">{{ route.params.runId ? 'Registered record sources' : 'Processed Files' }} ({{ details.files.length }})</h3>
             <p class="mt-1 text-sm text-gray-500">
-              These are the files actually processed in this submission.
+              {{ route.params.runId ? 'Review each record’s processing outcome above.' : 'These are the files actually processed in this submission.' }}
             </p>
           </div>
           <div v-if="details.file_summary" class="text-right text-xs text-gray-500">
@@ -212,6 +217,8 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import submissionService from '@/services/submission.service.js'
+import pipelineService from '@/services/pipeline.service.js'
+import SubmissionOutcomes from '@/components/workflow/SubmissionOutcomes.vue'
 import LoadingSpinner from '@/components/ui/LoadingSpinner.vue'
 import Alert from '@/components/ui/Alert.vue'
 
@@ -362,6 +369,7 @@ const schedulePoll = () => {
 }
 
 const loadProgress = async () => {
+  if (route.params.runId) { await loadDetails(); return }
   if (!details.value?.submission?.id) return
 
   try {
@@ -389,6 +397,19 @@ const loadProgress = async () => {
 
 const loadDetails = async () => {
   try {
+    if (route.params.runId) {
+      const response = await pipelineService.getPipelineRun(route.params.runId)
+      const run = response.data.run
+      details.value = { submission: { id: run.run_id, session_id: run.session_id, pipeline_id: run.pipeline_identifier,
+        status: ['pending', 'running'].includes(run.status) ? 'processing' : run.status, result: JSON.stringify(run.result),
+        timings: JSON.stringify(run.timings), created_at: run.started_at, completed_at: run.completed_at },
+        outcomes: run.outcomes, can_edit: run.can_edit, files: (run.result.details || []).map(record => ({ path: record.file_path, filename: record.file_path?.split('/').pop() })),
+        metadata: {}, zenodo_response: [] }
+      liveProgress.value = run.result.progress || null
+      if (details.value.submission.status === 'processing') schedulePoll()
+      else stopPolling()
+      return
+    }
     const response = await submissionService.getSubmission(route.params.id)
     details.value = response.data
     if (details.value?.submission?.status === 'processing') {

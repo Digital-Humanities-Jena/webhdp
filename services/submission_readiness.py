@@ -15,7 +15,7 @@ from exceptions import FileProcessingError, ValidationError
 from services.registry_lock import OperationConflict
 from services.lod_reliability import capture_session_lod
 from services.dataset_integrity_service import (
-    analyze_session_record_resolution, read_session_records, ensure_fresh_record_creation_allowed, ensure_record_operation_allowed,
+    analyze_session_record_resolution, read_session_records, ensure_fresh_record_creation_allowed, ensure_record_operation_allowed, RecordInventorySnapshot,
 )
 from services.submission_pipeline_service import (
     prepare_submission_sources, record_submission_metadata, _validate_execution_items_against_resolution_state,
@@ -46,6 +46,12 @@ def file_fingerprint(path):
     return {'path': str(path.resolve()), 'bytes': after.st_size, 'sha256': digest.hexdigest()}
 
 
+class ReadinessFieldError(ValueError):
+    def __init__(self, message, category, field):
+        super().__init__(message)
+        self.category, self.field = category, field
+
+
 class SubmissionReadiness:
     def __init__(self, native):
         self.native = native
@@ -55,6 +61,11 @@ class SubmissionReadiness:
         return URLSafeTimedSerializer(current_app.config['SECRET_KEY'], salt='submission-readiness-v1')
 
     def check(self, identifier, session, payload, user_id, *, version=None, lod_snapshot=None, own_run_id=None):
+        for event in self.events(identifier, session, payload, user_id, version=version, lod_snapshot=lod_snapshot, own_run_id=own_run_id):
+            if event['type'] == 'result':
+                return event['report']
+
+    def events(self, identifier, session, payload, user_id, *, version=None, lod_snapshot=None, own_run_id=None):
         self.native._assert_user_can_access_session(session, user_id, edit=True)
         blockers, deferred, checked_files, checked_records, effective_metadata = [], [], {}, [], []
         source_labels = {}
@@ -77,10 +88,18 @@ class SubmissionReadiness:
                 if model is PipelineRun:
                     blockers[-1]['route'] = f'/workflow/submit?sessionId={session.id}&runId={run.public_id}'
         definition = PipelineDefinition.query.filter_by(identifier=self.native.resolve_pipeline_identifier(identifier), is_active=True).first()
+        if payload.get('resume_from_run_id'):
+            from database.models import PipelineVersion
+            from services.pipeline_checkpoints import validate_recovery
+            previous = validate_recovery(self.native, payload, user_id)
+            if not definition or previous.pipeline_definition_id != definition.id:
+                raise ValidationError('Continuation must keep the original pipeline.')
+            version = db.session.get(PipelineVersion, previous.pipeline_version_id)
         version = version or (self.native._get_active_pipeline_version_row(definition) if definition else None)
         if not version:
             issue('The selected pipeline is unavailable. Choose an available pipeline.', 'pipeline')
-            return self._report(blockers, deferred, None, 0, 0, None)
+            yield {'type': 'result', 'report': self._report(blockers, deferred, None, 0, 0, None)}
+            return
         config = json.loads(version.config_json)
         if payload.get('expected_version') and payload['expected_version'] != version.version:
             issue('The pipeline version changed. Choose the pipeline again and review its steps.', 'pipeline')
@@ -104,11 +123,13 @@ class SubmissionReadiness:
             source_labels.update(sources['absolute_to_relative_path'])
         except Exception as exc:
             issue('Could not read the saved metadata, spreadsheet, templates, or project: ' + str(exc), 'mapping')
-            return self._report(blockers, deferred, version.version, len(target_keys), 0, None)
+            yield {'type': 'result', 'report': self._report(blockers, deferred, version.version, len(target_keys), 0, None)}
+            return
 
+        inventory = RecordInventorySnapshot()
         decisions = {}
         if items:
-            analysis = analyze_session_record_resolution(session)
+            analysis = analyze_session_record_resolution(session, inventory=inventory)
             # Validate every decision, including skip decisions, against the same execution rule.
             for item in items:
                 try:
@@ -120,6 +141,7 @@ class SubmissionReadiness:
         skipped = 0
         uses_zenodo = any((step.get('component_ref') or step['id']) in {'zenodo_draft', 'zenodo_upload'} for step in steps)
         for index, selection in enumerate(selected, 1):
+            yield {'type': 'progress', 'checked': index - 1, 'total': len(selected)}
             if selection.get('action') == 'skip':
                 skipped += 1
                 continue
@@ -159,13 +181,13 @@ class SubmissionReadiness:
                     row = records[rid]
                     if row.get('record_status') == 'published':
                         raise ValueError('This record is published. Resolve it as a new version before processing.')
-                    ensure_record_operation_allowed(session, local_record_id=rid, allow_allowed_versioning=True)
+                    ensure_record_operation_allowed(session, local_record_id=rid, allow_allowed_versioning=True, inventory=inventory)
                     metadata = record_submission_metadata(row)
                     checked_records.append(row)
                 else:
                     metadata = source['lod_base_metadata']
                     if selection.get('action') != 'force_create_fresh' and selection.get('action') != 'create_version':
-                        ensure_fresh_record_creation_allowed(session, source_file_path=str(effective), is_sandbox=bool(payload.get('is_sandbox', True)))
+                        ensure_fresh_record_creation_allowed(session, source_file_path=str(effective), is_sandbox=bool(payload.get('is_sandbox', True)), inventory=inventory)
                     if selection.get('action') == 'create_version':
                         target = db.session.get(type(session), selection.get('target_session_id'))
                         self.native._assert_user_can_access_session(target, user_id)
@@ -273,7 +295,11 @@ class SubmissionReadiness:
                     else:
                         pending_outputs.update((step['id'], field['name']) for field in manifest.get('outputs', []))
                 except Exception as exc:
-                    issue(str(exc), 'pipeline', source=effective, step=step)
+                    metadata_field = isinstance(exc, ReadinessFieldError) and any(
+                        binding.get('kind') == exc.category and binding.get('target') == exc.field
+                        and binding.get('type') == 'record_metadata_field'
+                        for binding in step.get('input_bindings', []) + step.get('parameter_bindings', []))
+                    issue(str(exc), 'metadata' if metadata_field else 'pipeline', source=effective, step=step)
         if selected and skipped == len(selected):
             issue('All selected sources are marked as skip. Choose at least one source to process.', 'files')
         if uses_zenodo:
@@ -282,11 +308,12 @@ class SubmissionReadiness:
             deferred.append({'message': 'Generated exports and required external validators are checked after generation; a preview covers only its selected record.'})
         from services.lod_artifact_service import validation_policy
         state = {'scope': 'submission-readiness-1', 'user': user_id, 'session': session.id, 'version': version.id,
-                 'config': fingerprint(config), 'request': fingerprint({key: payload.get(key) for key in ('local_file_paths', 'record_ids', 'execution_items', 'is_sandbox', 'abort_on_critical_error')}),
+                 'config': fingerprint(config), 'request': fingerprint({key: payload.get(key) for key in ('local_file_paths', 'record_ids', 'execution_items', 'is_sandbox', 'abort_on_critical_error', 'resume_from_run_id')}),
                  'settings': fingerprint(lod_snapshot), 'sources': fingerprint(checked_files), 'records': fingerprint(checked_records),
                  'effective_metadata': fingerprint(effective_metadata), 'validation_policy': fingerprint(validation_policy()),
                  'decisions': fingerprint(decisions), 'workspace': fingerprint({'environment': session.default_zenodo_environment, 'institution': session.institution_id, 'credential_preference': session.credential_preference})}
-        return self._report(blockers, deferred, version.version, len(selected), skipped, state)
+        yield {'type': 'progress', 'checked': len(selected), 'total': len(selected)}
+        yield {'type': 'result', 'report': self._report(blockers, deferred, version.version, len(selected), skipped, state)}
 
     def _fields(self, definitions, values, category, unresolved, session, files):
         for field in definitions:
@@ -298,7 +325,7 @@ class SubmissionReadiness:
                 if any(self.native._has_meaningful_bound_value(values.get(other)) for other in field.get('mutex_with', [])):
                     continue
                 if field.get('required'):
-                    raise ValueError(f"Supply the required {field.get('label') or name}.")
+                    raise ReadinessFieldError(f"Supply the required {field.get('label') or name}.", category, name)
                 continue
             value = self.native._coerce_playground_field_value(field, value, category=category)
             kind = field.get('type')

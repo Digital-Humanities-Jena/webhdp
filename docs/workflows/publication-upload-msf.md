@@ -33,6 +33,7 @@ Entry points:
 - UI: `/workflow/processing`
 - UI: `/submissions`
 - UI: `/submissions/:id`
+- UI: `/runs/:runId`
 
 Workflow:
 1. Upload or scan source files.
@@ -46,6 +47,39 @@ Workflow:
 
 Complete when:
 - The submission reaches `completed`, or a failure is triaged from the submission detail page.
+
+### Review and continue interrupted processing
+
+The result panel separates processing from publication and gives each record a
+next action. A completed process may still have an unpublished draft or pending
+uploads. Review generated files and metadata in record details before publishing.
+Raw responses are available in collapsed technical details.
+
+If processing fails, open its saved result from **Session Records → Recent
+processing runs** and choose **Review and continue failed work**. The review
+selects failed or unfinished records and keeps the original pipeline version
+and Zenodo environment. Correct record metadata or missing inputs, then check
+readiness and confirm processing. Verified successful steps are reused;
+changed input bytes or missing/altered artifacts rerun the affected work and
+its dependent steps. Successful records remain outside the retry unless the
+pipeline needs the complete original batch.
+
+If registration itself stopped, the recovery review lists the saved record IDs
+and reports sources that still need registration. Continue the saved records,
+then review the remaining sources in **Files**. An arbitrary batch component
+cannot continue until its complete original record group has been prepared;
+never substitute only the registered subset for that group.
+
+An uncertain Zenodo operation requires **Verify Zenodo state** from record
+details before retry. An interrupted active HPC allocation must be reviewed and
+released when the cluster is available. No recovery plan establishes live HPC
+readiness. Runs created before checkpoints were available retain their history
+but require an ordinary, reviewed record rerun.
+
+The final review reports how many selected sources have been checked. If the
+stream or connection ends early, processing remains disabled; use **Check
+again**. Missing values bound from record metadata link back to the metadata
+stage. Changed sources or settings are checked again before execution.
 
 ## Upload And Scan
 

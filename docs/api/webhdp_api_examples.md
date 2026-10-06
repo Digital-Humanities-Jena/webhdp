@@ -468,6 +468,19 @@ Inspect `data.ready`, `data.blockers`, and `data.unverified`. When ready, pass
 has no remote effects; runtime and generated-output checks remain deferred.
 Repeat the check after edits or after one hour before starting a new request.
 
+For a large selection, use the same request with `?stream=1` and `curl --no-buffer`.
+The response has one JSON object per line:
+
+```json
+{"type":"progress","checked":0,"total":2}
+{"type":"progress","checked":1,"total":2}
+{"type":"progress","checked":2,"total":2}
+{"type":"result","report":{"ready":true,"selected_count":2,"pipeline_version":"1.0.0","readiness_token":"<token>","blockers":[],"unverified":[]}}
+```
+
+The report shown is abbreviated. Wait for successful response completion and
+reject any error event or missing result before using its token.
+
 ### First submit on selected files
 ```bash
 curl -X POST "$BASE_URL_V2/pipelines/<pipeline_id>/execute" \
@@ -496,6 +509,54 @@ curl -X POST "$BASE_URL_V2/pipelines/<pipeline_id>/execute" \
 Operational note:
 - Use `local_file_paths` for the first submit.
 - Use `record_ids` for reruns and post-submit execution paths.
+
+### Review and continue failed work
+
+```bash
+curl "$BASE_URL_V2/runs/<failed_run_id>/recovery" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+Review `data.records` for blockers and `data.unregistered_sources` or
+`data.unregistered_record_ids` for unfinished
+registration. Use only eligible IDs and preserve the returned pipeline, session,
+version and environment. If `whole_batch` is true, every original member must be
+eligible; incomplete registration requires preparing the complete group first.
+Correct metadata or missing files before checking the continuation request:
+
+```bash
+curl -X POST "$BASE_URL_V2/pipelines/<original_pipeline_id>/readiness" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "session_id": 42,
+    "record_ids": [101],
+    "resume_from_run_id": "<failed_run_id>",
+    "expected_version": "1.0.0",
+    "is_sandbox": true
+  }'
+```
+
+When ready, send the same settings to `/execute`, adding `async_execution: true`,
+a new UUID `request_id`, and the returned `readiness_token`. Poll
+`GET /runs/<new_run_id>` and inspect `data.run.outcomes`. The failed run retains
+its history. If acceptance is uncertain, repeat the identical execution request
+and UUID to reconnect to the saved continuation.
+
+### Retrieve verified geometric detail levels
+
+```bash
+curl "$BASE_URL_V2/sessions/42/records/101/derivatives" \
+  -H "Authorization: Bearer $TOKEN"
+curl "$BASE_URL_V2/sessions/42/records/101/derivatives/<step_run_id>/medium" \
+  -H "Authorization: Bearer $TOKEN" \
+  --output /tmp/model-medium.glb
+```
+
+Use the `step_run_id` from `data.sets`. Compare the downloaded size and SHA-256
+with the selected report; retrieve `source` through the same route for a visual
+comparison. Missing or altered files return a conflict rather than an unverified
+preview. The source is the exact input supplied to that step.
 
 ## 10. Local Admin Tooling
 

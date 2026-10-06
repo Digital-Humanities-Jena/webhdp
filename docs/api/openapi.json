@@ -7079,7 +7079,7 @@
     },
     "/api/v1/sessions/file": {
       "post": {
-        "operationId": "post_api_start_session_file",
+        "operationId": "post_single_file_api_start_session_file",
         "responses": {
           "200": {
             "description": "Successful response. WebHDP API responses generally use {success, data, message, metadata}."
@@ -7105,7 +7105,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "api_start_session_file",
+        "summary": "single_file api_start_session_file",
         "tags": [
           "sessions"
         ]
@@ -13626,6 +13626,170 @@
         "summary": "pipeline_v2 cancel_pipeline_run_v2",
         "tags": [
           "runs"
+        ]
+      }
+    },
+    "/api/v2/runs/{run_id}/recovery": {
+      "get": {
+        "operationId": "get_pipeline_v2_get_pipeline_recovery_v2",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response. WebHDP API responses generally use {success, data, message, metadata}."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "pipeline_v2 get_pipeline_recovery_v2",
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/api/v2/sessions/{session_id}/records/{record_id}/derivatives": {
+      "get": {
+        "operationId": "get_pipeline_v2_get_record_derivatives_v2",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "record_id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response. WebHDP API responses generally use {success, data, message, metadata}."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "pipeline_v2 get_record_derivatives_v2",
+        "tags": [
+          "sessions"
+        ]
+      }
+    },
+    "/api/v2/sessions/{session_id}/records/{record_id}/derivatives/{step_run_id}/{level}": {
+      "get": {
+        "operationId": "get_pipeline_v2_get_record_derivative_file_v2",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "record_id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "step_run_id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "level",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response. WebHDP API responses generally use {success, data, message, metadata}."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "pipeline_v2 get_record_derivative_file_v2",
+        "tags": [
+          "sessions"
         ]
       }
     }

@@ -2,7 +2,7 @@ import { defineConfig, devices } from '@playwright/test'
 
 export default defineConfig({
   testDir: './e2e',
-  testMatch: 'backend-playground.spec.ts',
+  testMatch: ['backend-playground.spec.ts', 'backend-workflow.spec.ts'],
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,
   workers: 1,
@@ -15,6 +15,6 @@ export default defineConfig({
   ],
   webServer: [
     { command: '../.venv/bin/python ../tests/browser_api.py', env: { WEBHDP_BROWSER_TESTING: '1' }, url: 'http://127.0.0.1:4876/__test__/health', reuseExistingServer: false, timeout: 30000 },
-    { command: 'npm run dev -- --host 127.0.0.1 --port 4175', env: { VITE_API_URL: 'http://127.0.0.1:4876' }, url: 'http://127.0.0.1:4175', reuseExistingServer: false, timeout: 60000 },
+    { command: 'npm run dev -- --configLoader runner --host 127.0.0.1 --port 4175', env: { VITE_API_URL: 'http://127.0.0.1:4876' }, url: 'http://127.0.0.1:4175', reuseExistingServer: false, timeout: 60000 },
   ],
 })

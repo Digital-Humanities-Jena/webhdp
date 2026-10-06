@@ -479,7 +479,10 @@ Headers used by `/stream`:
 | POST | `/pipelines/<identifier>/readiness` | Yes | Session edit + mutable | Check every selected source and saved requirement without creating records or contacting remote services |
 | POST | `/pipelines/<identifier>/execute` | Yes | Session edit + mutable | Execute the native submit pipeline on selected files or existing records |
 | GET | `/runs/<run_id>` | Yes | Session view | Poll a native pipeline run |
+| GET | `/runs/<run_id>/recovery` | Yes | Session edit + mutable | Review failed/unfinished records and continuation blockers from saved checkpoints |
 | POST | `/runs/<run_id>/cancel` | Yes | Session edit + mutable | Cancel an unstarted native run |
+| GET | `/sessions/<session_id>/records/<record_id>/derivatives` | Yes | Session view | List verified geometric detail reports for this record |
+| GET | `/sessions/<session_id>/records/<record_id>/derivatives/<step_run_id>/<level>` | Yes | Session view | Download a checksum-verified source or generated detail level |
 | POST | `/playground/execute` | Yes | Session edit + mutable | Execute or queue a Playground run |
 | GET | `/playground/runs/<run_id>` | Yes | Session view | Poll a Playground run |
 | POST | `/playground/runs/<run_id>/cancel` | Yes | Session edit + mutable | Cancel an unstarted Playground run |
@@ -495,6 +498,24 @@ Execution notes:
 - Playground accepts `async_execution: true` with a stable UUID `request_id` and returns HTTP 202 with `data.playground_run`. Repeating the same request returns its persisted run. Changed payloads with the same ID return HTTP 409.
 - Playground paths are session-scoped for every adapter. Its worker uses the pinned component version and profile, and rechecks session permissions and paths before execution.
 - Run payloads expose `can_cancel` for queued work. A cancelled run has terminal status `failed` and `result.cancelled: true`; late worker delivery cannot restart it.
+
+Readiness streaming:
+- Add `?stream=1` to the readiness request for `application/x-ndjson`. Each newline terminates a complete JSON event. Progress events carry `type: "progress"`, `checked`, and `total`; the final event carries `type: "result"` and the public `report` object. Streaming errors carry `type: "error"` and a message.
+- Accept the report only after the response completes successfully. A truncated response, a missing result, or any error event cannot authorize execution. Check readiness again after cancellation or a transport error.
+- The check indexes one inventory snapshot for the request and still hashes every selected source and required artifact. It does not cache file validity across requests. Responses use `Cache-Control: no-store`.
+
+Failed-run continuation:
+- `GET /runs/<run_id>` returns `data.run`, including `session_id`, the pinned `pipeline_config`, `outcomes`, and `can_edit`. Outcomes distinguish processing from current publication state, with per-record issues, step results, and next actions. Private checkpoints and readiness state are omitted.
+- The recovery response returns `data.record_ids`, `records` with eligibility/reasons, `pipeline_identifier`, `pipeline_version`, `session_id`, `is_sandbox`, `whole_batch`, `unregistered_sources`, and `unregistered_record_ids`. It tracks the original selection separately from metadata-resolved assets and reconciles a stopped worker from local state without contacting compute services.
+- Send `resume_from_run_id` with those existing `record_ids`, the original session, pipeline and environment to both readiness and execution. Do not send new file paths or execution items. Readiness pins the original version even if a newer version is active. Use a new UUID `request_id` for the continuation and repeat it unchanged if its acknowledgement is lost.
+- Completed steps are reused only when component/profile/settings, input bytes, output bytes, and dependency state remain verified. Current curator metadata remains authoritative. Changed or unavailable files invalidate reuse. Remote mutations use record-aware reconciliation and idempotency guards.
+- Published records, unresolved Zenodo acknowledgements, and interrupted active HPC allocations block continuation. Arbitrary batch components require the complete original record group; incomplete registration blocks this mode. Record-scoped processing can continue saved IDs while remaining sources are reviewed separately in Files. Runs without checkpoints require an ordinary reviewed record rerun.
+
+Geometric derivative review:
+- Reports are available for successful `geometric_lod_generator` steps with saved checkpoint hashes. The list returns `data.sets`, each with source/high/medium/low counts, sizes, hashes, geometry checks, and retained-mesh counts. An unavailable or altered report carries a per-set error. Older runs need regeneration to establish the hashes.
+- Download `<level>` as `source`, `high`, `medium`, or `low`. A valid response is a GLB with `X-Content-SHA256` and `Cache-Control: no-store`. Verify bytes and checksum against the selected report before viewing. HTTP 409 means the saved model/report is unavailable or changed; HTTP 404 means the record/step/level combination was not found.
+- Models and reports must resolve inside the authorized session. The source is the input supplied to that step, which may itself be an earlier derivative. Triangle reduction and byte reduction are reported separately; appearance still requires visual review.
+- Browser checksum verification requires HTTPS or localhost. The comparison explains this requirement and leaves models unloaded when the browser cannot verify them.
 
 ### Uncertain Zenodo operations
 

@@ -272,6 +272,7 @@ class PipelineExecutionRequestSchema(BaseModel):
     expected_version: Optional[str] = None
     preflight_token: Optional[str] = None
     readiness_token: Optional[str] = None
+    resume_from_run_id: Optional[str] = None
 
     @model_validator(mode="after")
     def validate_targets(self) -> "PipelineExecutionRequestSchema":

@@ -248,11 +248,11 @@ test('a late readiness response cannot validate a changed destination', async ({
   })
   await page.goto('/workflow/submit')
   await expect(page.getByTestId('submission-readiness')).toHaveAttribute('aria-busy', 'true')
+  const cancelled = page.waitForEvent('requestfailed', request => new URL(request.url()).pathname.endsWith('/pipelines/render/readiness'))
   await page.getByRole('radio', { name: /Production/ }).check()
+  await cancelled
   await expect(page.getByTestId('submission-readiness')).toContainText('Supply the required creators.')
-  const lateResponse = page.waitForResponse(response => response.url().endsWith('/pipelines/render/readiness'))
   releaseFirst?.()
-  await lateResponse
   await expect(page.getByTestId('submission-readiness')).toContainText('Supply the required creators.')
   await expect(page.getByTestId('submit-confirm')).toBeDisabled()
 })

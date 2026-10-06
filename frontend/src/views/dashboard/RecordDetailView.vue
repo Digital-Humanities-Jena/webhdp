@@ -177,6 +177,7 @@
           </div>
         </section>
 
+        <DerivativeReview :session-id="route.params.sessionId" :record-id="route.params.recordId" />
         <section class="bg-white rounded-xl border border-slate-200 p-5" aria-labelledby="lod-recovery-title">
           <h2 id="lod-recovery-title" class="font-semibold text-slate-900">Metadata exports</h2>
           <p class="mt-1 text-sm text-slate-600">Each format is validated before upload. Retry uses the saved settings, reuses this draft, and keeps unchanged successful exports. To apply edited mappings or templates, start a new pipeline run.</p>
@@ -418,6 +419,7 @@
 
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
+import DerivativeReview from '@/components/workflow/DerivativeReview.vue'
 import { useRoute } from 'vue-router'
 import api from '@/services/api'
 import submissionService from '@/services/submission.service.js'

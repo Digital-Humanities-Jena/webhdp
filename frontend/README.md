@@ -32,7 +32,25 @@ npm run test:unit
 npm run build
 npm run test:e2e
 npm run test:e2e:headed
+npm run test:e2e:core
+npm run test:e2e:backend
 ```
+
+The core browser suite exercises workflow guidance and recovery in Chromium and
+Firefox with controlled API responses. The backend suite starts
+`../tests/browser_api.py` with an isolated temporary database/workspace and uses
+the real upload, metadata, readiness, execution, checkpoint and derivative routes.
+It covers reload/lost acknowledgement, partial failure, selective continuation
+and checksum-verified model comparison. Only external component execution and
+delivery are replaced by deterministic fixtures; no Docker, Draco, Zenodo or
+production database is required. Install the root Python development dependencies
+and Playwright browsers before running it. Fixture routes exist only in that
+test application.
+
+If Vite configuration bundling stalls on a local setup, use
+`npm run test:unit -- --configLoader runner` and
+`npm run build -- --configLoader runner`. Both Playwright configurations use this
+loader for their local development servers.
 
 ## Source Map
 
