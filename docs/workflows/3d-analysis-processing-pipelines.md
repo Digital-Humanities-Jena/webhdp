@@ -97,7 +97,7 @@ Complete when:
 
 ### Geometric detail levels
 
-Geometric LOD Generator 1.0.1 accepts a static, self-contained GLB with one scene.
+Geometric LOD Generator 1.0.2 accepts a static, self-contained GLB with one scene.
 It runs on the CPU in its installed container. It rejects animation, skins,
 morph targets, external dependencies, and unsupported glTF extensions. Convert
 other source formats with an appropriate upstream component before binding its
@@ -109,6 +109,8 @@ The component returns high, medium, and low detail GLBs plus a report. The
 form a non-increasing ladder. The error limit defaults to `0.001` of each mesh's
 world-space bounding-box diagonal. Reduction is accepted only when bidirectional
 vertex, edge-midpoint, and triangle-centroid samples stay within the limit.
+Each material group's world-space surface area must also stay within 2.5% of
+the original, preventing overlapping surfaces from silently disappearing.
 Otherwise the preceding geometry is retained and the report explains why.
 Equal levels can therefore be an expected conservative result.
 
@@ -118,6 +120,20 @@ report, then review representative models in the intended viewer. Export can
 repack resources or increase bytes even when triangle counts decrease. The
 component declares one CPU, 8 GiB RAM, and a 600-second timeout; representative
 large models require resource measurements before changing deployment settings.
+
+In record details, expand **Compare source and geometric detail levels**, choose
+a level, and use **Load comparison**. Sizes and actual triangle counts are shown
+before downloading the models. The comparison uses the exact input to this step,
+which may already be normalized. Both downloaded models must match their saved
+checksums before display. Review silhouette, thin features, normal-mapped
+lighting, texture seams and material boundaries; the geometry guard does not
+establish visual quality. A changed or missing report/model requires regeneration.
+
+The expanded local CPU corpus accepted 25 static models and 75 outputs, rejecting
+an animated model and an entirely degenerate model as expected. Independent
+geometry/attribute comparison and Khronos glTF validation passed. See the
+component's validation README for pinned inputs, measurements and repeatable
+acceptance commands. Packaged-image and Draco acceptance remain separate gates.
 
 The repository component README at
 `external_code/geometric_lod_generator/README.md` gives build instructions, CPU

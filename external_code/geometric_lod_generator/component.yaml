@@ -4,7 +4,7 @@ metadata:
   description: Generate three GLB detail levels on the CPU, retaining preceding geometry when sampled surface error exceeds the limit. Static embedded GLB only.
   tags: [3d, lod, optimization, derivative]
   category: 3D Processing
-  version: "1.0.1"
+  version: "1.0.2"
   status: alpha
   component_schema: "0.1.0-alpha.1"
 

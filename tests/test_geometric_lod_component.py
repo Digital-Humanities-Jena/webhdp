@@ -48,6 +48,35 @@ def test_failed_blender_removes_partial_artifacts_and_keeps_source(tmp_path, mon
     assert not list(output.iterdir())
 
 
+def test_degenerate_exported_tangents_are_repaired_without_changing_normals_or_handedness(tmp_path):
+    import struct
+    normals = struct.pack('<9f', *([0, 0, 1] * 3))
+    tangents = struct.pack('<12f', 0, 0, 0, -1, 2, 0, 0, 1, 0, 1, 0, -1)
+    positions = struct.pack('<9f', 0, 0, 0, 1, 0, 0, 0, 1, 0)
+    binary = positions + normals + tangents
+    document = {'asset': {'version': '2.0'}, 'buffers': [{'byteLength': len(binary)}],
+                'bufferViews': [{'buffer': 0, 'byteLength': 36}, {'buffer': 0, 'byteOffset': 36, 'byteLength': 36},
+                                {'buffer': 0, 'byteOffset': 72, 'byteLength': 48}],
+                'accessors': [{'bufferView': index, 'componentType': 5126, 'type': 'VEC4' if index == 2 else 'VEC3', 'count': 3} for index in range(3)],
+                'meshes': [{'primitives': [{'attributes': {'POSITION': 0, 'NORMAL': 1, 'TANGENT': 2}}]}]}
+    payload = json.dumps(document).encode()
+    payload += b' ' * (-len(payload) % 4)
+    path = tmp_path / 'export.glb'
+    path.write_bytes(struct.pack('<4sIII4s', b'glTF', 2, 28 + len(payload) + len(binary), len(payload), b'JSON') + payload
+                     + struct.pack('<I4s', len(binary), b'BIN\x00') + binary)
+    runner._contract().inspect_glb(path)
+    assert runner._repair_tangents(path) == 2
+    result = path.read_bytes()[-len(binary):]
+    assert result[:72] == binary[:72]
+    for index in range(3):
+        x, y, z, handedness = struct.unpack_from('<4f', result, 72 + 16 * index)
+        assert x*x + y*y + z*z == pytest.approx(1)
+        assert z == 0
+        assert handedness == (-1 if index in (0, 2) else 1)
+    runner._contract().inspect_glb(path)
+    assert runner._repair_tangents(path) == 0
+
+
 @pytest.mark.parametrize('scenes', [[], [{'nodes': [0]}, {'nodes': [0]}]])
 def test_ambiguous_or_missing_scene_fails_before_blender(tmp_path, scenes):
     source = glb(tmp_path / 'source.glb', scenes=scenes, nodes=[{'mesh': 0}])

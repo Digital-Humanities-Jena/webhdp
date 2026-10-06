@@ -1,0 +1,1035 @@
+{
+  "date": "2026-10-06",
+  "component_version": "1.0.2",
+  "blender_version": "5.1.1",
+  "validator_version": "2.0.0-dev.3.10",
+  "target_ratio": 0.5,
+  "max_relative_error": 0.001,
+  "accepted": true,
+  "comparison_passed": true,
+  "conformance_passed": true,
+  "packaged_image_validated": false,
+  "installed_session_validated": false,
+  "cases": [
+    {
+      "source_sha256": "37c3577d143071b42dd46e9d942b157837eb25c6340112171d7faecaa987b14e",
+      "status": "passed",
+      "elapsed_seconds": 1.3824665839929366,
+      "blender_peak_rss_bytes": 331333632,
+      "source_unchanged": true,
+      "accepted": true,
+      "source": "AlphaBlendModeTest.glb",
+      "source_triangles": 61,
+      "source_bytes": 2978812,
+      "levels": {
+        "high": {
+          "triangles": 61,
+          "bytes": 2976772,
+          "size_change_percent": -0.068483677385478,
+          "retained_meshes": 9,
+          "maximum_relative_error": 1.098936709489347e-07,
+          "sha256": "90a2ec4d92654f145974196cde13bcd256babd0d00697cef60722c2f164ddae4",
+          "repaired_tangents": 13
+        },
+        "low": {
+          "triangles": 61,
+          "bytes": 2976772,
+          "size_change_percent": -0.068483677385478,
+          "retained_meshes": 9,
+          "maximum_relative_error": 1.098936709489347e-07,
+          "sha256": "90a2ec4d92654f145974196cde13bcd256babd0d00697cef60722c2f164ddae4",
+          "repaired_tangents": 13
+        },
+        "medium": {
+          "triangles": 61,
+          "bytes": 2976772,
+          "size_change_percent": -0.068483677385478,
+          "retained_meshes": 9,
+          "maximum_relative_error": 1.098936709489347e-07,
+          "sha256": "b3a6e7d6542d2994d7e28950d24a551ac82eafba786c44d31573b3f71aaaf2ce",
+          "repaired_tangents": 13
+        }
+      }
+    },
+    {
+      "source_sha256": "ccc9c3ce56423720b09399c2351537207cd5a65f859f9e6e2f30922762f3abd4",
+      "status": "passed",
+      "elapsed_seconds": 0.7411187499965308,
+      "blender_peak_rss_bytes": 352600064,
+      "source_unchanged": true,
+      "accepted": true,
+      "source": "Avocado.glb",
+      "source_triangles": 682,
+      "source_bytes": 8110040,
+      "levels": {
+        "high": {
+          "triangles": 682,
+          "bytes": 8110436,
+          "size_change_percent": 0.004882836582797978,
+          "retained_meshes": 1,
+          "maximum_relative_error": 0.0,
+          "sha256": "e64a640db1eb76bdbecefa6f8870a295a0b12dd937203d0061c22466983be5ed",
+          "repaired_tangents": 306
+        },
+        "low": {
+          "triangles": 682,
+          "bytes": 8110436,
+          "size_change_percent": 0.004882836582797978,
+          "retained_meshes": 1,
+          "maximum_relative_error": 0.0,
+          "sha256": "e64a640db1eb76bdbecefa6f8870a295a0b12dd937203d0061c22466983be5ed",
+          "repaired_tangents": 306
+        },
+        "medium": {
+          "triangles": 682,
+          "bytes": 8110436,
+          "size_change_percent": 0.004882836582797978,
+          "retained_meshes": 1,
+          "maximum_relative_error": 0.0,
+          "sha256": "e64a640db1eb76bdbecefa6f8870a295a0b12dd937203d0061c22466983be5ed",
+          "repaired_tangents": 306
+        }
+      }
+    },
+    {
+      "source_sha256": "ed52f7192b8311d700ac0ce80644e3852cd01537e4d62241b9acba023da3d54e",
+      "status": "passed",
+      "elapsed_seconds": 0.5339163749886211,
+      "blender_peak_rss_bytes": 229179392,
+      "source_unchanged": true,
+      "accepted": true,
+      "source": "Box.glb",
+      "source_triangles": 12,
+      "source_bytes": 1664,
+      "levels": {
+        "high": {
+          "triangles": 12,
+          "bytes": 1632,
+          "size_change_percent": -1.9230769230769273,
+          "retained_meshes": 1,
+          "maximum_relative_error": 0.0,
+          "sha256": "2a49e5a920b3c11d1923c266a0f4e8c281b9e2ec8a935c73106e268547ef0dd4",
+          "repaired_tangents": 0
+        },
+        "low": {
+          "triangles": 12,
+          "bytes": 1632,
+          "size_change_percent": -1.9230769230769273,
+          "retained_meshes": 1,
+          "maximum_relative_error": 0.0,
+          "sha256": "2a49e5a920b3c11d1923c266a0f4e8c281b9e2ec8a935c73106e268547ef0dd4",
+          "repaired_tangents": 0
+        },
+        "medium": {
+          "triangles": 12,
+          "bytes": 1632,
+          "size_change_percent": -1.9230769230769273,
+          "retained_meshes": 1,
+          "maximum_relative_error": 0.0,
+          "sha256": "2a49e5a920b3c11d1923c266a0f4e8c281b9e2ec8a935c73106e268547ef0dd4",
+          "repaired_tangents": 0
+        }
+      }
+    },
+    {
+      "source_sha256": "ad0d18d9a21df0d7c2bd3890e60ce69d60d39a55d9b82bacea7e77ac9e583839",
+      "status": "rejected",
+      "elapsed_seconds": 0.0005065840086899698,
+      "blender_peak_rss_bytes": 0,
+      "source_unchanged": true,
+      "accepted": true,
+      "source": "BoxAnimated.glb",
+      "reason": "Animated model"
+    },
+    {
+      "source_sha256": "b2ae631f118f1d13f829cdf9d9dc0fe7cb582de20b8c51d17f81f77a1cbf290c",
+      "status": "passed",
+      "elapsed_seconds": 0.5201527919998625,
+      "blender_peak_rss_bytes": 227819520,
+      "source_unchanged": true,
+      "accepted": true,
+      "source": "BoxInterleaved.glb",
+      "source_triangles": 12,
+      "source_bytes": 1632,
+      "levels": {
+        "high": {
+          "triangles": 12,
+          "bytes": 1620,
+          "size_change_percent": -0.7352941176470562,
+          "retained_meshes": 1,
+          "maximum_relative_error": 0.0,
+          "sha256": "f9f8369f97d58a30d799c850ddbc5f53cb2c53b3cf0e01ea44aebd50608464b9",
+          "repaired_tangents": 0
+        },
+        "low": {
+          "triangles": 12,
+          "bytes": 1620,
+          "size_change_percent": -0.7352941176470562,
+          "retained_meshes": 1,
+          "maximum_relative_error": 0.0,
+          "sha256": "f9f8369f97d58a30d799c850ddbc5f53cb2c53b3cf0e01ea44aebd50608464b9",
+          "repaired_tangents": 0
+        },
+        "medium": {
+          "triangles": 12,
+          "bytes": 1620,
+          "size_change_percent": -0.7352941176470562,
+          "retained_meshes": 1,
+          "maximum_relative_error": 0.0,
+          "sha256": "f9f8369f97d58a30d799c850ddbc5f53cb2c53b3cf0e01ea44aebd50608464b9",
+          "repaired_tangents": 0
+        }
+      }
+    },
+    {
+      "source_sha256": "624621d7885bb418ac64e99c994b45634a32c87caeefae67b06c5c0531c57115",
+      "status": "passed",
+      "elapsed_seconds": 0.5662381250003818,
+      "blender_peak_rss_bytes": 231342080,
+      "source_unchanged": true,
+      "accepted": true,
+      "source": "BoxTexturedNonPowerOfTwo.glb",
+      "source_triangles": 12,
+      "source_bytes": 4696,
+      "levels": {
+        "high": {
+          "triangles": 12,
+          "bytes": 5116,
+          "size_change_percent": 8.943781942078367,
+          "retained_meshes": 1,
+          "maximum_relative_error": 0.0,
+          "sha256": "9bda63857e5ad7072d9675bd8d57f1b450c57c55552ddcef56b5ae191bc4fc1e",
+          "repaired_tangents": 0
+        },
+        "low": {
+          "triangles": 12,
+          "bytes": 5116,
+          "size_change_percent": 8.943781942078367,
+          "retained_meshes": 1,
+          "maximum_relative_error": 0.0,
+          "sha256": "9bda63857e5ad7072d9675bd8d57f1b450c57c55552ddcef56b5ae191bc4fc1e",
+          "repaired_tangents": 0
+        },
+        "medium": {
+          "triangles": 12,
+          "bytes": 5116,
+          "size_change_percent": 8.943781942078367,
+          "retained_meshes": 1,
+          "maximum_relative_error": 0.0,
+          "sha256": "9bda63857e5ad7072d9675bd8d57f1b450c57c55552ddcef56b5ae191bc4fc1e",
+          "repaired_tangents": 0
+        }
+      }
+    },
+    {
+      "source_sha256": "9c48227f33b0ba2fbcf23b98ebf60d1c8ae0c6e6c5281e0aa3cc58affee10382",
+      "status": "passed",
+      "elapsed_seconds": 0.5279432090028422,
+      "blender_peak_rss_bytes": 229376000,
+      "source_unchanged": true,
+      "accepted": true,
+      "source": "BoxVertexColors.glb",
+      "source_triangles": 12,
+      "source_bytes": 1924,
+      "levels": {
+        "high": {
+          "triangles": 12,
+          "bytes": 1876,
+          "size_change_percent": -2.494802494802495,
+          "retained_meshes": 1,
+          "maximum_relative_error": 0.0,
+          "sha256": "b1b17de80602d8a84da8a76f5b10c75d775ee781479208088c79242ee2d350f6",
+          "repaired_tangents": 0
+        },
+        "low": {
+          "triangles": 12,
+          "bytes": 1876,
+          "size_change_percent": -2.494802494802495,
+          "retained_meshes": 1,
+          "maximum_relative_error": 0.0,
+          "sha256": "b1b17de80602d8a84da8a76f5b10c75d775ee781479208088c79242ee2d350f6",
+          "repaired_tangents": 0
+        },
+        "medium": {
+          "triangles": 12,
+          "bytes": 1876,
+          "size_change_percent": -2.494802494802495,
+          "retained_meshes": 1,
+          "maximum_relative_error": 0.0,
+          "sha256": "b1b17de80602d8a84da8a76f5b10c75d775ee781479208088c79242ee2d350f6",
+          "repaired_tangents": 0
+        }
+      }
+    },
+    {
+      "source_sha256": "a1e3b04de97b11de564ce6e53b95f02954a297f0008183ac63a4f5974f6b32d8",
+      "status": "passed",
+      "elapsed_seconds": 2.1977902079961495,
+      "blender_peak_rss_bytes": 582795264,
+      "source_unchanged": true,
+      "accepted": true,
+      "source": "DamagedHelmet.glb",
+      "source_triangles": 15452,
+      "source_bytes": 3773916,
+      "levels": {
+        "high": {
+          "triangles": 15452,
+          "bytes": 8757012,
+          "size_change_percent": 132.0404587701475,
+          "retained_meshes": 1,
+          "maximum_relative_error": 0.0,
+          "sha256": "fda64bdbc8db97a19861cf5b345db6b61819936278675a754d33b49fbeec57c6",
+          "repaired_tangents": 10896
+        },
+        "low": {
+          "triangles": 15452,
+          "bytes": 8757012,
+          "size_change_percent": 132.0404587701475,
+          "retained_meshes": 1,
+          "maximum_relative_error": 0.0,
+          "sha256": "fda64bdbc8db97a19861cf5b345db6b61819936278675a754d33b49fbeec57c6",
+          "repaired_tangents": 10896
+        },
+        "medium": {
+          "triangles": 15452,
+          "bytes": 8757012,
+          "size_change_percent": 132.0404587701475,
+          "retained_meshes": 1,
+          "maximum_relative_error": 0.0,
+          "sha256": "fda64bdbc8db97a19861cf5b345db6b61819936278675a754d33b49fbeec57c6",
+          "repaired_tangents": 10896
+        }
+      }
+    },
+    {
+      "source_sha256": "074898ec4c3636230faffe0cacac7403c3f6135db61f943da28ffaa88ca2a39f",
+      "status": "passed",
+      "elapsed_seconds": 0.6198629999998957,
+      "blender_peak_rss_bytes": 232390656,
+      "source_unchanged": true,
+      "accepted": true,
+      "source": "EmissiveStrengthTest.glb",
+      "source_triangles": 90,
+      "source_bytes": 10668,
+      "levels": {
+        "high": {
+          "triangles": 90,
+          "bytes": 12196,
+          "size_change_percent": 14.323209598800158,
+          "retained_meshes": 6,
+          "maximum_relative_error": 0.0,
+          "sha256": "06f5244a713cbd0f0f00ba353deab65cfd009c6052fd6c3e090b762d7130c246",
+          "repaired_tangents": 0
+        },
+        "low": {
+          "triangles": 90,
+          "bytes": 12196,
+          "size_change_percent": 14.323209598800158,
+          "retained_meshes": 6,
+          "maximum_relative_error": 0.0,
+          "sha256": "06f5244a713cbd0f0f00ba353deab65cfd009c6052fd6c3e090b762d7130c246",
+          "repaired_tangents": 0
+        },
+        "medium": {
+          "triangles": 90,
+          "bytes": 12196,
+          "size_change_percent": 14.323209598800158,
+          "retained_meshes": 6,
+          "maximum_relative_error": 0.0,
+          "sha256": "06f5244a713cbd0f0f00ba353deab65cfd009c6052fd6c3e090b762d7130c246",
+          "repaired_tangents": 0
+        }
+      }
+    },
+    {
+      "source_sha256": "f5352cced402b595ab7f1e4971852fbf33cef8d22351e45caafb072e31d5008a",
+      "status": "passed",
+      "elapsed_seconds": 0.568782000002102,
+      "blender_peak_rss_bytes": 244219904,
+      "source_unchanged": true,
+      "accepted": true,
+      "source": "MultiUVTest.glb",
+      "source_triangles": 12,
+      "source_bytes": 43004,
+      "levels": {
+        "high": {
+          "triangles": 12,
+          "bytes": 42508,
+          "size_change_percent": -1.1533810808296852,
+          "retained_meshes": 1,
+          "maximum_relative_error": 0.0,
+          "sha256": "b0e4d9b0d016319dfd5329618a124da5670df051498e55cc770e86ec69d388c8",
+          "repaired_tangents": 0
+        },
+        "low": {
+          "triangles": 12,
+          "bytes": 42508,
+          "size_change_percent": -1.1533810808296852,
+          "retained_meshes": 1,
+          "maximum_relative_error": 0.0,
+          "sha256": "b0e4d9b0d016319dfd5329618a124da5670df051498e55cc770e86ec69d388c8",
+          "repaired_tangents": 0
+        },
+        "medium": {
+          "triangles": 12,
+          "bytes": 42508,
+          "size_change_percent": -1.1533810808296852,
+          "retained_meshes": 1,
+          "maximum_relative_error": 0.0,
+          "sha256": "b0e4d9b0d016319dfd5329618a124da5670df051498e55cc770e86ec69d388c8",
+          "repaired_tangents": 0
+        }
+      }
+    },
+    {
+      "source_sha256": "ea8c41fd0630f03adcf7a5c06bf86d7b850fa510b6f07cc51eb1fccc205a50f2",
+      "status": "passed",
+      "elapsed_seconds": 0.8585472080012551,
+      "blender_peak_rss_bytes": 244137984,
+      "source_unchanged": true,
+      "accepted": true,
+      "source": "NegativeScaleTest.glb",
+      "source_triangles": 7724,
+      "source_bytes": 62568,
+      "levels": {
+        "high": {
+          "triangles": 7724,
+          "bytes": 143736,
+          "size_change_percent": 129.72765630993476,
+          "retained_meshes": 11,
+          "maximum_relative_error": 0.0,
+          "sha256": "b8589b2ee0b5f03fd3979a8727cccd7013e6e3a9ad17406adc7c631334e31c68",
+          "repaired_tangents": 0
+        },
+        "low": {
+          "triangles": 7724,
+          "bytes": 143736,
+          "size_change_percent": 129.72765630993476,
+          "retained_meshes": 11,
+          "maximum_relative_error": 0.0,
+          "sha256": "b8589b2ee0b5f03fd3979a8727cccd7013e6e3a9ad17406adc7c631334e31c68",
+          "repaired_tangents": 0
+        },
+        "medium": {
+          "triangles": 7724,
+          "bytes": 143736,
+          "size_change_percent": 129.72765630993476,
+          "retained_meshes": 11,
+          "maximum_relative_error": 0.0,
+          "sha256": "b8589b2ee0b5f03fd3979a8727cccd7013e6e3a9ad17406adc7c631334e31c68",
+          "repaired_tangents": 0
+        }
+      }
+    },
+    {
+      "source_sha256": "31ce5f3c873fc55531a17ccacf001e3d1d482a508695aa826fa79cc196e0ce78",
+      "status": "passed",
+      "elapsed_seconds": 0.8176078329997836,
+      "blender_peak_rss_bytes": 317636608,
+      "source_unchanged": true,
+      "accepted": true,
+      "source": "NormalTangentMirrorTest.glb",
+      "source_triangles": 5240,
+      "source_bytes": 1567084,
+      "levels": {
+        "high": {
+          "triangles": 3704,
+          "bytes": 1520624,
+          "size_change_percent": -2.9647421580464073,
+          "retained_meshes": 0,
+          "maximum_relative_error": 0.00011266546582595601,
+          "sha256": "5b8ae6d0a6b087fce538e56de355f35d04115e098704bae3d35b2c0033755079",
+          "repaired_tangents": 1423
+        },
+        "low": {
+          "triangles": 1310,
+          "bytes": 1448936,
+          "size_change_percent": -7.539353346725508,
+          "retained_meshes": 0,
+          "maximum_relative_error": 0.0008195852725116873,
+          "sha256": "884a341a3fab46a1c6884074ebacca05669774e78de183deb3b942783ceb507c",
+          "repaired_tangents": 512
+        },
+        "medium": {
+          "triangles": 2620,
+          "bytes": 1488100,
+          "size_change_percent": -5.040189294256081,
+          "retained_meshes": 0,
+          "maximum_relative_error": 0.000278312299636076,
+          "sha256": "0e440d8a49e60a14a97ba249126fbe07b43e16da906b88a2d941be29fd0688c6",
+          "repaired_tangents": 1008
+        }
+      }
+    },
+    {
+      "source_sha256": "569aedb53822d5721e7e06af5983348683d4b2ffb1d469338ad4f02bf6a74911",
+      "status": "passed",
+      "elapsed_seconds": 0.9928397920011776,
+      "blender_peak_rss_bytes": 251330560,
+      "source_unchanged": true,
+      "accepted": true,
+      "source": "TextureTransformMultiTest.glb",
+      "source_triangles": 3956,
+      "source_bytes": 388264,
+      "levels": {
+        "high": {
+          "triangles": 2816,
+          "bytes": 425800,
+          "size_change_percent": 9.667648816269336,
+          "retained_meshes": 23,
+          "maximum_relative_error": 0.0004945655566105198,
+          "sha256": "61e8c1d6c4716a62afcb37dc8cd376a25a51238f5ba247b2bd296ee5950f72ee",
+          "repaired_tangents": 1257
+        },
+        "low": {
+          "triangles": 2816,
+          "bytes": 425800,
+          "size_change_percent": 9.667648816269336,
+          "retained_meshes": 29,
+          "maximum_relative_error": 0.0004945655566105198,
+          "sha256": "61e8c1d6c4716a62afcb37dc8cd376a25a51238f5ba247b2bd296ee5950f72ee",
+          "repaired_tangents": 1257
+        },
+        "medium": {
+          "triangles": 2816,
+          "bytes": 425800,
+          "size_change_percent": 9.667648816269336,
+          "retained_meshes": 29,
+          "maximum_relative_error": 0.0004945655566105198,
+          "sha256": "11f0889a08c4fa0d5ef17b7f06d88ec474367542e27ad8b675fea5788ab92a95",
+          "repaired_tangents": 1257
+        }
+      }
+    },
+    {
+      "source_sha256": "e07b68c6fd9fbf73d372c610a681b89d6b013bdd1a506e46a411df82210a2481",
+      "status": "passed",
+      "elapsed_seconds": 0.5329807079979219,
+      "blender_peak_rss_bytes": 229638144,
+      "source_unchanged": true,
+      "accepted": true,
+      "source": "UnlitTest.glb",
+      "source_triangles": 88,
+      "source_bytes": 3992,
+      "levels": {
+        "high": {
+          "triangles": 88,
+          "bytes": 6560,
+          "size_change_percent": 64.32865731462927,
+          "retained_meshes": 2,
+          "maximum_relative_error": 0.0,
+          "sha256": "23db265163097f5f29be058beaafa87ad28250326897d65aa9d1fa31a8957dc4",
+          "repaired_tangents": 0
+        },
+        "low": {
+          "triangles": 88,
+          "bytes": 6560,
+          "size_change_percent": 64.32865731462927,
+          "retained_meshes": 2,
+          "maximum_relative_error": 0.0,
+          "sha256": "23db265163097f5f29be058beaafa87ad28250326897d65aa9d1fa31a8957dc4",
+          "repaired_tangents": 0
+        },
+        "medium": {
+          "triangles": 88,
+          "bytes": 6560,
+          "size_change_percent": 64.32865731462927,
+          "retained_meshes": 2,
+          "maximum_relative_error": 0.0,
+          "sha256": "23db265163097f5f29be058beaafa87ad28250326897d65aa9d1fa31a8957dc4",
+          "repaired_tangents": 0
+        }
+      }
+    },
+    {
+      "source_sha256": "696ce0d83ad576bb945683436cd36f5b30fb697d1bf8c8bf75028882de43da28",
+      "status": "rejected",
+      "elapsed_seconds": 0.5229580409941263,
+      "blender_peak_rss_bytes": 225705984,
+      "source_unchanged": true,
+      "accepted": true,
+      "source": "degenerate.glb",
+      "reason": "Entirely degenerate geometry"
+    },
+    {
+      "source_sha256": "e57cca7ff0410ecd18fec58cf50353f273a058bd10c9884e37ca6c4347280572",
+      "status": "passed",
+      "elapsed_seconds": 14.61900154199975,
+      "blender_peak_rss_bytes": 1323646976,
+      "source_unchanged": true,
+      "accepted": true,
+      "source": "dense-sphere.glb",
+      "source_triangles": 327680,
+      "source_bytes": 9221128,
+      "levels": {
+        "high": {
+          "triangles": 231704,
+          "bytes": 8377152,
+          "size_change_percent": -9.152632953365359,
+          "retained_meshes": 0,
+          "maximum_relative_error": 6.758975870046495e-06,
+          "sha256": "a29f8fb6982bc0a55a4c0a8a5156c466e9ca63d336b40181e5e2d365c179d4d4",
+          "repaired_tangents": 90224
+        },
+        "low": {
+          "triangles": 81920,
+          "bytes": 2483124,
+          "size_change_percent": -73.07136393725366,
+          "retained_meshes": 0,
+          "maximum_relative_error": 3.0214160321565325e-05,
+          "sha256": "48e956c287c293dde7c7cbed7760ecc8b4d3ab73459746c51a7dd1456fecb0ff",
+          "repaired_tangents": 32013
+        },
+        "medium": {
+          "triangles": 163840,
+          "bytes": 5933896,
+          "size_change_percent": -35.64891410248291,
+          "retained_meshes": 0,
+          "maximum_relative_error": 1.1659010616546333e-05,
+          "sha256": "a89923fda5a7834fee3c82c6ef0848d2074f070514c8458872de7ff1e7b29b25",
+          "repaired_tangents": 63943
+        }
+      }
+    },
+    {
+      "source_sha256": "3bbefe5a7ec448ce1c31347775bd1c1aee1de12213833d44d49346421be02231",
+      "status": "passed",
+      "elapsed_seconds": 6.715071000013268,
+      "blender_peak_rss_bytes": 740179968,
+      "source_unchanged": true,
+      "accepted": true,
+      "source": "dense-surface.glb",
+      "source_triangles": 96800,
+      "source_bytes": 7343952,
+      "levels": {
+        "high": {
+          "triangles": 96800,
+          "bytes": 10604456,
+          "size_change_percent": 44.39713113593336,
+          "retained_meshes": 1,
+          "maximum_relative_error": 0.0,
+          "sha256": "ba43da3beead5d40a924c49e929c4fa196f682ae15b34c897359bf93ff9af9da",
+          "repaired_tangents": 153426
+        },
+        "low": {
+          "triangles": 96800,
+          "bytes": 10604456,
+          "size_change_percent": 44.39713113593336,
+          "retained_meshes": 1,
+          "maximum_relative_error": 0.0,
+          "sha256": "ba43da3beead5d40a924c49e929c4fa196f682ae15b34c897359bf93ff9af9da",
+          "repaired_tangents": 153426
+        },
+        "medium": {
+          "triangles": 96800,
+          "bytes": 10604456,
+          "size_change_percent": 44.39713113593336,
+          "retained_meshes": 1,
+          "maximum_relative_error": 0.0,
+          "sha256": "ba43da3beead5d40a924c49e929c4fa196f682ae15b34c897359bf93ff9af9da",
+          "repaired_tangents": 153426
+        }
+      }
+    },
+    {
+      "source_sha256": "754937ed11dcb2c8403c37c3ed8d98639dd691dd60161822e8c34f5f07c550b6",
+      "status": "passed",
+      "elapsed_seconds": 0.6650082920095883,
+      "blender_peak_rss_bytes": 239779840,
+      "source_unchanged": true,
+      "accepted": true,
+      "source": "disconnected-small-island.glb",
+      "source_triangles": 2220,
+      "source_bytes": 159460,
+      "levels": {
+        "high": {
+          "triangles": 2220,
+          "bytes": 234440,
+          "size_change_percent": 47.02119653831682,
+          "retained_meshes": 1,
+          "maximum_relative_error": 0.0,
+          "sha256": "2f37242d5ee649d451a426626cf0e250029aab71bfcd3e5bb40ceb7f9ea9e59a",
+          "repaired_tangents": 4558
+        },
+        "low": {
+          "triangles": 2220,
+          "bytes": 234440,
+          "size_change_percent": 47.02119653831682,
+          "retained_meshes": 1,
+          "maximum_relative_error": 0.0,
+          "sha256": "2f37242d5ee649d451a426626cf0e250029aab71bfcd3e5bb40ceb7f9ea9e59a",
+          "repaired_tangents": 4558
+        },
+        "medium": {
+          "triangles": 2220,
+          "bytes": 234440,
+          "size_change_percent": 47.02119653831682,
+          "retained_meshes": 1,
+          "maximum_relative_error": 0.0,
+          "sha256": "2f37242d5ee649d451a426626cf0e250029aab71bfcd3e5bb40ceb7f9ea9e59a",
+          "repaired_tangents": 4558
+        }
+      }
+    },
+    {
+      "source_sha256": "5f25340bb8867d8685626fddd0959c10c8fd3f7279da4d580b457eddb234fe10",
+      "status": "passed",
+      "elapsed_seconds": 0.48035837498900946,
+      "blender_peak_rss_bytes": 229900288,
+      "source_unchanged": true,
+      "accepted": true,
+      "source": "hard-edges.glb",
+      "source_triangles": 300,
+      "source_bytes": 21908,
+      "levels": {
+        "high": {
+          "triangles": 300,
+          "bytes": 32564,
+          "size_change_percent": 48.639766295417196,
+          "retained_meshes": 1,
+          "maximum_relative_error": 0.0,
+          "sha256": "3444d5ad9ef328746a8702cac529d3cb6fe56563201ead41c2b06797cca10c17",
+          "repaired_tangents": 435
+        },
+        "low": {
+          "triangles": 300,
+          "bytes": 32564,
+          "size_change_percent": 48.639766295417196,
+          "retained_meshes": 1,
+          "maximum_relative_error": 0.0,
+          "sha256": "3444d5ad9ef328746a8702cac529d3cb6fe56563201ead41c2b06797cca10c17",
+          "repaired_tangents": 435
+        },
+        "medium": {
+          "triangles": 300,
+          "bytes": 32564,
+          "size_change_percent": 48.639766295417196,
+          "retained_meshes": 1,
+          "maximum_relative_error": 0.0,
+          "sha256": "3444d5ad9ef328746a8702cac529d3cb6fe56563201ead41c2b06797cca10c17",
+          "repaired_tangents": 435
+        }
+      }
+    },
+    {
+      "source_sha256": "81c9ff7107d58be4010fa320163774a3ba01ae8dc387a8e9fc88dad25da62086",
+      "status": "passed",
+      "elapsed_seconds": 0.47763199999462813,
+      "blender_peak_rss_bytes": 228687872,
+      "source_unchanged": true,
+      "accepted": true,
+      "source": "hierarchy-instances.glb",
+      "source_triangles": 24,
+      "source_bytes": 2204,
+      "levels": {
+        "high": {
+          "triangles": 24,
+          "bytes": 4488,
+          "size_change_percent": 103.62976406533578,
+          "retained_meshes": 2,
+          "maximum_relative_error": 0.0,
+          "sha256": "475e4919cf777f83824c678613ebc11108728d5fd2e56889c36e3be8859763bf",
+          "repaired_tangents": 0
+        },
+        "low": {
+          "triangles": 24,
+          "bytes": 4488,
+          "size_change_percent": 103.62976406533578,
+          "retained_meshes": 2,
+          "maximum_relative_error": 0.0,
+          "sha256": "475e4919cf777f83824c678613ebc11108728d5fd2e56889c36e3be8859763bf",
+          "repaired_tangents": 0
+        },
+        "medium": {
+          "triangles": 24,
+          "bytes": 4488,
+          "size_change_percent": 103.62976406533578,
+          "retained_meshes": 2,
+          "maximum_relative_error": 0.0,
+          "sha256": "475e4919cf777f83824c678613ebc11108728d5fd2e56889c36e3be8859763bf",
+          "repaired_tangents": 0
+        }
+      }
+    },
+    {
+      "source_sha256": "75fec00c8c90243f337b3c0b742819dcda31a67bb261b6167905cf31ec4713b2",
+      "status": "passed",
+      "elapsed_seconds": 0.4832605830015382,
+      "blender_peak_rss_bytes": 229015552,
+      "source_unchanged": true,
+      "accepted": true,
+      "source": "large-coordinates.glb",
+      "source_triangles": 12,
+      "source_bytes": 1772,
+      "levels": {
+        "high": {
+          "triangles": 12,
+          "bytes": 2344,
+          "size_change_percent": 32.279909706546285,
+          "retained_meshes": 1,
+          "maximum_relative_error": 0.0,
+          "sha256": "0811ca2854c26886728405e9b48c85b78c3b1a4dd5d3a85bc7e1c0d2e3d4c601",
+          "repaired_tangents": 0
+        },
+        "low": {
+          "triangles": 12,
+          "bytes": 2344,
+          "size_change_percent": 32.279909706546285,
+          "retained_meshes": 1,
+          "maximum_relative_error": 0.0,
+          "sha256": "0811ca2854c26886728405e9b48c85b78c3b1a4dd5d3a85bc7e1c0d2e3d4c601",
+          "repaired_tangents": 0
+        },
+        "medium": {
+          "triangles": 12,
+          "bytes": 2344,
+          "size_change_percent": 32.279909706546285,
+          "retained_meshes": 1,
+          "maximum_relative_error": 0.0,
+          "sha256": "0811ca2854c26886728405e9b48c85b78c3b1a4dd5d3a85bc7e1c0d2e3d4c601",
+          "repaired_tangents": 0
+        }
+      }
+    },
+    {
+      "source_sha256": "a0cf327e98d5f9758c10f4860286c2a8dbb2908e03fefc3788b66aebffeaad19",
+      "status": "passed",
+      "elapsed_seconds": 0.48184858399326913,
+      "blender_peak_rss_bytes": 228950016,
+      "source_unchanged": true,
+      "accepted": true,
+      "source": "microscopic.glb",
+      "source_triangles": 12,
+      "source_bytes": 1852,
+      "levels": {
+        "high": {
+          "triangles": 12,
+          "bytes": 2424,
+          "size_change_percent": 30.885529157667378,
+          "retained_meshes": 1,
+          "maximum_relative_error": 0.0,
+          "sha256": "22266b82ac0dd94a716afd416c7bae434ebf6ac76588a2692b40b7327ce88ce4",
+          "repaired_tangents": 0
+        },
+        "low": {
+          "triangles": 12,
+          "bytes": 2424,
+          "size_change_percent": 30.885529157667378,
+          "retained_meshes": 1,
+          "maximum_relative_error": 0.0,
+          "sha256": "22266b82ac0dd94a716afd416c7bae434ebf6ac76588a2692b40b7327ce88ce4",
+          "repaired_tangents": 0
+        },
+        "medium": {
+          "triangles": 12,
+          "bytes": 2424,
+          "size_change_percent": 30.885529157667378,
+          "retained_meshes": 1,
+          "maximum_relative_error": 0.0,
+          "sha256": "22266b82ac0dd94a716afd416c7bae434ebf6ac76588a2692b40b7327ce88ce4",
+          "repaired_tangents": 0
+        }
+      }
+    },
+    {
+      "source_sha256": "a390a8bfb857978f4a53648252b734ecc03a785301b5641f05c33c81a95f9ff4",
+      "status": "passed",
+      "elapsed_seconds": 0.5107277499919292,
+      "blender_peak_rss_bytes": 228769792,
+      "source_unchanged": true,
+      "accepted": true,
+      "source": "multiple-materials.glb",
+      "source_triangles": 12,
+      "source_bytes": 2628,
+      "levels": {
+        "high": {
+          "triangles": 12,
+          "bytes": 3288,
+          "size_change_percent": 25.114155251141558,
+          "retained_meshes": 1,
+          "maximum_relative_error": 0.0,
+          "sha256": "537f3013cb923d1d2c97fe5ef5f13ed5f63423b6e75efd607fe4da33418a8780",
+          "repaired_tangents": 0
+        },
+        "low": {
+          "triangles": 12,
+          "bytes": 3288,
+          "size_change_percent": 25.114155251141558,
+          "retained_meshes": 1,
+          "maximum_relative_error": 0.0,
+          "sha256": "537f3013cb923d1d2c97fe5ef5f13ed5f63423b6e75efd607fe4da33418a8780",
+          "repaired_tangents": 0
+        },
+        "medium": {
+          "triangles": 12,
+          "bytes": 3288,
+          "size_change_percent": 25.114155251141558,
+          "retained_meshes": 1,
+          "maximum_relative_error": 0.0,
+          "sha256": "537f3013cb923d1d2c97fe5ef5f13ed5f63423b6e75efd607fe4da33418a8780",
+          "repaired_tangents": 0
+        }
+      }
+    },
+    {
+      "source_sha256": "60aeb39b78d8d9e17f8c4fca5bad5b269290101a8ccc499cda4fd6194f50b56a",
+      "status": "passed",
+      "elapsed_seconds": 0.48185587499756366,
+      "blender_peak_rss_bytes": 228130816,
+      "source_unchanged": true,
+      "accepted": true,
+      "source": "no-material.glb",
+      "source_triangles": 12,
+      "source_bytes": 1732,
+      "levels": {
+        "high": {
+          "triangles": 12,
+          "bytes": 2304,
+          "size_change_percent": 33.025404157043866,
+          "retained_meshes": 1,
+          "maximum_relative_error": 0.0,
+          "sha256": "2238f99911a791e2560720f56aead4e5692ec41b0a5296034c323bebadd34442",
+          "repaired_tangents": 0
+        },
+        "low": {
+          "triangles": 12,
+          "bytes": 2304,
+          "size_change_percent": 33.025404157043866,
+          "retained_meshes": 1,
+          "maximum_relative_error": 0.0,
+          "sha256": "2238f99911a791e2560720f56aead4e5692ec41b0a5296034c323bebadd34442",
+          "repaired_tangents": 0
+        },
+        "medium": {
+          "triangles": 12,
+          "bytes": 2304,
+          "size_change_percent": 33.025404157043866,
+          "retained_meshes": 1,
+          "maximum_relative_error": 0.0,
+          "sha256": "2238f99911a791e2560720f56aead4e5692ec41b0a5296034c323bebadd34442",
+          "repaired_tangents": 0
+        }
+      }
+    },
+    {
+      "source_sha256": "46cd427ab810668c2fae40ba60754ad3462fda560cd6804b623e6ba0e39cbbd7",
+      "status": "passed",
+      "elapsed_seconds": 0.47216512500017416,
+      "blender_peak_rss_bytes": 227655680,
+      "source_unchanged": true,
+      "accepted": true,
+      "source": "sparse-data-uri.glb",
+      "source_triangles": 1,
+      "source_bytes": 608,
+      "levels": {
+        "high": {
+          "triangles": 1,
+          "bytes": 876,
+          "size_change_percent": 44.07894736842106,
+          "retained_meshes": 1,
+          "maximum_relative_error": 0.0,
+          "sha256": "25c84c4a1d462fb904ab2e407a1c2359d065e1941b6b6e23f064453a584cfddd",
+          "repaired_tangents": 0
+        },
+        "low": {
+          "triangles": 1,
+          "bytes": 876,
+          "size_change_percent": 44.07894736842106,
+          "retained_meshes": 1,
+          "maximum_relative_error": 0.0,
+          "sha256": "25c84c4a1d462fb904ab2e407a1c2359d065e1941b6b6e23f064453a584cfddd",
+          "repaired_tangents": 0
+        },
+        "medium": {
+          "triangles": 1,
+          "bytes": 876,
+          "size_change_percent": 44.07894736842106,
+          "retained_meshes": 1,
+          "maximum_relative_error": 0.0,
+          "sha256": "25c84c4a1d462fb904ab2e407a1c2359d065e1941b6b6e23f064453a584cfddd",
+          "repaired_tangents": 0
+        }
+      }
+    },
+    {
+      "source_sha256": "ec14464ddfde0e4ae64e94e866bc88ad4a0a5c673e5463c635657921623ef70e",
+      "status": "passed",
+      "elapsed_seconds": 0.5810345000063535,
+      "blender_peak_rss_bytes": 241254400,
+      "source_unchanged": true,
+      "accepted": true,
+      "source": "thin-torus.glb",
+      "source_triangles": 2304,
+      "source_bytes": 162296,
+      "levels": {
+        "high": {
+          "triangles": 2304,
+          "bytes": 258304,
+          "size_change_percent": 59.156109824025236,
+          "retained_meshes": 1,
+          "maximum_relative_error": 0.0,
+          "sha256": "3de3e090e7e298f57e5a27c5e36485aecee9d64c6d31171582fa5aac2280a018",
+          "repaired_tangents": 4652
+        },
+        "low": {
+          "triangles": 2304,
+          "bytes": 258304,
+          "size_change_percent": 59.156109824025236,
+          "retained_meshes": 1,
+          "maximum_relative_error": 0.0,
+          "sha256": "3de3e090e7e298f57e5a27c5e36485aecee9d64c6d31171582fa5aac2280a018",
+          "repaired_tangents": 4652
+        },
+        "medium": {
+          "triangles": 2304,
+          "bytes": 258304,
+          "size_change_percent": 59.156109824025236,
+          "retained_meshes": 1,
+          "maximum_relative_error": 0.0,
+          "sha256": "3de3e090e7e298f57e5a27c5e36485aecee9d64c6d31171582fa5aac2280a018",
+          "repaired_tangents": 4652
+        }
+      }
+    },
+    {
+      "source_sha256": "8812d63552d866ff740c2164592d286f9b6e1142d2700f8a2683525dde932022",
+      "status": "passed",
+      "elapsed_seconds": 0.48045808299502824,
+      "blender_peak_rss_bytes": 228360192,
+      "source_unchanged": true,
+      "accepted": true,
+      "source": "\u6a21\u578b caf\u00e9 with spaces.glb",
+      "source_triangles": 12,
+      "source_bytes": 1760,
+      "levels": {
+        "high": {
+          "triangles": 12,
+          "bytes": 2332,
+          "size_change_percent": 32.49999999999999,
+          "retained_meshes": 1,
+          "maximum_relative_error": 0.0,
+          "sha256": "68068782aa71daf802be8acce0eee374776c2c1752a1658f8a84cf413f3af298",
+          "repaired_tangents": 0
+        },
+        "low": {
+          "triangles": 12,
+          "bytes": 2332,
+          "size_change_percent": 32.49999999999999,
+          "retained_meshes": 1,
+          "maximum_relative_error": 0.0,
+          "sha256": "68068782aa71daf802be8acce0eee374776c2c1752a1658f8a84cf413f3af298",
+          "repaired_tangents": 0
+        },
+        "medium": {
+          "triangles": 12,
+          "bytes": 2332,
+          "size_change_percent": 32.49999999999999,
+          "retained_meshes": 1,
+          "maximum_relative_error": 0.0,
+          "sha256": "68068782aa71daf802be8acce0eee374776c2c1752a1658f8a84cf413f3af298",
+          "repaired_tangents": 0
+        }
+      }
+    }
+  ]
+}

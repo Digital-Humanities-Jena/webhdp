@@ -30,6 +30,17 @@ def sampled_error(points, tree):
                for hit in (tree.find_nearest(point) for point in points))
 
 
+def material_areas(obj, mesh):
+    """Keep overlapping surfaces and small material groups in the acceptance guard."""
+    mesh.calc_loop_triangles()
+    areas = {}
+    for triangle in mesh.loop_triangles:
+        a, b, c = [obj.matrix_world @ mesh.vertices[index].co for index in triangle.vertices]
+        key = triangle.material_index
+        areas[key] = areas.get(key, 0.0) + (b - a).cross(c - a).length * 0.5
+    return areas
+
+
 def generate(source, output, ratio, max_error):
     bpy.ops.object.select_all(action='SELECT')
     bpy.ops.object.delete(use_global=False)
@@ -46,16 +57,17 @@ def generate(source, output, ratio, max_error):
         low = Vector(tuple(min(point[axis] for point in points) for axis in range(3)))
         high = Vector(tuple(max(point[axis] for point in points) for axis in range(3)))
         diagonal = (high - low).length
-        originals[obj.name] = (tree, points, triangles, diagonal)
+        originals[obj.name] = (tree, points, triangles, diagonal, material_areas(obj, obj.data))
         accepted_errors[obj.name] = 0.0
         total += triangles
     report = {'source_triangles': total, 'levels': {}, 'blender_version': bpy.app.version_string,
-              'method': 'guarded_decimation', 'generated_levels': ['high', 'medium', 'low']}
+              'method': 'guarded_decimation', 'max_material_area_change': 0.025,
+              'generated_levels': ['high', 'medium', 'low']}
     for level, target_ratio in (('high', math.sqrt(ratio)), ('medium', ratio), ('low', ratio * ratio)):
         checks = []
         triangles_after = 0
         for obj in objects:
-            source_tree, source_points, source_triangles, diagonal = originals[obj.name]
+            source_tree, source_points, source_triangles, diagonal, source_areas = originals[obj.name]
             _, _, before = surface(obj, obj.data)
             target = max(1, math.floor(source_triangles * target_ratio))
             status, reason = 'retained', 'Already at or below the requested detail budget.'
@@ -75,6 +87,11 @@ def generate(source, output, ratio, max_error):
                     allowed = max_error * diagonal
                     if candidate_error > allowed + max(diagonal * 1e-9, 1e-15) or after > before:
                         raise ValueError('Reduction exceeded the geometric error limit.')
+                    areas = material_areas(obj, obj.data)
+                    if areas.keys() != source_areas.keys() or any(
+                            not math.isclose(area, areas[key], rel_tol=0.025, abs_tol=1e-20)
+                            for key, area in source_areas.items()):
+                        raise ValueError('Reduction exceeded the surface area limit for a material group.')
                     status = 'reduced' if after < before else 'retained'
                     reason = 'Within the sampled error limit.' if status == 'reduced' else 'No further reduction was possible.'
                 except ValueError as exc:

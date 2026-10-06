@@ -1,6 +1,6 @@
 # Geometric LOD Generator
 
-Version 1.0.1 replaces the former copied preview with three guarded CPU Blender
+Version 1.0.2 produces three guarded CPU Blender
 reductions. This installable component is separate from Linked Open Data
 generation and the HPC mesh optimizer. No HPC allocation is needed.
 
@@ -33,6 +33,9 @@ be identical and a target is not a guarantee. Retention is recorded per mesh
 with its reason, requested budget, accepted level's `sampled_error`, and limit.
 `candidate_sampled_error` records an attempted reduction separately, including
 rejected candidates; it is absent (`null`) when no finite candidate was measured.
+Every material group's world-space surface area must also remain within 2.5%
+of the original. This guards overlapping surfaces and small material groups
+that nearest-surface distance alone cannot distinguish.
 
 Error is sampled in both directions against the original surface, using all
 vertices, triangle edge midpoints, and triangle centroids. This is a conservative
@@ -41,6 +44,10 @@ not texture appearance. Mesh instances are copied independently; meshes are not
 joined, welded, or remeshed. UV layers, colors, normals, tangents, embedded
 textures, and supported material graphs pass through Blender's importer/exporter.
 Missing glTF default materials are made explicit in a temporary import copy.
+Invalid exported tangent lengths are normalized. Zero directions at degenerate
+UVs receive a deterministic perpendicular to the normal with preserved
+handedness, and `repaired_tangents` records their count per level. Inspect
+normal-mapped lighting around these locations during appearance review.
 Export can repack resources or increase file size. Review appearance and material
 boundaries in the intended viewer before publication.
 
@@ -51,7 +58,7 @@ From the repository root, build this self-contained image with the
 
 ```sh
 docker build -f external_code/geometric_lod_generator/Dockerfile \
-  -t webhdp/geometric-lod-generator:1.0.1 external_code
+  -t webhdp/geometric-lod-generator:1.0.2 external_code
 ```
 
 The image installs CPU Blender. The component declares one CPU and 8 GiB RAM,
@@ -90,11 +97,11 @@ WEBHDP_TEST_BLENDER=/path/to/blender .venv/bin/python -m pytest -q \
 ```
 
 To exercise the packaged runtime with the same generated fixtures, also set
-`WEBHDP_TEST_GEOMETRIC_IMAGE=webhdp/geometric-lod-generator:1.0.1`. These optional
+`WEBHDP_TEST_GEOMETRIC_IMAGE=webhdp/geometric-lod-generator:1.0.2`. These optional
 checks require Docker and run with networking disabled, one CPU, 8 GiB RAM, and
 read-only source mounts. They also check ratio changes and retry isolation.
 
-The CPU cases cover a 3,968-triangle smooth sphere, embedded texture with two UV
+The earlier 1.0.1 CPU cases covered a 3,968-triangle smooth sphere, embedded texture with two UV
 layers and vertex colors, a tight limit that retains geometry, distinct retry
 directories, and a changed target ratio. A Blender 5.1.1 local run at ratio 0.5
 and relative error 0.01 produced 2,804 / 1,983 / 990 triangles with an unchanged
@@ -115,7 +122,9 @@ the installed component through a fresh WebHDP session with duplicate basenames
 and an unsupported record between valid records. Confirm record-local artifacts,
 unchanged originals, failure isolation, and source/output provenance.
 
-These CPU and packaged checks cover the fixtures above, not the entire corpus or
-installed-session acceptance. GPU optimizer/renderer and disconnected-cluster
+The [CPU corpus validation guide](validation/README.md) records the broader
+1.0.2 acceptance, discovered regressions, and resource/file-size measurements.
+The earlier packaged checks do not establish 1.0.2 packaged or installed-session
+acceptance. GPU optimizer/renderer and disconnected-cluster
 checks belong to their existing validation runbooks and must be completed in an
 available test allocation.
