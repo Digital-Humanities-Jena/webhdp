@@ -16,6 +16,7 @@ from services.credential_crypto import decrypt_secret, encrypt_secret
 from services.cloud_upload_service import STORAGE_DROPBOX, STORAGE_GDRIVE, STORAGE_SERVER, CloudUploadService
 from services.hpc_link_client import HpcLinkClient
 from services.notification_service import notify_user
+from services.registry_lock import OperationConflict, registry_lock
 
 
 TERMINAL_ALLOCATION_STATES = {"failed", "released", "expired", "cancelled"}
@@ -413,6 +414,24 @@ class HpcAllocationService:
         return self.serialize_allocation(allocation)
 
     def process_queue(self) -> None:
+        try:
+            with registry_lock('hpc-allocation-queue'):
+                db.session.expire_all()
+                self._process_queue()
+        except OperationConflict:
+            return  # Another request is already advancing the shared queue.
+
+    def poll_allocation(self, allocation: HpcAllocation) -> Dict[str, Any]:
+        try:
+            with registry_lock('hpc-allocation-queue'):
+                db.session.expire_all()
+                self._process_queue()
+                return self.refresh_allocation(allocation)
+        except OperationConflict:
+            db.session.refresh(allocation)
+            return self.serialize_allocation(allocation)
+
+    def _process_queue(self) -> None:
         config = self.get_or_create_config()
         if not config.enabled:
             return
@@ -423,7 +442,7 @@ class HpcAllocationService:
         queued = HpcAllocation.query.filter_by(status="queued").order_by(HpcAllocation.requested_at.asc()).all()
         for allocation in queued:
             if not self._can_start_next(config, allocation):
-                break
+                continue
             self._start_allocation(allocation, config)
 
     def _start_allocation(self, allocation: HpcAllocation, config: HpcLinkConfig) -> None:

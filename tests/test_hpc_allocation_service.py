@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 import os
+import pytest
 
 from database.models import HpcAllocation, HpcLinkConfig, User, UserRole
 from services.hpc_allocation_service import HpcAllocationService, mask_secret
@@ -344,3 +345,101 @@ def test_request_replaces_expired_running_allocation(monkeypatch):
         assert result['allocation_id'] != previous.public_id
         assert result['status'] == 'allocating'
         assert HpcAllocation.query.count() == 2
+
+
+@pytest.fixture
+def queue_workspace(tmp_path, monkeypatch):
+    from flask import Flask
+    from flask_jwt_extended import JWTManager
+    from database.database import db
+    from routes.hpc_link_routes import hpc_link_bp
+    app = Flask(__name__)
+    app.config.update(SQLALCHEMY_DATABASE_URI=f'sqlite:///{tmp_path / "queue.db"}',
+        SQLALCHEMY_TRACK_MODIFICATIONS=False, JWT_SECRET_KEY='allocation-test-key')
+    db.init_app(app)
+    JWTManager(app)
+    service = app.hpc_allocation_service = HpcAllocationService()
+    app.register_blueprint(hpc_link_bp, url_prefix='/api/v1/hpc-link')
+    with app.app_context():
+        db.create_all()
+        users = [User(email=f'operator-{index}@example.com', role=UserRole.ADMIN) for index in (1, 2)]
+        for user in users:
+            user.set_password('allocation-test-password')
+        config = HpcLinkConfig(enabled=True, default_partition='partition-a',
+            max_active_allocations=2, max_active_allocations_per_user=1)
+        db.session.add_all([*users, config])
+        db.session.commit()
+        monkeypatch.setattr(service, '_notify_allocation', lambda *args, **kwargs: None)
+        try:
+            yield app, service, users
+        finally:
+            db.session.remove()
+            db.drop_all()
+
+
+def test_waiting_allocation_poll_advances_after_remote_job_ends(queue_workspace, monkeypatch):
+    from database.database import db
+    from flask_jwt_extended import create_access_token
+    from unittest.mock import Mock
+    app, service, users = queue_workspace
+    active = HpcAllocation(user_id=users[0].id, purpose='workflow', status='running',
+        requested_partition='partition-a', remote_session_id='ended-job')
+    waiting = HpcAllocation(user_id=users[0].id, purpose='workflow', status='queued',
+        requested_partition='partition-a')
+    db.session.add_all([active, waiting]); db.session.commit()
+    client = Mock()
+    client.get.side_effect = lambda path, **kwargs: {
+        'status': 'finished' if path.endswith('ended-job') else 'running'}
+    client.post.return_value = {'session_id': 'next-job', 'job_id': 'next-slurm-job', 'status': 'queued'}
+    monkeypatch.setattr(service, 'client', lambda *args, **kwargs: client)
+    headers = {'Authorization': 'Bearer ' + create_access_token(identity=str(users[0].id))}
+    response = app.test_client().get(f'/api/v1/hpc-link/allocations/{waiting.public_id}', headers=headers)
+    assert response.status_code == 200
+    assert response.json['data']['allocation']['status'] == 'running'
+    assert response.json['data']['allocation']['remote_job_id'] == 'next-slurm-job'
+    assert active.status == 'expired'
+    client.post.assert_called_once()
+
+
+def test_user_at_allocation_limit_does_not_block_other_users(queue_workspace, monkeypatch):
+    from database.database import db
+    from unittest.mock import Mock
+    _, service, users = queue_workspace
+    active = HpcAllocation(user_id=users[0].id, purpose='workflow', status='running',
+        requested_partition='partition-a', remote_session_id='active-job')
+    first = HpcAllocation(user_id=users[0].id, purpose='workflow', status='queued',
+        requested_partition='partition-a', requested_at=datetime.utcnow() - timedelta(seconds=10))
+    second = HpcAllocation(user_id=users[1].id, purpose='workflow', status='queued',
+        requested_partition='partition-a')
+    db.session.add_all([active, first, second]); db.session.commit()
+    client = Mock()
+    client.get.return_value = {'status': 'running'}
+    client.post.return_value = {'session_id': 'second-user-job', 'status': 'queued'}
+    monkeypatch.setattr(service, 'client', lambda *args, **kwargs: client)
+    service.process_queue()
+    assert first.status == 'queued'
+    assert second.status == 'allocating'
+    assert second.remote_session_id == 'second-user-job'
+    client.post.assert_called_once()
+
+
+def test_poll_returns_saved_status_while_another_request_advances_queue(queue_workspace, monkeypatch):
+    from contextlib import contextmanager
+    from database.database import db
+    from unittest.mock import Mock
+    from services.registry_lock import OperationConflict
+    _, service, users = queue_workspace
+    waiting = HpcAllocation(user_id=users[0].id, purpose='workflow', status='queued',
+        requested_partition='partition-a')
+    db.session.add(waiting); db.session.commit()
+    client = Mock()
+    monkeypatch.setattr(service, 'client', lambda *args, **kwargs: client)
+    @contextmanager
+    def busy_lock(name):
+        raise OperationConflict('Queue processing is already in progress.')
+        yield
+    monkeypatch.setattr('services.hpc_allocation_service.registry_lock', busy_lock)
+    assert service.poll_allocation(waiting)['status'] == 'queued'
+    service.process_queue()
+    client.post.assert_not_called()
+    client.get.assert_not_called()

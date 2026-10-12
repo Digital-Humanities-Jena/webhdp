@@ -90,7 +90,7 @@ def request_hpc_allocation():
 def get_hpc_allocation(allocation_id):
     service = current_app.hpc_allocation_service
     allocation = service.get_allocation(allocation_id, _current_user())
-    payload = service.refresh_allocation(allocation)
+    payload = service.poll_allocation(allocation)
     return APIResponse.success(data={"allocation": payload})
 
 
