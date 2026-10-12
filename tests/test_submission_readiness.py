@@ -87,6 +87,26 @@ def check(workspace, identifier='guarded_lod', **changes):
     return native.check_submission_readiness(identifier, session.id, {**payload, **changes}, user.id)
 
 
+def test_default_render_readiness_uses_selected_files_instead_of_directory_default(workspace):
+    report = check(workspace, 'render')
+    assert report['ready'], report
+    assert report['readiness_token']
+    assert any('Compute connectivity' in item['message'] for item in report['unverified'])
+    assert PipelineRun.query.count() == 0
+
+
+def test_render_readiness_still_rejects_an_explicit_directory_outside_session(workspace):
+    from services.submission_readiness import SubmissionReadiness
+    _, native, session, _, source, _, _, _ = workspace
+    outside = Path(session.session_dir).parent / 'outside-session'
+    outside.mkdir()
+    manifest = native._get_component_manifest_by_key('fast_renderer')
+    with pytest.raises(ValueError, match='input directory inside this session'):
+        SubmissionReadiness(native)._fields(manifest['inputs'],
+            {'input_files': [str(source)], 'input-dir': str(outside)}, 'input', set(), session, {})
+    assert PipelineRun.query.count() == 0
+
+
 def test_readiness_is_read_only_and_never_contacts_compute_or_zenodo(workspace):
     app, native, session, _, source, _, _, headers = workspace
     before = {str(path): path.read_bytes() for path in source.parents[1].rglob('*') if path.is_file()}

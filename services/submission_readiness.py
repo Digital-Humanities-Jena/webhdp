@@ -320,6 +320,12 @@ class SubmissionReadiness:
             name = field['name']
             if (category, name) in unresolved:
                 continue
+            if name not in values and any(
+                (category, other) in unresolved
+                or self.native._has_meaningful_bound_value(values.get(other))
+                for other in field.get('mutex_with', [])
+            ):
+                continue
             value = values.get(name, field.get('default'))
             if self.native._is_missing_manifest_value(value):
                 if any(self.native._has_meaningful_bound_value(values.get(other)) for other in field.get('mutex_with', [])):
