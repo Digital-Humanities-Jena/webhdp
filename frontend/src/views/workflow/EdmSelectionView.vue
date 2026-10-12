@@ -111,11 +111,13 @@
                     <div class="space-y-3">
                         <!-- Horizontal Scroll list if many, or grid -->
                         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                            <div
-                                v-for="(asset, idx) in uploadedAssets"
-                                :key="idx"
+                            <button
+                                v-for="asset in uploadedAssets"
+                                :key="asset.identity"
+                                type="button"
+                                :aria-pressed="isAssetSelected(asset)"
                                 @click="selectedFile = asset"
-                                :class="['flex items-center gap-3 p-2 rounded-lg border cursor-pointer transition-colors', selectedFile?.name === asset.name ? 'border-indigo-600 bg-indigo-50 ring-1 ring-indigo-600' : 'border-gray-200 hover:bg-gray-50']"
+                                :class="['flex items-center gap-3 p-2 rounded-lg border cursor-pointer transition-colors text-left', isAssetSelected(asset) ? 'border-indigo-600 bg-indigo-50 ring-1 ring-indigo-600' : 'border-gray-200 hover:bg-gray-50']"
                             >
                                 <div class="w-10 h-10 rounded border border-gray-200 bg-gray-100 flex-shrink-0 flex items-center justify-center overflow-hidden">
                                      <img
@@ -128,14 +130,15 @@
                                 </div>
                                 <div class="min-w-0 flex-1">
                                     <p class="text-sm font-medium text-gray-900 truncate" :title="asset.name">{{ asset.name }}</p>
-                                    <p class="text-xs text-gray-500">{{ ((asset.size ?? asset.size_bytes ?? 0) / 1024).toFixed(1) }} KB</p>
+                                    <p v-if="asset.showPath" class="text-xs text-gray-500 truncate" :title="asset.path">{{ asset.path }}</p>
+                                    <p class="text-xs text-gray-500">{{ (asset.size / 1024).toFixed(1) }} KB</p>
                                 </div>
                                 <div class="flex-shrink-0">
-                                    <div :class="['w-4 h-4 rounded-full border flex items-center justify-center', selectedFile?.name === asset.name ? 'border-indigo-600' : 'border-gray-300']">
-                                        <div v-if="selectedFile?.name === asset.name" class="w-2 h-2 rounded-full bg-indigo-600"></div>
+                                    <div :class="['w-4 h-4 rounded-full border flex items-center justify-center', isAssetSelected(asset) ? 'border-indigo-600' : 'border-gray-300']">
+                                        <div v-if="isAssetSelected(asset)" class="w-2 h-2 rounded-full bg-indigo-600"></div>
                                     </div>
                                 </div>
-                            </div>
+                            </button>
                         </div>
                     </div>
                     <p class="text-xs text-gray-400 mt-2">The selected file will be used as the primary object (edm:ProvidedCHO, ore:Aggregation) in the XML.</p>
@@ -369,29 +372,66 @@ function validationDetailPassed(detail) {
     return detail?.valid === true && !detail.skipped
 }
 
-// Get uploaded assets from workflow store
+function assetFilename(file) {
+    const value = String(file?.name || file?.filename || file?.relative_path || file?.path || file?.absolute_path || '')
+    return value.replaceAll('\\', '/').split('/').pop() || ''
+}
+
+function assetSourceIdentity(file) {
+    const id = file?.file_id ?? file?.id
+    if (id !== undefined && id !== null && id !== '') return `id:${id}`
+    const path = file?.absolute_path || file?.path || file?.relative_path
+    return path ? `path:${path}` : ''
+}
+
+const localAssetIds = new WeakMap()
+let nextLocalAssetId = 0
+function assetIdentity(file) {
+    const sourceIdentity = assetSourceIdentity(file)
+    if (sourceIdentity) return sourceIdentity
+    if (!localAssetIds.has(file)) localAssetIds.set(file, `upload:${++nextLocalAssetId}`)
+    return localAssetIds.get(file)
+}
+
+// Adapt browser files and restored session nodes without changing either source.
 const uploadedAssets = computed(() => {
-    return workflowStore.uploadedFiles || []
+    const files = (workflowStore.uploadedFiles || []).filter(file => file && typeof file === 'object')
+    const names = files.map(assetFilename)
+    const nameCounts = new Map()
+    names.forEach(name => nameCounts.set(name, (nameCounts.get(name) || 0) + 1))
+    return files.map((file, index) => ({
+        source: file,
+        identity: assetIdentity(file),
+        name: names[index] || 'Unnamed asset',
+        mainFileKey: names[index],
+        size: Number(file.size ?? file.size_bytes) || 0,
+        path: file.relative_path || file.path || file.absolute_path || '',
+        showPath: Boolean(names[index] && nameCounts.get(names[index]) > 1),
+        thumbnail: file.thumbnail,
+        url: file.url,
+    }))
 })
+const isAssetSelected = (asset) => selectedFile.value?.identity === asset.identity
 
-// Auto-select largest file on mount or when assets change
-watch(uploadedAssets, (files) => {
-    if (files && files.length > 0 && !selectedFile.value) {
-        const draftMainFileKey = workflowStore.submissionMetadata?.edm_main_file_key
-        if (draftMainFileKey) {
-            const matchingFile = files.find(file => file.name === draftMainFileKey)
-            if (matchingFile) {
-                selectedFile.value = matchingFile
-                return
-            }
-        }
-
-        // Find largest file
-        const largest = files.reduce((prev, current) => {
-             return (prev.size > current.size) ? prev : current
-        }, files[0])
-        selectedFile.value = largest
+function selectMainAssetFromDraft() {
+    const files = uploadedAssets.value
+    if (!files.length) {
+        selectedFile.value = null
+        return
     }
+    const draftMainFileKey = workflowStore.submissionMetadata?.edm_main_file_key
+    const matching = draftMainFileKey ? files.filter(file => file.mainFileKey === draftMainFileKey) : []
+    const selectedSourceIds = new Set((workflowStore.selectedFiles || []).map(assetSourceIdentity).filter(Boolean))
+    const selectedMatches = (matching.length ? matching : files).filter(file => selectedSourceIds.has(file.identity))
+    selectedFile.value = matching.length === 1 ? matching[0]
+        : selectedMatches.length === 1 ? selectedMatches[0]
+        : files.reduce((largest, file) => largest.size >= file.size ? largest : file, files[0])
+}
+
+watch(uploadedAssets, (files) => {
+    const current = files.find(file => file.identity === selectedFile.value?.identity)
+    if (current) selectedFile.value = current
+    else selectMainAssetFromDraft()
 }, { immediate: true })
 
 function isImageAsset(asset) {
@@ -468,6 +508,7 @@ onMounted(async () => {
         })) {
           await restoreWorkflowContext(workflowStore, resumeSessionId)
         }
+        selectMainAssetFromDraft()
         edmProvider.value = workflowStore.submissionMetadata?.edm_provider ?? "WebHDP"
         await Promise.all([
             fetchTemplates(),
@@ -508,7 +549,7 @@ async function refreshPreview() {
 
         if (useLiveData.value && workflowStore.isBatchMode && workflowStore.fileMetadataMap && selectedFile.value) {
             // In batch mode, metadata is per-file. Use the metadata for the currently selected file.
-            metadata = { ...workflowStore.fileMetadataMap[selectedFile.value.name] }
+            metadata = { ...workflowStore.fileMetadataMap[selectedFile.value.mainFileKey] }
         } else if (useLiveData.value && workflowStore.submissionMetadata) {
             metadata = { ...workflowStore.submissionMetadata }
         } else {
@@ -537,7 +578,7 @@ async function refreshPreview() {
             template_id: selectedTemplate.value.id,
             metadata: metadata,
             zenodo: zenodoMock,
-            main_file_key: selectedFile.value ? selectedFile.value.name : null // NEW
+            main_file_key: selectedFile.value?.mainFileKey || null
         })
 
         if (epoch !== previewEpoch) return
@@ -606,8 +647,10 @@ async function handleNext() {
 
         if (workflowStore.isBatchMode) {
           delete currentMeta.edm_main_file_key
-        } else if (selectedFile.value) {
-          currentMeta.edm_main_file_key = selectedFile.value.name
+        } else if (selectedFile.value?.mainFileKey) {
+          currentMeta.edm_main_file_key = selectedFile.value.mainFileKey
+        } else {
+          delete currentMeta.edm_main_file_key
         }
 
         currentMeta.edm_provider = edmProvider.value
