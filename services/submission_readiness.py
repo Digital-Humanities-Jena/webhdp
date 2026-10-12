@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import math
+from functools import lru_cache
 from pathlib import Path
 
 from flask import current_app
@@ -44,6 +46,17 @@ def file_fingerprint(path):
     if after.st_size == 0:
         raise ValueError('The source is empty. Upload a complete file.')
     return {'path': str(path.resolve()), 'bytes': after.st_size, 'sha256': digest.hexdigest()}
+
+
+@lru_cache(maxsize=2)
+def _component_contract(component):
+    paths = {key: Path(__file__).resolve().parents[1] / 'external_code' / key / 'runner.py'
+             for key in ('mesh_optimizer', 'geometric_lod_generator')}
+    # Console workers can import the application without retaining its root in sys.path.
+    spec = importlib.util.spec_from_file_location(f'webhdp_readiness_{component}', paths[component])
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 class ReadinessFieldError(ValueError):
@@ -270,16 +283,13 @@ class SubmissionReadiness:
                             except Exception as exc:
                                 issue(f'{standard.upper()} template: {exc}', 'mapping', source=effective, step=step)
                     if key == 'geometric_lod_generator':
-                        from external_code.geometric_lod_generator.runner import validate_parameters
                         known_parameters = {key: value for key, value in parameters.items() if ('parameter', key) not in unresolved}
-                        validate_parameters(known_parameters)
+                        _component_contract(key).validate_parameters(known_parameters)
                     if ('input', 'input_file') not in unresolved and key in {'geometric_lod_generator', 'mesh_optimizer', 'georeferencer'}:
                         if key == 'geometric_lod_generator':
-                            from external_code.geometric_lod_generator.runner import validate_request
-                            validate_request({'inputs': inputs, 'parameters': known_parameters})
+                            _component_contract(key).validate_request({'inputs': inputs, 'parameters': known_parameters})
                         else:
-                            from external_code.mesh_optimizer.runner import inspect_glb
-                            inspect_glb(Path(inputs['input_file']))
+                            _component_contract('mesh_optimizer').inspect_glb(Path(inputs['input_file']))
                     if key == 'georeferencer' and ('input', 'reference_files') not in unresolved:
                         refs = {path for path in inputs.get('reference_files', []) if Path(path).suffix.lower() in {'.tif', '.tiff'}}
                         if len(refs) != 1:

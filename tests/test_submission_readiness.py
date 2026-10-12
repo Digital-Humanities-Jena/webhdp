@@ -95,6 +95,31 @@ def test_default_render_readiness_uses_selected_files_instead_of_directory_defau
     assert PipelineRun.query.count() == 0
 
 
+@pytest.mark.parametrize('identifier', ['guarded_lod', 'guarded_mesh'])
+def test_component_readiness_does_not_require_repository_on_import_path(workspace, monkeypatch, identifier):
+    import sys
+    from services.submission_readiness import _component_contract
+    _, native, _, _, _, _, _, _ = workspace
+    if identifier == 'guarded_mesh':
+        validated = native.validate_component_manifest_path(str(ROOT / 'external_code' / 'mesh_optimizer'))
+        validated['manifest']['execution']['profiles'][0]['sif_sha256'] = 'a' * 64
+        native.import_component_from_manifest(validated['manifest'])
+        native.create_pipeline_version_from_config(identifier, {'name': 'Optimize model', 'steps': [{
+            'id': 'optimize', 'name': 'Optimize model', 'enabled': True, 'scope': 'record',
+            'component_ref': 'mesh_optimizer', 'execution_profile_ref': 'hpc_singularity',
+            'parameters': {}, 'input_bindings': [
+                {'kind': 'input', 'target': 'input_file', 'type': 'pipeline_source_file'}]}]})
+    _component_contract.cache_clear()
+    with monkeypatch.context() as isolated:
+        for name in list(sys.modules):
+            if name == 'external_code' or name.startswith('external_code.'):
+                isolated.delitem(sys.modules, name)
+        isolated.setattr(sys, 'path', [entry for entry in sys.path
+                                      if Path(entry or '.').resolve() != ROOT])
+        report = check(workspace, identifier)
+    assert report['ready'], report
+
+
 def test_render_readiness_still_rejects_an_explicit_directory_outside_session(workspace):
     from services.submission_readiness import SubmissionReadiness
     _, native, session, _, source, _, _, _ = workspace
