@@ -219,6 +219,20 @@ def test_queued_source_changes_fail_before_record_registration(workspace):
     assert retry['reused'] and not retry['result']['success']
 
 
+def test_queued_readiness_failure_preserves_source_guidance(workspace):
+    app, native, session, user, source, _, payload, _ = workspace
+    queued = native.create_pending_run('guarded_lod', session_id=session.id,
+        initiated_by_user_id=user.id, request_payload=payload)
+    source.unlink()
+    with pytest.raises(ValidationError, match='model.glb') as caught:
+        execute_submission_pipeline(identifier='guarded_lod',
+            local_file_paths=payload['local_file_paths'], db_session_id=session.id,
+            precreated_run_public_id=queued['run_id'])
+    assert caught.value.details['readiness']['blockers']
+    assert 'model.glb' in PipelineRun.query.one().error_message
+    app.project_service.resolve_token_for_session.assert_not_called()
+
+
 def test_metadata_and_spreadsheet_checks_cover_later_selected_records(workspace):
     _, native, session, _, source, metadata, payload, _ = workspace
     second = glb(source.with_name('second.glb'), scenes=[{'nodes': [0]}], nodes=[{'mesh': 0}])

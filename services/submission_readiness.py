@@ -366,7 +366,12 @@ class SubmissionReadiness:
 
     def require(self, report, token=None, *, saved_state=None):
         if not report['ready']:
-            raise ValidationError('Resolve the submission readiness blockers before processing.', details={'readiness': self.public(report)})
+            descriptions = []
+            for blocker in report['blockers'][:3]:
+                context = ' / '.join(blocker[key] for key in ('source', 'step') if blocker.get(key))
+                descriptions.append(f"{context}: {blocker['message']}" if context else blocker['message'])
+            message = 'Resolve the submission readiness blockers before processing. ' + '; '.join(descriptions)
+            raise ValidationError(message, details={'readiness': self.public(report)})
         if token:
             try:
                 saved_state = self.signer().loads(token, max_age=3600)
