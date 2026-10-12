@@ -1185,20 +1185,23 @@ def session_record_cache_key(
     resolved_hdpc_path: str,
     session_context: dict[str, Any],
 ) -> tuple[Any, ...]:
-    try:
-        stat = os.stat(resolved_hdpc_path)
-        mtime_ns = stat.st_mtime_ns
-        size = stat.st_size
-    except OSError:
-        mtime_ns = 0
-        size = 0
+    revisions = []
+    # Committed WAL writes can leave the main database unchanged until checkpointing.
+    for suffix in ('', '-wal'):
+        try:
+            stat = os.stat(resolved_hdpc_path + suffix)
+            revisions.append((stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size, stat.st_ino))
+        except OSError:
+            revisions.append(None)
     context_signature = json.dumps(session_context, sort_keys=True, default=str)
     return (
         session_row.id,
         resolved_hdpc_path,
-        mtime_ns,
-        size,
+        tuple(revisions),
         context_signature,
+        getattr(session_row, 'status', None),
+        getattr(session_row, 'user_id', None),
+        getattr(session_row, 'created_at', None),
     )
 
 

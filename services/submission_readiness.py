@@ -309,7 +309,9 @@ class SubmissionReadiness:
         from services.lod_artifact_service import validation_policy
         state = {'scope': 'submission-readiness-1', 'user': user_id, 'session': session.id, 'version': version.id,
                  'config': fingerprint(config), 'request': fingerprint({key: payload.get(key) for key in ('local_file_paths', 'record_ids', 'execution_items', 'is_sandbox', 'abort_on_critical_error', 'resume_from_run_id')}),
-                 'settings': fingerprint(lod_snapshot), 'sources': fingerprint(checked_files), 'records': fingerprint(checked_records),
+                 'settings': fingerprint(lod_snapshot), 'sources': fingerprint(checked_files),
+                 # Session progress changes do not change the selected records or their inputs.
+                 'records': fingerprint([{key: value for key, value in row.items() if key != 'session_status'} for row in checked_records]),
                  'effective_metadata': fingerprint(effective_metadata), 'validation_policy': fingerprint(validation_policy()),
                  'decisions': fingerprint(decisions), 'workspace': fingerprint({'environment': session.default_zenodo_environment, 'institution': session.institution_id, 'credential_preference': session.credential_preference})}
         yield {'type': 'progress', 'checked': len(selected), 'total': len(selected)}

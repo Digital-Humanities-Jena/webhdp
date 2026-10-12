@@ -358,6 +358,44 @@ def test_record_reruns_check_the_actual_record_metadata(workspace):
     assert not report['ready']
 
 
+def test_record_readiness_survives_session_status_changes_between_processes(workspace):
+    from services import dataset_integrity_service as integrity
+    from services.hdpc_local_service import create_local_record_with_metadata, get_hdpc_file_id_map
+    _, native, session, user, _, metadata, payload, _ = workspace
+    created = create_local_record_with_metadata(session.hdpc_path,
+        file_id=get_hdpc_file_id_map(session.hdpc_path)['model.glb'],
+        metadata=json.loads(metadata.field_value), is_sandbox=True)
+    options = {'local_file_paths': [], 'record_ids': [created['local_record_db_id']]}
+    report = check(workspace, 'metadata_only', **options)
+    assert report['ready'], report
+    session.status = 'failed'
+    db.session.commit()
+    assert integrity.read_session_records(session)[0]['session_status'] == 'failed'
+    integrity._SESSION_RECORD_CACHE.clear()
+    refreshed = check(workspace, 'metadata_only', **options)
+    assert refreshed['ready'], refreshed
+    native.require_submission_readiness('metadata_only', session.id,
+        {**payload, **options, 'readiness_token': report['readiness_token']}, user.id)
+
+
+def test_record_inventory_refreshes_after_wal_updates(workspace):
+    import sqlite3
+    from services.dataset_integrity_service import read_session_records
+    from services.hdpc_local_service import create_local_record_with_metadata, get_hdpc_file_id_map
+    _, _, session, _, _, metadata, _, _ = workspace
+    create_local_record_with_metadata(session.hdpc_path,
+        file_id=get_hdpc_file_id_map(session.hdpc_path)['model.glb'],
+        metadata=json.loads(metadata.field_value), is_sandbox=True)
+    with sqlite3.connect(session.hdpc_path) as writer:
+        writer.execute('PRAGMA journal_mode=WAL')
+        original_stat = Path(session.hdpc_path).stat()
+        assert read_session_records(session)[0]['record_title'] == 'Museum model'
+        writer.execute("UPDATE zenodo_records SET record_title = 'Revised model'")
+        writer.commit()
+        assert Path(session.hdpc_path).stat().st_mtime_ns == original_stat.st_mtime_ns
+        assert read_session_records(session)[0]['record_title'] == 'Revised model'
+
+
 def test_invalid_template_is_a_local_blocker_and_invalid_tokens_require_recheck(workspace):
     _, native, session, user, _, _, payload, _ = workspace
     from database.models import LodTemplate
