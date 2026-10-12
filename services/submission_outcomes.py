@@ -4,6 +4,30 @@ import logging
 import sqlite3
 
 
+def _step_outcome(step, saved, detail, result, *, has_effective_snapshot):
+    state = str(saved.get('status') or '').strip().lower()
+    if state.startswith('skipped'):
+        return 'skipped'
+    if state in {'failed', 'error'} or saved.get('success') is False:
+        return 'failed'
+    if saved.get('success') is True or state in {'completed', 'success', 'generated'}:
+        return 'completed'
+    if step.get('enabled') is False:
+        return 'skipped'
+    if not has_effective_snapshot:
+        component = step.get('component_ref') or step['id']
+        aggregate_key = {'fast_renderer': 'render', 'any_to_usdz': 'usdz'}.get(component)
+        aggregate = detail.get(aggregate_key) if aggregate_key else None
+        aggregate = aggregate if isinstance(aggregate, dict) else {}
+        aggregate_state = str(aggregate.get('status') or '').lower()
+        if not aggregate.get('error') and (
+            aggregate_state.startswith('skipped_disabled')
+            or (aggregate_state.startswith('skipped') and result.get('success') is True and not detail.get('error'))
+        ):
+            return 'skipped'
+    return 'not_started'
+
+
 def summarize_outcomes(result, session, *, run_id=None, config=None, recoverable=False):
     from services.dataset_integrity_service import read_session_records
     current = {}
@@ -12,7 +36,9 @@ def summarize_outcomes(result, session, *, run_id=None, config=None, recoverable
             current = {int(record['local_record_id']): record for record in read_session_records(session)}
         except (OSError, sqlite3.Error, ValueError):
             logging.getLogger(__name__).warning('Current record state is unavailable for session %s.', session.id)
-    configured = [step for step in (config or {}).get('steps', []) if step.get('enabled', True)]
+    effective_steps = (result or {}).get('effective_steps')
+    has_effective_snapshot = isinstance(effective_steps, list)
+    configured = effective_steps if has_effective_snapshot else (config or {}).get('steps', [])
     records = []
     for detail in (result or {}).get('details', []):
         if not session or not isinstance(detail, dict) or not detail.get('record_id'):
@@ -20,12 +46,13 @@ def summarize_outcomes(result, session, *, run_id=None, config=None, recoverable
         rid = int(detail['record_id'])
         local = current.get(rid, {})
         saved_steps = detail.get('step_results') or {}
-        definitions = configured or [{'id': key, 'name': key.replace('_', ' ').capitalize()} for key in saved_steps]
+        definitions = [step for step in configured if isinstance(step, dict) and step.get('id')]
+        configured_ids = {step['id'] for step in definitions}
+        definitions += [{'id': key, 'name': key.replace('_', ' ').capitalize()} for key in saved_steps if key not in configured_ids]
         steps = []
         for step in definitions:
             saved = saved_steps.get(step['id'], {})
-            state = str(saved.get('status') or '')
-            status = 'skipped' if state.startswith('skipped') else 'failed' if saved.get('success') is False else 'completed' if saved.get('success') else 'not_started'
+            status = _step_outcome(step, saved, detail, result or {}, has_effective_snapshot=has_effective_snapshot)
             steps.append({'id': step['id'], 'name': step.get('name') or step['id'],
                           'status': status, 'issue': saved.get('error'), 'reused': bool(saved.get('reused'))})
         attention = bool(detail.get('error')) or any(step['status'] in {'failed', 'not_started'} for step in steps)

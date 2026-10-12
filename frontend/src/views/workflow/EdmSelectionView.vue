@@ -254,8 +254,9 @@
 
                         <!-- Details (Horizontal Grid) -->
                         <div class="mt-4 border-t border-gray-100 pt-4">
+                            <p v-if="validationScope" class="mb-2 text-xs text-gray-600">{{ validationScope }}</p>
                             <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
-                                <div v-for="(res, type) in validationResult.details" :key="type" class="flex flex-col items-center justify-center p-2 bg-gray-50 rounded-lg border border-gray-100">
+                                <div v-for="(res, type) in validationChecks" :key="type" class="flex flex-col items-center justify-center p-2 bg-gray-50 rounded-lg border border-gray-100">
                                     <span class="text-[9px] uppercase font-bold text-gray-400">{{ formatValidationStep(type) }}</span>
                                     <span :class="['text-[10px] font-bold', !res || res.skipped ? 'text-gray-500' : validationDetailPassed(res) ? 'text-green-600' : 'text-red-600']">
                                         {{ !res || res.skipped ? 'SKIPPED' : validationDetailPassed(res) ? 'PASS' : 'FAIL' }}
@@ -332,6 +333,12 @@ const previewError = ref(null)
 
 const systemConfig = ref(null)
 const validationResult = ref(null)
+const validationScope = computed(() => typeof validationResult.value?.details?.scope === 'string' ? validationResult.value.details.scope : '')
+const validationChecks = computed(() => Object.fromEntries(
+    Object.entries(validationResult.value?.details || {}).filter(([, result]) => result === null || (
+        typeof result === 'object' && !Array.isArray(result) && (typeof result.valid === 'boolean' || typeof result.skipped === 'boolean')
+    ))
+))
 const showWarnings = ref(false)
 const useLiveData = ref(true)
 const localValidatorEnabled = computed(() => Boolean(systemConfig.value?.enable_local_edm_validation ?? systemConfig.value?.enable_metis_validation))

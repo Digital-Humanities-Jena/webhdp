@@ -95,6 +95,7 @@ describe('SessionRecordsView', () => {
             record_title: 'Published Model',
             record_status: 'published',
             zenodo_record_id: 701,
+            is_sandbox: true,
             provenance: {
               mapping_field_count: 2,
             },
@@ -144,7 +145,7 @@ describe('SessionRecordsView', () => {
     expect(wrapper.text()).toContain('Workspace Intelligence')
     expect(wrapper.text()).toContain('Published Model')
     expect(wrapper.text()).toContain('Dataset Workspace')
-    expect(mocked.buildDatasetRoute).toHaveBeenCalledWith('dataset-42')
+    expect(mocked.buildDatasetRoute).toHaveBeenCalledWith('dataset-42', { environment: 'sandbox' })
 
     const copyButton = wrapper.findAll('button').find((button) => button.text() === 'Copy Zenodo IDs')
     await copyButton.trigger('click')

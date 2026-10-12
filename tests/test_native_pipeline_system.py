@@ -1544,6 +1544,11 @@ class NativePipelineSystemTestCase(unittest.TestCase):
 
             result = self.native_service.execute_registered_submission("generic_pipeline", execution_context)
             pipeline_runs = PipelineRun.query.all()
+            self.assertEqual(json.loads(pipeline_runs[0].result_json)["effective_steps"], result["effective_steps"])
+            self.assertEqual(
+                {step["id"]: step["enabled"] for step in result["effective_steps"]},
+                {step["id"]: step.get("enabled", True) for step in execution_context["steps_map"].values()},
+            )
             step_runs = StepRun.query.all()
             artifacts = ExecutionArtifact.query.order_by(ExecutionArtifact.name.asc()).all()
 

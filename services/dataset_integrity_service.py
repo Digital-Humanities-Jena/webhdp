@@ -1426,6 +1426,94 @@ def collect_records_for_dataset(
     return filtered, sessions
 
 
+def get_session_dataset_keys(session_row: DBSession, records: list[dict[str, Any]]) -> set[str]:
+    """Retain dataset identity before a session has prepared any records."""
+    context = get_session_dataset_context(session_row)
+    keys = {
+        normalize_dataset_key(record.get("dataset_key"))
+        for record in records
+        if normalize_dataset_key(record.get("dataset_key"))
+    }
+    context_key = normalize_dataset_key(context.get("dataset_key"))
+    if context_key:
+        keys.add(context_key)
+    for candidate in context.get("prepared_candidate_files") or []:
+        if not isinstance(candidate, dict):
+            continue
+        candidate_key = normalize_dataset_key(
+            candidate.get("dataset_key") or extract_dataset_key(candidate.get("source_file_path"))
+        )
+        if candidate_key:
+            keys.add(candidate_key)
+    return keys or {infer_session_dataset_key(session_row)}
+
+
+def collect_dataset_workspaces(
+    user_id: int | None = None,
+    *,
+    include_all_sessions: bool = False,
+) -> dict[str, dict[str, Any]]:
+    """Build dataset existence and environment information within the caller's session scope."""
+    records, sessions = collect_dataset_records(user_id, include_all_sessions=include_all_sessions)
+    records_by_session: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    workspaces: dict[str, dict[str, Any]] = {}
+    for record in records:
+        records_by_session[int(record["session_id"])].append(record)
+    for session_row in sessions:
+        session_records = records_by_session.get(session_row.id, [])
+        seen_dataset_keys: set[str] = set()
+        for dataset_key in sorted(get_session_dataset_keys(session_row, session_records)):
+            key = normalize_dataset_key_lower(dataset_key)
+            if key in seen_dataset_keys:
+                continue
+            seen_dataset_keys.add(key)
+            workspace = workspaces.setdefault(
+                key,
+                {
+                    "dataset_key": dataset_key,
+                    "records": [],
+                    "sessions": [],
+                    "session_environments": {},
+                    "available_environments": set(),
+                },
+            )
+            dataset_records = [record for record in session_records if record.get("dataset_key_lower") == key]
+            environments = {
+                "sandbox" if bool(record.get("is_sandbox")) else "production"
+                for record in dataset_records
+            }
+            if not environments:
+                default_environment = getattr(session_row, "default_zenodo_environment", None)
+                environments.add("production" if default_environment == "production" else "sandbox")
+            workspace["records"].extend(dataset_records)
+            workspace["sessions"].append(session_row)
+            workspace["session_environments"][session_row.id] = environments
+            workspace["available_environments"].update(environments)
+    return workspaces
+
+
+def scope_dataset_workspace(workspace: dict[str, Any], environment: str) -> dict[str, Any]:
+    """An empty environment selection does not make an accessible dataset nonexistent."""
+    normalized_environment = normalize_environment(environment, default="production")
+    records = filter_records_by_environment(workspace["records"], normalized_environment)
+    sessions = [
+        session_row for session_row in workspace["sessions"]
+        if normalized_environment == "all"
+        or normalized_environment in workspace["session_environments"][session_row.id]
+    ]
+    return {
+        "dataset_key": workspace["dataset_key"],
+        "records": records,
+        "sessions": sessions,
+        "available_environments": sorted(workspace["available_environments"]),
+        "empty_reason": None if records else (
+            "no_records_in_environment"
+            if normalized_environment != "all" and normalized_environment not in workspace["available_environments"]
+            else "no_records"
+        ),
+    }
+
+
 def choose_authoritative_session_id(records: list[dict[str, Any]]) -> int | None:
     by_session: dict[int, dict[str, Any]] = {}
     for record in records:
@@ -1469,6 +1557,7 @@ def classify_draft_kind(record: dict[str, Any], records_for_path: list[dict[str,
         return "not_draft"
     if record.get("concept_rec_id") and any(
         other.get("record_status") == "published"
+        and bool(other.get("is_sandbox")) == bool(record.get("is_sandbox"))
         and other.get("concept_rec_id")
         and other.get("concept_rec_id") == record.get("concept_rec_id")
         for other in records_for_path
@@ -1479,7 +1568,12 @@ def classify_draft_kind(record: dict[str, Any], records_for_path: list[dict[str,
     return "partial_draft"
 
 
-def build_dataset_summary(dataset_key: str, records: list[dict[str, Any]]) -> dict[str, Any]:
+def build_dataset_summary(
+    dataset_key: str,
+    records: list[dict[str, Any]],
+    *,
+    sessions: list[DBSession] | None = None,
+) -> dict[str, Any]:
     authoritative_session_id = choose_authoritative_session_id(records)
     by_path: dict[str, list[dict[str, Any]]] = defaultdict(list)
     environment_breakdown: dict[str, dict[str, int]] = {
@@ -1524,7 +1618,10 @@ def build_dataset_summary(dataset_key: str, records: list[dict[str, Any]]) -> di
     duplicate_published_paths = sum(
         1
         for records_for_path in by_path.values()
-        if sum(1 for record in records_for_path if record.get("record_status") == "published") > 1
+        if any(
+            sum(1 for record in records_for_path if record.get("record_status") == "published" and bool(record.get("is_sandbox")) == is_sandbox) > 1
+            for is_sandbox in (False, True)
+        )
     )
     unpublished_paths = sum(
         1
@@ -1539,6 +1636,16 @@ def build_dataset_summary(dataset_key: str, records: list[dict[str, Any]]) -> di
                 draft_kind_counter[draft_kind] += 1
 
     session_summaries: dict[int, dict[str, Any]] = {}
+    for session_row in sessions or []:
+        session_summaries[session_row.id] = {
+            "session_id": session_row.id,
+            "published_records": 0,
+            "published_source_paths": set(),
+            "draft_records": 0,
+            "prepared_records": 0,
+            "total_records": 0,
+            "latest_activity": session_row.created_at.isoformat() if session_row.created_at else None,
+        }
     for record in records:
         summary = session_summaries.setdefault(
             int(record["session_id"]),
@@ -1569,7 +1676,7 @@ def build_dataset_summary(dataset_key: str, records: list[dict[str, Any]]) -> di
     return {
         "dataset_key": dataset_key,
         "authoritative_session_id": authoritative_session_id,
-        "session_count": len({record["session_id"] for record in records}),
+        "session_count": len(session_summaries),
         "record_count": len(records),
         "source_path_count": len(by_path),
         "published_source_path_count": sum(
@@ -2214,15 +2321,15 @@ def build_duplicate_check_payload(
 
 
 def build_duplicate_groups(dataset_key: str, records: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    grouped: dict[tuple[str, bool], list[dict[str, Any]]] = defaultdict(list)
     for record in records:
         path_key = str(record.get("normalized_source_file_path") or "").strip().lower()
         if not path_key:
             continue
-        grouped[path_key].append(record)
+        grouped[(path_key, bool(record.get("is_sandbox")))].append(record)
 
     groups: list[dict[str, Any]] = []
-    for path_key, records_for_path in grouped.items():
+    for (path_key, is_sandbox), records_for_path in grouped.items():
         published_count = sum(1 for record in records_for_path if record.get("record_status") == "published")
         if len(records_for_path) < 2 and published_count < 2:
             continue
@@ -2240,6 +2347,7 @@ def build_duplicate_groups(dataset_key: str, records: list[dict[str, Any]]) -> l
         groups.append(
             {
                 "dataset_key": dataset_key,
+                "environment": "sandbox" if is_sandbox else "production",
                 "normalized_source_file_path": sorted_records[0].get("normalized_source_file_path"),
                 "conflict_class": "published_duplicate" if published_count > 1 else "draft_or_prepared_overlap",
                 "record_count": len(records_for_path),
@@ -2346,7 +2454,20 @@ def build_dataset_export_bundle(
 ) -> dict[str, Any]:
     chosen_authoritative_session_id = authoritative_session_id if authoritative_session_id is not None else choose_authoritative_session_id(records)
     if chosen_authoritative_session_id is None:
-        raise ValueError(f"No dataset records available for {dataset_key}")
+        return {
+            "dataset_key": dataset_key,
+            "authoritative_session_id": None,
+            "primary": {
+                "record_count": 0,
+                "json_payload": json_payload([], None, dataset_key),
+                "csv_text": records_to_csv_text([]),
+            },
+            "secondary": {
+                "record_count": 0,
+                "json_payload": json_payload([], None, dataset_key),
+                "csv_text": records_to_csv_text([]),
+            },
+        }
 
     authoritative_published = [
         record

@@ -289,7 +289,7 @@
                   <div class="text-right text-xs text-slate-500">
                     <p>{{ recordFileStatusLabel(file.upload_status || file.status || 'pending') }}</p>
                     <p v-if="file.pipeline_source || file.step_source">{{ file.pipeline_source || 'unknown' }} / {{ file.step_source || 'unknown' }}</p>
-                    <button v-if="file.absolute_path && ['mesh_optimizer', 'georeferencer', 'fast_renderer'].includes(file.pipeline_source)"
+                    <button v-if="canDownloadGeneratedFile(file)"
                       type="button" :disabled="!!downloadingFile" class="mt-2 text-indigo-700 underline disabled:opacity-50"
                       @click="downloadGeneratedFile(file)">{{ downloadingFile === file.absolute_path ? 'Downloading…' : 'Download file' }}</button>
                   </div>
@@ -447,6 +447,10 @@ const reconciliationDraftId = ref('')
 const reconciliationError = ref('')
 const unresolvedOperations = computed(() => detail.value?.zenodo_status?.unresolved_operations || [])
 const canEditRecord = computed(() => detail.value?.session?.permissions?.can_edit !== false && detail.value?.session?.access_mode !== 'explorer_only')
+const generatedFileSources = new Set(['render', 'mesh_optimizer', 'georeferencer', 'fast_renderer'])
+const canDownloadGeneratedFile = (file) => Boolean(
+  file.absolute_path && (generatedFileSources.has(file.pipeline_source) || generatedFileSources.has(file.step_source))
+)
 async function reconcileRecord(confirmAbsence, confirmUnpublished = false) {
   if (reconciliationBusy.value) return
   if (confirmAbsence && !window.confirm('Only continue after checking your Zenodo uploads and confirming that no draft was created for this request. Allow another draft creation attempt?')) return

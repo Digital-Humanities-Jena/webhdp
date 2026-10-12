@@ -3506,6 +3506,14 @@ class NativePipelineSystemService:
             if merged_step.get("enabled", True):
                 enabled_steps.append(merged_step)
         execution_context["steps_map"] = merged_steps_map
+        effective_steps = [
+            {"id": step["id"], "name": step.get("name") or step["id"],
+             "component_ref": step.get("component_ref") or step["id"], "enabled": bool(step.get("enabled", True))}
+            for step in merged_steps_map.values()
+        ]
+        saved_result = _json_loads(pipeline_run.result_json, {})
+        saved_result["effective_steps"] = effective_steps
+        pipeline_run.result_json = _json_dumps(saved_result)
 
         record_contexts: List[Dict[str, Any]] = []
         from services import pipeline_checkpoints as checkpoints
@@ -3672,6 +3680,7 @@ class NativePipelineSystemService:
         overall_success = len(failed_records) == 0
         exec_data: Dict[str, Any] = {
             "success": overall_success,
+            "effective_steps": effective_steps,
             "details": processed_results,
             "summary": {
                 "total_records": total_records,

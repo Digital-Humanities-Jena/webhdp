@@ -21,6 +21,47 @@ it('never shows successful validation when the validator is unavailable', async 
   expect(wrapper.text()).not.toContain('Available checks passed')
   wrapper.unmount()
 })
+it('shows scope as guidance and only labels actual validation checks', async () => {
+  const scope = 'Enabled XML, schema and business checks. Skipped checks have not been performed.'
+  api.post.mockImplementation(url => Promise.resolve({ success: true, data: url.endsWith('/validate') ? {
+    valid: true,
+    details: {
+      scope,
+      basic: { valid: true },
+      xsd: { valid: true },
+      schematron: { valid: true, skipped: true },
+      business: { valid: true },
+      remote: null,
+      note: 'Informational text',
+      count: 4,
+    },
+  } : { xml: '<rdf/>' } }))
+  const wrapper = mountSelection()
+  await flushPromises()
+  expect(wrapper.text()).toContain(scope)
+  expect(wrapper.text()).toContain('Available checks passed')
+  const checks = wrapper.findAll('div.flex.flex-col.items-center.justify-center')
+  expect(checks.map(check => check.findAll('span').map(label => label.text()))).toEqual([
+    ['Basic', 'PASS'], ['Xsd', 'PASS'], ['Schematron', 'SKIPPED'], ['Business', 'PASS'], ['Remote', 'SKIPPED'],
+  ])
+  expect(checks.some(check => check.text().includes('Scope') || check.text().includes('FAIL'))).toBe(false)
+  wrapper.unmount()
+})
+it('keeps genuine failed checks visible', async () => {
+  api.post.mockImplementation(url => Promise.resolve({ success: true, data: url.endsWith('/validate') ? {
+    valid: false,
+    errors: ['Schema has an unexpected property'],
+    details: { scope: 'Checks enabled', basic: { valid: true }, xsd: { valid: false } },
+  } : { xml: '<rdf/>' } }))
+  const wrapper = mountSelection()
+  await flushPromises()
+  expect(wrapper.text()).toContain('Issues Found')
+  expect(wrapper.text()).toContain('Schema has an unexpected property')
+  expect(wrapper.findAll('div.flex.flex-col.items-center.justify-center').map(check => check.findAll('span').map(label => label.text()))).toEqual([
+    ['Basic', 'PASS'], ['Xsd', 'FAIL'],
+  ])
+  wrapper.unmount()
+})
 it('ignores a validation response for a previously selected template', async () => {
   let resolveFirst
   api.post.mockImplementation((url, payload) => {

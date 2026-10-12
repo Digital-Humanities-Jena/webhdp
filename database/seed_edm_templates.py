@@ -264,11 +264,25 @@ MODEL_3D_TEMPLATE = '''<?xml version="1.0" encoding="UTF-8"?>
   {% if main_file %}
   <edm:WebResource rdf:about="{{ main_file.content_url }}">
     <dc:format>{{ main_file.mime_type | default('model/gltf-binary') }}</dc:format>
+    <dc:type rdf:resource="{{ helpers.map_3d_type(metadata) }}"/>
     {% if metadata.extent %}
     <dcterms:extent>{{ metadata.extent }}</dcterms:extent>
     {% endif %}
 
     <edm:rights rdf:resource="{{ helpers.map_license(metadata.license) }}"/>
+    {% if metadata.point_count %}
+    <edm:pointCount>{{ metadata.point_count }}</edm:pointCount>
+    {% endif %}
+
+    {% if metadata.polygon_count %}
+    <edm:polygonCount>{{ metadata.polygon_count }}</edm:polygonCount>
+    {% endif %}
+
+    {% if metadata.vertex_count %}
+    <edm:vertexCount>{{ metadata.vertex_count }}</edm:vertexCount>
+    {% endif %}
+
+    <edm:type>3D</edm:type>
     {% set digital_source_type_uri = helpers.normalize_digital_source_type_uri(metadata.digital_source_type) %}
     {% if digital_source_type_uri %}
     <schema:digitalSourceType rdf:resource="{{ digital_source_type_uri }}"/>
@@ -277,20 +291,6 @@ MODEL_3D_TEMPLATE = '''<?xml version="1.0" encoding="UTF-8"?>
     {% if intended_usage_uri %}
     <edm:intendedUsage rdf:resource="{{ intended_usage_uri }}"/>
     {% endif %}
-    <edm:type>3D</edm:type>
-    {% if metadata.vertex_count %}
-    <edm:vertexCount>{{ metadata.vertex_count }}</edm:vertexCount>
-    {% endif %}
-
-    {% if metadata.polygon_count %}
-    <edm:polygonCount>{{ metadata.polygon_count }}</edm:polygonCount>
-    {% endif %}
-
-    {% if metadata.point_count %}
-    <edm:pointCount>{{ metadata.point_count }}</edm:pointCount>
-    {% endif %}
-
-    <dc:type rdf:resource="{{ helpers.map_3d_type(metadata) }}"/>
   </edm:WebResource>
 
   {% if helpers.is_oembed(main_file.viewer_url) %}

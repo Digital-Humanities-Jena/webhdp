@@ -3,12 +3,13 @@ import os
 import sqlite3
 import tempfile
 import unittest
+from datetime import datetime, timedelta
 
 from flask import Flask
 from flask_jwt_extended import JWTManager, create_access_token
 
 from database.database import db
-from database.models import File, Session as DBSession, Submission, User, UserMetadata, UserRole
+from database.models import File, PipelineDefinition, PipelineRun, PipelineRunStatus, PipelineVersion, Session as DBSession, Submission, User, UserMetadata, UserRole
 from routes.session_routes import WORKFLOW_STATE_FIELD, session_bp
 from routes.submission_routes import submission_bp
 
@@ -283,6 +284,89 @@ class TestSubmissionRecordAccounting(unittest.TestCase):
 
     def _headers(self):
         return {"Authorization": f"Bearer {self.token}"}
+
+    def _add_native_run(self, details, *, status="completed", record_ids=None, started_at=None, error=None):
+        with self.app.app_context():
+            definition = PipelineDefinition(identifier="native_render", name="Native render")
+            db.session.add(definition)
+            db.session.flush()
+            version = PipelineVersion(pipeline_definition_id=definition.id, version="1.0.0", config_json="{}", config_hash="fixture")
+            db.session.add(version)
+            db.session.flush()
+            run = PipelineRun(
+                pipeline_definition_id=definition.id, pipeline_version_id=version.id,
+                session_id=self.session_id, initiated_by_user_id=self.user_id,
+                status=PipelineRunStatus(status), started_at=started_at or datetime.utcnow(),
+                completed_at=datetime.utcnow() if status in {"completed", "failed"} else None,
+                request_json=json.dumps({"record_ids": record_ids or []}),
+                result_json=json.dumps({"success": status == "completed", "details": details}), error_message=error,
+            )
+            db.session.add(run)
+            db.session.commit()
+            return run.public_id
+
+    def test_native_run_supplies_current_record_processing_and_exact_version_identity(self):
+        with sqlite3.connect(os.path.join(self.temp_dir.name, "session.hdpc")) as conn:
+            conn.execute("INSERT INTO zenodo_records SELECT 5, source_file_id, 'Draft A v2', 'draft', record_metadata_json, '9005', concept_rec_id, NULL, is_sandbox, created_timestamp, last_updated_timestamp FROM zenodo_records WHERE record_id = 4")
+            conn.execute("INSERT INTO record_files_map SELECT 5, file_id, file_purpose, upload_status, upload_timestamp, file_path FROM record_files_map WHERE record_id = 4")
+        run_id = self._add_native_run([{
+            "record_id": 5, "file_path": self.fixture_paths["source_paths"]["model_a.glb"],
+            "render": {"status": "completed", "success": True},
+            "usdz": {"status": "skipped", "success": False},
+            "edm": {"status": "generated", "success": True},
+            "iiif": {"status": "generated", "success": True},
+            "mets": {"status": "generated", "success": True},
+            "step_results": {"fast_renderer": {"status": "completed", "success": True}},
+        }])
+        response = self.client.get(f"/api/v1/sessions/{self.session_id}/records", headers=self._headers())
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()["data"]
+        self.assertEqual(payload["processing_execution"]["run_id"], run_id)
+        self.assertEqual(payload["summary"]["processed_records"], 1)
+        records = {record["local_record_id"]: record for record in payload["records"]}
+        self.assertFalse(records[4]["selected_for_submission"])
+        self.assertFalse(records[4]["processed_in_latest_submission"])
+        self.assertTrue(records[5]["processed_in_latest_submission"])
+        detail = self.client.get(f"/api/v1/sessions/{self.session_id}/records/5", headers=self._headers()).get_json()["data"]["record"]
+        self.assertEqual(detail["processing"]["execution"]["source"], "native_pipeline")
+        self.assertEqual(detail["processing"]["execution"]["run_id"], run_id)
+        for step in ["render", "edm", "iiif", "mets"]:
+            self.assertEqual(detail["processing"][f"{step}_status"], "completed")
+        self.assertEqual(detail["processing"]["usdz_status"], "skipped")
+
+    def test_latest_failed_native_run_preserves_its_record_error_without_reusing_old_success(self):
+        run_id = self._add_native_run([{
+            "record_id": 3, "file_path": self.fixture_paths["source_paths"]["model_c.glb"],
+            "render": {"status": "failed", "success": False}, "error": "Renderer unavailable",
+            "step_results": {"fast_renderer": {"status": "failed", "success": False}},
+        }], status="failed", record_ids=[3], error="One record failed")
+        payload = self.client.get(f"/api/v1/sessions/{self.session_id}/records", headers=self._headers()).get_json()["data"]
+        records = {record["local_record_id"]: record for record in payload["records"]}
+        self.assertEqual(payload["processing_execution"]["run_id"], run_id)
+        self.assertEqual(records[3]["processing"]["render_status"], "failed")
+        self.assertEqual(records[3]["processing"]["error"], "Renderer unavailable")
+        self.assertFalse(records[4]["processed_in_latest_submission"])
+
+    def test_pending_native_run_selects_exact_records_without_claiming_processing_completed(self):
+        self._add_native_run([], status="pending", record_ids=[3])
+        payload = self.client.get(f"/api/v1/sessions/{self.session_id}/records", headers=self._headers()).get_json()["data"]
+        records = {record["local_record_id"]: record for record in payload["records"]}
+        self.assertEqual(payload["summary"]["processed_records"], 0)
+        self.assertTrue(records[3]["selected_for_submission"])
+        self.assertEqual(records[3]["display_status"], "selected_not_processed")
+        self.assertTrue(records[2]["available_not_selected"])
+        self.assertFalse(records[4]["processed_in_latest_submission"])
+
+    def test_newer_legacy_submission_is_not_overridden_by_an_older_native_run(self):
+        with self.app.app_context():
+            legacy_started_at = db.session.get(Submission, self.submission_id).created_at
+        self._add_native_run([{ "record_id": 3, "render": {"status": "failed"} }], status="failed", started_at=legacy_started_at - timedelta(minutes=1))
+        payload = self.client.get(f"/api/v1/sessions/{self.session_id}/records", headers=self._headers()).get_json()["data"]
+        self.assertEqual(payload["processing_execution"]["source"], "submission")
+        self.assertEqual(payload["summary"]["processed_records"], 1)
+        processed = next(record for record in payload["records"] if record["processed_in_latest_submission"])
+        self.assertEqual(processed["local_record_id"], 4)
+        self.assertEqual(processed["processing"]["render_status"], "completed")
 
     def test_session_records_deduplicate_processed_and_prepared_entries(self):
         response = self.client.get(f"/api/v1/sessions/{self.session_id}/records", headers=self._headers())

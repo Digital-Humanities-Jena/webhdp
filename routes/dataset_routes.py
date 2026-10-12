@@ -16,15 +16,16 @@ from services.dataset_integrity_service import (
     build_duplicate_check_payload,
     build_duplicate_groups,
     collect_dataset_records,
+    collect_dataset_workspaces,
     collect_records_for_dataset,
     extract_dataset_key,
     filter_records_by_environment,
-    get_session_dataset_context,
     normalize_dataset_key,
     normalize_dataset_key_lower,
     normalize_environment,
     normalize_source_path,
     scan_candidate_files_for_session,
+    scope_dataset_workspace,
 )
 from services.session_access_service import can_view_session, get_accessible_sessions
 
@@ -59,49 +60,18 @@ def _visible_session_ids_for_user(user: User | None) -> set[int]:
 
 def _build_dataset_catalog(user_id: int, *, include_all_sessions: bool) -> list[dict]:
     environment = normalize_environment(request.args.get("environment"), default="production")
-    all_records, sessions = collect_dataset_records(
+    workspaces = collect_dataset_workspaces(
         None if include_all_sessions else user_id,
         include_all_sessions=include_all_sessions,
     )
-    by_dataset: dict[str, list[dict]] = {}
-    for record in all_records:
-        if environment != "all" and not (
-            bool(record.get("is_sandbox")) if environment == "sandbox" else not bool(record.get("is_sandbox"))
-        ):
-            continue
-        dataset_key = normalize_dataset_key(record.get("dataset_key"))
-        if not dataset_key:
-            continue
-        by_dataset.setdefault(dataset_key, []).append(record)
-
-    for session_row in sessions:
-        context = get_session_dataset_context(session_row)
-        dataset_key = normalize_dataset_key(context.get("dataset_key"))
-        if not dataset_key:
-            continue
-        by_dataset.setdefault(dataset_key, [])
-
     catalog = []
-    for dataset_key, records in by_dataset.items():
-        summary = build_dataset_summary(dataset_key, records) if records else {
-            "dataset_key": dataset_key,
-            "authoritative_session_id": None,
-            "session_count": 0,
-            "record_count": 0,
-            "source_path_count": 0,
-            "published_source_path_count": 0,
-            "unpublished_source_path_count": 0,
-            "duplicate_published_source_path_count": 0,
-            "primary_record_count": 0,
-            "primary_missing_doi_count": 0,
-            "primary_missing_glb_link_count": 0,
-            "draft_breakdown": {},
-            "environment_breakdown": {
-                "sandbox": {"record_count": 0, "source_path_count": 0, "published_source_path_count": 0},
-                "production": {"record_count": 0, "source_path_count": 0, "published_source_path_count": 0},
-            },
-            "sessions": [],
-        }
+    for workspace in workspaces.values():
+        if environment != "all" and environment not in workspace["available_environments"]:
+            continue
+        scoped = scope_dataset_workspace(workspace, environment)
+        summary = build_dataset_summary(scoped["dataset_key"], scoped["records"], sessions=scoped["sessions"])
+        summary["available_environments"] = scoped["available_environments"]
+        summary["empty_reason"] = scoped["empty_reason"]
         catalog.append(summary)
     catalog.sort(
         key=lambda item: (
@@ -112,6 +82,15 @@ def _build_dataset_catalog(user_id: int, *, include_all_sessions: bool) -> list[
         reverse=True,
     )
     return catalog
+
+
+def _load_dataset_workspace(user: User, dataset_key: str, environment: str) -> dict | None:
+    workspaces = collect_dataset_workspaces(
+        None if _is_privileged(user) else user.id,
+        include_all_sessions=_is_privileged(user),
+    )
+    workspace = workspaces.get(normalize_dataset_key_lower(dataset_key))
+    return scope_dataset_workspace(workspace, environment) if workspace is not None else None
 
 
 def _parse_int_arg(value: object, *, default: int, minimum: int = 1, maximum: int = 100) -> int:
@@ -355,16 +334,13 @@ def get_dataset_summary(dataset_key: str):
         return APIResponse.unauthorized()
     normalized_dataset_key = normalize_dataset_key(dataset_key)
     environment = normalize_environment(request.args.get("environment"), default="production")
-    records, _ = collect_records_for_dataset(
-        normalized_dataset_key,
-        None if _is_privileged(user) else user.id,
-        include_all_sessions=_is_privileged(user),
-        environment=environment,
-    )
-    if not records:
+    workspace = _load_dataset_workspace(user, normalized_dataset_key, environment)
+    if workspace is None:
         return APIResponse.not_found("Dataset not found")
-    summary = build_dataset_summary(normalized_dataset_key, records)
+    summary = build_dataset_summary(normalized_dataset_key, workspace["records"], sessions=workspace["sessions"])
     summary["environment"] = environment
+    summary["available_environments"] = workspace["available_environments"]
+    summary["empty_reason"] = workspace["empty_reason"]
     return APIResponse.success(data=summary)
 
 
@@ -376,14 +352,10 @@ def get_dataset_duplicates(dataset_key: str):
         return APIResponse.unauthorized()
     normalized_dataset_key = normalize_dataset_key(dataset_key)
     environment = normalize_environment(request.args.get("environment"), default="production")
-    records, _ = collect_records_for_dataset(
-        normalized_dataset_key,
-        None if _is_privileged(user) else user.id,
-        include_all_sessions=_is_privileged(user),
-        environment=environment,
-    )
-    if not records:
+    workspace = _load_dataset_workspace(user, normalized_dataset_key, environment)
+    if workspace is None:
         return APIResponse.not_found("Dataset not found")
+    records = workspace["records"]
     groups = build_duplicate_groups(normalized_dataset_key, records)
     groups, normalized_path_filter = _filter_duplicate_groups_by_path(
         normalized_dataset_key,
@@ -397,6 +369,8 @@ def get_dataset_duplicates(dataset_key: str):
         data={
             "dataset_key": normalized_dataset_key,
             "environment": environment,
+            "available_environments": workspace["available_environments"],
+            "empty_reason": workspace["empty_reason"],
             "authoritative_session_id": summary.get("authoritative_session_id"),
             "path_filter": normalized_path_filter or None,
             "group_count": len(groups),
@@ -497,14 +471,10 @@ def export_dataset(dataset_key: str):
         except (TypeError, ValueError):
             return APIResponse.validation_error("authoritative_session_id must be an integer")
 
-    records, _ = collect_records_for_dataset(
-        normalized_dataset_key,
-        None if _is_privileged(user) else user.id,
-        include_all_sessions=_is_privileged(user),
-        environment=environment,
-    )
-    if not records:
+    workspace = _load_dataset_workspace(user, normalized_dataset_key, environment)
+    if workspace is None:
         return APIResponse.not_found("Dataset not found")
+    records = workspace["records"]
 
     bundle = build_dataset_export_bundle(
         normalized_dataset_key,
@@ -514,6 +484,8 @@ def export_dataset(dataset_key: str):
     response_data = {
         "dataset_key": normalized_dataset_key,
         "environment": environment,
+        "available_environments": workspace["available_environments"],
+        "empty_reason": workspace["empty_reason"],
         "authoritative_session_id": bundle["authoritative_session_id"],
     }
     if export_format in {"bundle", "json"}:

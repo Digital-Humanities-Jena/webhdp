@@ -6,6 +6,37 @@ import pytest
 from services import dataset_integrity_service as service
 
 
+def test_duplicate_groups_preserve_real_conflicts_in_each_environment():
+    records = [{
+        "normalized_source_file_path": "Models_Dataset/model.glb",
+        "record_status": "published",
+        "session_id": index,
+        "local_record_id": index,
+        "concept_rec_id": str(index),
+        "is_sandbox": is_sandbox,
+    } for index, is_sandbox in enumerate([False, False, True, True], start=1)]
+
+    groups = service.build_duplicate_groups("Models_Dataset", records)
+
+    assert len(groups) == 2
+    assert {group["environment"] for group in groups} == {"production", "sandbox"}
+    assert all(group["record_count"] == 2 and group["published_record_count"] == 2 for group in groups)
+    assert all(len({record["is_sandbox"] for record in group["records"]}) == 1 for group in groups)
+
+
+def test_draft_classification_does_not_match_concept_ids_across_environments():
+    draft = {"record_status": "draft", "concept_rec_id": "123", "is_sandbox": True}
+    production_record = {"record_status": "published", "concept_rec_id": "123", "is_sandbox": False}
+
+    assert service.classify_draft_kind(draft, [draft, production_record]) == "partial_draft"
+
+
+def test_session_dataset_context_does_not_add_synthetic_alias_for_named_record_dataset(monkeypatch):
+    monkeypatch.setattr(service, "get_session_dataset_context", lambda session: {})
+
+    assert service.get_session_dataset_keys(SimpleNamespace(id=27), [{"dataset_key": "Models_Dataset"}]) == {"Models_Dataset"}
+
+
 def test_build_model_preview_resolves_encoded_published_glb_url():
     preview = service.build_model_preview(
         {

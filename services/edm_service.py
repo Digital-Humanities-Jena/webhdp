@@ -2147,6 +2147,24 @@ class EdmService:
         repaired = etree.tostring(root, encoding="unicode")
         return self._ensure_schema_namespace(repaired)
 
+    def prepare_rendered_edm_with_report(
+        self,
+        rendered: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Apply the shared export safeguards without claiming validation passed."""
+        repaired = self._ensure_minimum_viable_edm(rendered, metadata)
+        from services.lod_reliability import assert_public_document
+        from services.metadata_adjustments import document_adjustments
+
+        assert_public_document(repaired)
+        adjustments = document_adjustments(rendered, repaired, "edm")
+        return {
+            "content": repaired,
+            "minimum_viable_applied": bool(adjustments),
+            "adjustments": adjustments,
+        }
+
     def render_template(
         self,
         template_id: int,
@@ -2451,15 +2469,11 @@ class EdmService:
         )
         if not rendered:
             raise ValueError("Template rendering returned empty result")
-        repaired = self._ensure_minimum_viable_edm(
+        prepared = self.prepare_rendered_edm_with_report(
             rendered,
             metadata if isinstance(metadata, dict) else dict(metadata),
         )
-        from services.lod_reliability import assert_public_document
-        assert_public_document(repaired)
-        from services.metadata_adjustments import document_adjustments
-        adjustments = document_adjustments(rendered, repaired, "edm")
-        minimum_viable_applied = bool(adjustments)
+        repaired = prepared["content"]
 
         # Optional validation
         validation = None
@@ -2480,9 +2494,7 @@ class EdmService:
                 raise ValueError("EDM validation failed: " + "; ".join(validation.get("errors") or ["Validation was not completed"]))
 
         return {
-            "content": repaired,
-            "minimum_viable_applied": minimum_viable_applied,
-            "adjustments": adjustments,
+            **prepared,
             "validation": validation,
         }
 

@@ -33,6 +33,7 @@ vi.mock('@/services/submission.service.js', () => ({
   default: mocked.submissionService,
 }))
 vi.mock('@/services/pipeline.service.js', () => ({ default: mocked.pipelineService }))
+vi.mock('@/services/api', () => ({ default: { get: vi.fn().mockResolvedValue({ data: { available: false } }) } }))
 
 vi.mock('@/composables/useToast', () => ({
   useToast: () => mocked.toast,
@@ -43,6 +44,7 @@ import RecordDetailView from '../src/views/dashboard/RecordDetailView.vue'
 describe('RecordDetailView', () => {
   beforeEach(() => {
     Object.values(mocked.submissionService).forEach((fn) => fn.mockReset())
+    Object.values(mocked.pipelineService).forEach((fn) => fn.mockReset())
     Object.values(mocked.toast).forEach((fn) => fn.mockReset())
     mocked.route.params = {
       sessionId: '42',
@@ -67,6 +69,49 @@ describe('RecordDetailView', () => {
     expect(mocked.pipelineService.getPlaygroundSessionFile).toHaveBeenCalledWith(42, '/session/outputs/model_optimized.glb')
     expect(mocked.toast.error).toHaveBeenCalledWith(expect.stringContaining('could not be downloaded'))
     expect(button.attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it.each(['render', 'custom_pipeline'])('downloads renderer PNGs from %s without requiring the Playground UI', async (pipelineSource) => {
+    const path = '/session/outputs/model_front.png'
+    mocked.submissionService.getSessionRecordDetail.mockResolvedValue({ data: {
+      session: { access_mode: 'explorer_only', permissions: { can_edit: false } },
+      record: {
+        local_record_id: 9,
+        files: [{ file_id: 2, filename: 'model_front.png', absolute_path: path, pipeline_source: pipelineSource, step_source: 'fast_renderer' }],
+      },
+    } })
+    const image = new Blob(['preview'], { type: 'image/png' })
+    mocked.pipelineService.getPlaygroundSessionFile.mockResolvedValue(image)
+    const wrapper = mount(RecordDetailView, { global: { stubs: { RouterLink: RouterLinkStub, PlaygroundModelViewer: true } } })
+    await flushPromises()
+
+    const button = wrapper.findAll('button').find(item => item.text() === 'Download file')
+    expect(button).toBeTruthy()
+    await button.trigger('click')
+    await flushPromises()
+
+    expect(mocked.pipelineService.getPlaygroundSessionFile).toHaveBeenCalledWith(42, path)
+    expect(URL.createObjectURL).toHaveBeenCalledWith(image)
+    expect(HTMLAnchorElement.prototype.click).toHaveBeenCalled()
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:record-detail')
+    expect(mocked.toast.error).not.toHaveBeenCalled()
+    expect(button.attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('does not offer generated file downloads for source files or missing local paths', async () => {
+    mocked.submissionService.getSessionRecordDetail.mockResolvedValue({ data: { record: {
+      local_record_id: 9,
+      files: [
+        { file_id: 1, filename: 'model.glb', absolute_path: '/session/model.glb', pipeline_source: 'upload' },
+        { file_id: 2, filename: 'remote_preview.png', pipeline_source: 'render', step_source: 'fast_renderer' },
+      ],
+    } } })
+    const wrapper = mount(RecordDetailView, { global: { stubs: { RouterLink: RouterLinkStub, PlaygroundModelViewer: true } } })
+    await flushPromises()
+    expect(wrapper.findAll('button').some(item => item.text() === 'Download file')).toBe(false)
+    expect(mocked.pipelineService.getPlaygroundSessionFile).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 

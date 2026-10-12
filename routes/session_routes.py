@@ -26,7 +26,7 @@ from constants import (
     WORKFLOW_STATE_FIELD,
 )
 from database.database import db
-from database.models import BatchFileMetadata, CloudMirrorObject, File, Institution, Session as DBSession, Submission, User, UserMetadata
+from database.models import BatchFileMetadata, CloudMirrorObject, File, Institution, PipelineRun, Session as DBSession, Submission, User, UserMetadata
 from exceptions import SecurityError, ValidationError
 from routes.access_helpers import get_current_user_from_jwt, get_session_with_permission
 from security import resolve_child_path, safe_extract_zip, sanitize_upload_filename
@@ -1624,9 +1624,28 @@ def _serialize_submission_summary(latest_submission: Submission | None) -> dict[
 
 def _build_session_record_common_context(session_row: DBSession) -> dict[str, Any]:
     latest_submission = (
-        Submission.query.filter_by(session_id=session_row.id).order_by(Submission.created_at.desc()).first()
+        Submission.query.filter_by(session_id=session_row.id).order_by(Submission.created_at.desc(), Submission.id.desc()).first()
     )
+    latest_run = PipelineRun.query.filter_by(session_id=session_row.id).order_by(PipelineRun.started_at.desc(), PipelineRun.id.desc()).first()
+    native_execution = bool(latest_run and (not latest_submission or latest_run.started_at >= latest_submission.created_at))
     submission_result = _parse_json(latest_submission.result, {}) if latest_submission else {}
+    execution = None
+    selected_record_ids: set[str] = set()
+    processed_record_ids: set[str] = set()
+    if native_execution:
+        submission_result = _parse_json(latest_run.result_json, {})
+        request_payload = _parse_json(latest_run.request_json, {})
+        selected_record_ids = {str(int(record_id)) for record_id in request_payload.get("record_ids", []) if str(record_id).isdigit()}
+        execution = {
+            "source": "native_pipeline",
+            "run_id": latest_run.public_id,
+            "status": latest_run.status.value,
+            "started_at": latest_run.started_at.isoformat() + "Z",
+            "completed_at": latest_run.completed_at.isoformat() + "Z" if latest_run.completed_at else None,
+            "error": latest_run.error_message,
+        }
+    elif latest_submission:
+        execution = {"source": "submission", **_serialize_submission_summary(latest_submission)}
     workflow_state_record = db.session.query(UserMetadata).filter_by(
         session_id=session_row.id,
         field_name=WORKFLOW_STATE_FIELD,
@@ -1640,7 +1659,7 @@ def _build_session_record_common_context(session_row: DBSession) -> dict[str, An
     session_file_rows = File.query.filter_by(session_id=session_row.id).all()
     selected_file_signatures = set()
     for file_row in session_file_rows:
-        if file_row.id not in selected_file_ids:
+        if native_execution or file_row.id not in selected_file_ids:
             continue
         selected_file_signatures.add(_normalize_path_signature(file_row.path))
         selected_file_signatures.add(_normalize_name_signature(file_row.filename))
@@ -1652,7 +1671,11 @@ def _build_session_record_common_context(session_row: DBSession) -> dict[str, An
         for detail in submission_result.get("details", []):
             if isinstance(detail, dict) and detail.get("record_id") is not None:
                 details_by_record[str(detail["record_id"])] = detail
-            if isinstance(detail, dict):
+                if native_execution:
+                    selected_record_ids.add(str(detail["record_id"]))
+                    if detail.get("step_results") or latest_run.status.value == "completed":
+                        processed_record_ids.add(str(detail["record_id"]))
+            if isinstance(detail, dict) and not native_execution:
                 processed_file_signatures.add(_normalize_path_signature(detail.get("file_path")))
                 processed_file_signatures.add(_normalize_name_signature(detail.get("file_path")))
     processed_file_signatures.discard(None)
@@ -1685,6 +1708,10 @@ def _build_session_record_common_context(session_row: DBSession) -> dict[str, An
 
     return {
         "submission": _serialize_submission_summary(latest_submission),
+        "processing_execution": execution,
+        "native_execution": native_execution,
+        "selected_record_ids": selected_record_ids,
+        "processed_record_ids": processed_record_ids,
         "details_by_record": details_by_record,
         "processed_file_signatures": processed_file_signatures,
         "selected_file_signatures": selected_file_signatures,
@@ -1824,6 +1851,8 @@ def _build_session_record_payload(session_row: DBSession, base_record: dict[str,
     mapped_metadata_keys = sorted(mapped_metadata.keys())
     detail_warnings = detail.get("warnings") if isinstance(detail.get("warnings"), list) else []
     processing_error = detail.get("error")
+    if context.get("native_execution") and not detail.get("step_results") and str(local_record_id) in context.get("selected_record_ids", set()):
+        processing_error = processing_error or (context.get("processing_execution") or {}).get("error")
 
     signature_candidates = _record_signature_candidates(
         source_file_id=base_record.get("source_file_id"),
@@ -1831,12 +1860,16 @@ def _build_session_record_payload(session_row: DBSession, base_record: dict[str,
         file_items=file_items,
         detail=detail,
     )
-    processed_in_latest_submission = str(local_record_id) in (context.get("details_by_record") or {}) or any(
-        item in (context.get("processed_file_signatures") or set()) for item in signature_candidates
-    )
-    selected_for_submission = processed_in_latest_submission or any(
-        item in (context.get("selected_file_signatures") or set()) for item in signature_candidates
-    )
+    if context.get("native_execution"):
+        processed_in_latest_submission = str(local_record_id) in context.get("processed_record_ids", set())
+        selected_for_submission = str(local_record_id) in context.get("selected_record_ids", set())
+    else:
+        processed_in_latest_submission = str(local_record_id) in (context.get("details_by_record") or {}) or any(
+            item in (context.get("processed_file_signatures") or set()) for item in signature_candidates
+        )
+        selected_for_submission = processed_in_latest_submission or any(
+            item in (context.get("selected_file_signatures") or set()) for item in signature_candidates
+        )
     available_not_selected = status == "prepared" and not selected_for_submission
     zenodo_id = base_record.get("zenodo_record_id") or metadata_payload.get("id")
     is_sandbox = base_record.get("is_sandbox") if base_record.get("is_sandbox") is not None else None
@@ -1886,6 +1919,7 @@ def _build_session_record_payload(session_row: DBSession, base_record: dict[str,
             ],
         },
         "processing": {
+            "execution": context.get("processing_execution") if selected_for_submission else None,
             "render_status": _extract_processing_step_status(detail, "render"),
             "usdz_status": _extract_processing_step_status(detail, "usdz"),
             "edm_status": _extract_processing_step_status(detail, "edm"),
@@ -1916,7 +1950,6 @@ def _build_session_record_payload(session_row: DBSession, base_record: dict[str,
 
 
 def _build_session_records_payload(session_row: DBSession, inventory: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
-    from database.models import PipelineRun
     recent_runs = PipelineRun.query.filter_by(session_id=session_row.id).order_by(PipelineRun.started_at.desc()).limit(10).all()
     visible_records = inventory.get("visible_records") or []
     records_payload: list[dict[str, Any]] = []
@@ -1956,6 +1989,7 @@ def _build_session_records_payload(session_row: DBSession, inventory: dict[str, 
         "recent_runs": [{'run_id': run.public_id, 'status': run.status.value,
                          'started_at': run.started_at.isoformat() + 'Z'} for run in recent_runs],
         "submission": context.get("submission"),
+        "processing_execution": context.get("processing_execution"),
         "summary": {
             "total_records": len(records_payload),
             "published_records": published_count,

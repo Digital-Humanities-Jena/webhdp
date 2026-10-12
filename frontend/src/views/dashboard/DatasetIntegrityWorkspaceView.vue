@@ -18,6 +18,41 @@
         </button>
       </div>
 
+      <div class="rounded-xl border border-slate-200 bg-white p-4">
+        <div class="flex flex-col gap-3 lg:flex-row lg:items-end">
+          <div class="flex-1">
+            <label class="block text-sm font-medium text-slate-700">Dataset</label>
+            <select
+              v-model="selectedDatasetKey"
+              :disabled="loading"
+              class="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+              @change="navigateToDataset"
+            >
+              <option value="">Choose a dataset</option>
+              <option v-if="selectedDatasetKey && !datasets.some(dataset => dataset.dataset_key === selectedDatasetKey)" :value="selectedDatasetKey">{{ selectedDatasetKey }}</option>
+              <option v-for="dataset in datasets" :key="dataset.dataset_key" :value="dataset.dataset_key">
+                {{ dataset.dataset_key }}
+              </option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-slate-700">Environment</label>
+            <select
+              v-model="selectedEnvironment"
+              :disabled="loading"
+              class="mt-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+            >
+              <option value="production">Production</option>
+              <option value="sandbox">Sandbox</option>
+              <option value="all">All</option>
+            </select>
+          </div>
+          <div v-if="selectedDatasetKey" class="text-xs text-slate-500">
+            Route key: <span class="font-mono">{{ selectedDatasetKey }}</span>
+          </div>
+        </div>
+      </div>
+
       <LoadingSpinner v-if="loading" size="lg" text="Loading dataset integrity workspace..." />
 
       <div v-else-if="error" class="rounded-xl border border-rose-200 bg-white p-6">
@@ -25,38 +60,6 @@
       </div>
 
       <div v-else class="space-y-6">
-        <div class="rounded-xl border border-slate-200 bg-white p-4">
-          <div class="flex flex-col gap-3 lg:flex-row lg:items-end">
-            <div class="flex-1">
-              <label class="block text-sm font-medium text-slate-700">Dataset</label>
-              <select
-                v-model="selectedDatasetKey"
-                class="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
-                @change="navigateToDataset"
-              >
-                <option value="">Choose a dataset</option>
-                <option v-for="dataset in datasets" :key="dataset.dataset_key" :value="dataset.dataset_key">
-                  {{ dataset.dataset_key }}
-                </option>
-              </select>
-            </div>
-            <div>
-              <label class="block text-sm font-medium text-slate-700">Environment</label>
-              <select
-                v-model="selectedEnvironment"
-                class="mt-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
-              >
-                <option value="production">Production</option>
-                <option value="sandbox">Sandbox</option>
-                <option value="all">All</option>
-              </select>
-            </div>
-            <div v-if="selectedDatasetKey" class="text-xs text-slate-500">
-              Route key: <span class="font-mono">{{ selectedDatasetKey }}</span>
-            </div>
-          </div>
-        </div>
-
         <div v-if="!selectedDatasetKey" class="space-y-6">
           <div class="overflow-hidden rounded-xl border border-slate-200 bg-white">
             <div class="border-b border-slate-200 px-4 py-3">
@@ -148,7 +151,7 @@
                       <div v-if="item.groups_preview?.length" class="space-y-1">
                         <p
                           v-for="group in item.groups_preview"
-                          :key="`${item.dataset_key}-${group.normalized_source_file_path}`"
+                          :key="`${item.dataset_key}-${group.environment}-${group.normalized_source_file_path}`"
                           class="break-all"
                         >
                           {{ group.normalized_source_file_path }}
@@ -172,6 +175,9 @@
         </div>
 
         <template v-else>
+          <p v-if="summary.empty_reason" class="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-600" role="status">
+            {{ emptyDatasetMessage }}
+          </p>
           <div class="grid grid-cols-2 gap-3 md:grid-cols-5">
             <div class="rounded-xl border border-slate-200 bg-white p-4">
               <p class="text-xs uppercase tracking-wide text-slate-500">Source Paths</p>
@@ -402,10 +408,10 @@
                 {{ selectedPathFilter ? 'No duplicate groups match the selected source path.' : 'No duplicate groups were detected for this dataset.' }}
               </div>
 
-              <div v-for="group in duplicates" :key="group.normalized_source_file_path" class="rounded-xl border border-slate-200 p-4">
+              <div v-for="group in duplicates" :key="`${group.environment}-${group.normalized_source_file_path}`" class="rounded-xl border border-slate-200 p-4">
                 <div class="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <p class="text-sm font-semibold text-slate-900">{{ group.normalized_source_file_path }}</p>
+                    <p class="text-sm font-semibold text-slate-900">{{ group.normalized_source_file_path }}<span v-if="selectedEnvironment === 'all'" class="ml-2 text-xs font-normal text-slate-500">{{ group.environment === 'sandbox' ? 'Sandbox' : 'Production' }}</span></p>
                     <p class="mt-1 text-xs text-slate-500">
                       {{ group.record_count }} rows · {{ group.published_record_count }} published · {{ group.lineage_count || 0 }} lineage<span v-if="(group.lineage_count || 0) !== 1">s</span>
                     </p>
@@ -607,6 +613,8 @@ const selectedDatasetKey = ref('')
 const selectedPathFilter = ref('')
 const pathFilterDraft = ref('')
 const versioningRecordKey = ref('')
+let loadVersion = 0
+let exportVersion = 0
 
 const tabs = [
   { id: 'overview', label: 'Overview' },
@@ -614,6 +622,12 @@ const tabs = [
   { id: 'drafts', label: 'Drafts / Repairs' },
   { id: 'exports', label: 'Exports' },
 ]
+
+const emptyDatasetMessage = computed(() => {
+  if (summary.value.empty_reason === 'no_records') return 'This dataset has no prepared records yet. Continue its session workflow to create records.'
+  const available = (summary.value.available_environments || []).map(value => value === 'sandbox' ? 'Sandbox' : 'Production').join(' or ')
+  return `No records in ${selectedEnvironment.value === 'sandbox' ? 'Sandbox' : 'Production'} for this dataset.${available ? ` Choose ${available} in Environment to review its records.` : ''}`
+})
 
 const showError = computed(() => !!error.value)
 const isPrivileged = computed(() => ['admin', 'moderator'].includes(authStore.user?.role || ''))
@@ -644,12 +658,12 @@ const triggerDownload = (content, filename, mimeType) => {
 }
 
 const applyRouteState = () => {
-  selectedDatasetKey.value = route.params.datasetKey ? decodeURIComponent(String(route.params.datasetKey)) : ''
+  selectedDatasetKey.value = String(route.params.datasetKey || '')
   const routeTab = String(route.query.tab || 'overview')
   activeTab.value = VALID_TABS.has(routeTab) ? routeTab : 'overview'
   const routeEnvironment = String(route.query.environment || 'production')
   selectedEnvironment.value = VALID_ENVIRONMENTS.has(routeEnvironment) ? routeEnvironment : 'production'
-  selectedPathFilter.value = route.query.path ? decodeURIComponent(String(route.query.path)) : ''
+  selectedPathFilter.value = String(route.query.path || '')
   pathFilterDraft.value = selectedPathFilter.value
 }
 
@@ -669,7 +683,7 @@ const buildWorkspaceLocation = (overrides = {}) => {
 
   const query = {}
   if (tab && tab !== 'overview') query.tab = tab
-  if (environment && environment !== 'production') query.environment = environment
+  if (environment) query.environment = environment
   if (path) query.path = path
 
   return {
@@ -687,12 +701,13 @@ const syncWorkspaceRoute = async (overrides = {}) => {
   }
 }
 
-const loadDatasets = async () => {
-  const response = await datasetService.listDatasets({ environment: selectedEnvironment.value })
-  datasets.value = response.data?.datasets || []
+const loadDatasets = async (environment) => {
+  const response = await datasetService.listDatasets({ environment })
+  return response.data?.datasets || []
 }
 
 const loadConflictReview = async () => {
+  const version = loadVersion
   if (!isPrivileged.value || selectedDatasetKey.value) {
     globalConflictReview.value = []
     globalConflictReviewCount.value = 0
@@ -705,14 +720,15 @@ const loadConflictReview = async () => {
       limit: 25,
       group_limit: 3,
     })
+    if (version !== loadVersion) return
     globalConflictReview.value = response.data?.datasets || []
     globalConflictReviewCount.value = Number(response.data?.duplicate_group_count || 0)
   } finally {
-    reviewLoading.value = false
+    if (version === loadVersion) reviewLoading.value = false
   }
 }
 
-const loadDatasetDetail = async () => {
+const loadDatasetDetail = async (version = loadVersion) => {
   if (!selectedDatasetKey.value) {
     summary.value = {}
     duplicates.value = []
@@ -729,16 +745,17 @@ const loadDatasetDetail = async () => {
     datasetService.getDatasetSummary(selectedDatasetKey.value, { environment: selectedEnvironment.value }),
     datasetService.getDatasetDuplicates(selectedDatasetKey.value, params),
   ])
+  if (version !== loadVersion) return
   summary.value = summaryResponse.data || {}
   duplicates.value = duplicatesResponse.data?.groups || []
   selectedAuthoritativeSessionId.value = summary.value.authoritative_session_id || null
   selectedPathFilter.value = duplicatesResponse.data?.path_filter || selectedPathFilter.value || ''
   pathFilterDraft.value = selectedPathFilter.value
   exportBundle.value = null
-  await loadAuthoritativeSessionInsight(selectedAuthoritativeSessionId.value)
+  await loadAuthoritativeSessionInsight(selectedAuthoritativeSessionId.value, version)
 }
 
-const loadAuthoritativeSessionInsight = async (sessionId = selectedAuthoritativeSessionId.value) => {
+const loadAuthoritativeSessionInsight = async (sessionId = selectedAuthoritativeSessionId.value, version = loadVersion) => {
   authoritativeSessionInsight.value = null
   authoritativeSessionInsightError.value = ''
   if (!selectedDatasetKey.value || !sessionId) {
@@ -747,8 +764,10 @@ const loadAuthoritativeSessionInsight = async (sessionId = selectedAuthoritative
 
   try {
     const response = await submissionService.getSessionWorkspaceSummary(sessionId)
+    if (version !== loadVersion || sessionId !== selectedAuthoritativeSessionId.value) return
     authoritativeSessionInsight.value = response.data || null
   } catch (err) {
+    if (version !== loadVersion || sessionId !== selectedAuthoritativeSessionId.value) return
     console.error('Failed to load authoritative session intelligence:', err)
     authoritativeSessionInsightError.value =
       err.error?.message || err.error || err.message || 'Workspace intelligence is currently unavailable.'
@@ -756,12 +775,28 @@ const loadAuthoritativeSessionInsight = async (sessionId = selectedAuthoritative
 }
 
 const loadCurrent = async () => {
+  const version = ++loadVersion
+  exportVersion += 1
+  exportBundle.value = null
+  exporting.value = false
+  reviewLoading.value = false
   loading.value = true
   error.value = ''
   try {
-    await loadDatasets()
+    const explicitEnvironment = VALID_ENVIRONMENTS.has(String(route.query.environment || ''))
+    const catalog = await loadDatasets(!explicitEnvironment && selectedDatasetKey.value ? 'all' : selectedEnvironment.value)
+    if (version !== loadVersion) return
+    datasets.value = catalog
+    if (!explicitEnvironment && selectedDatasetKey.value) {
+      const dataset = catalog.find(item => item.dataset_key.toLowerCase() === selectedDatasetKey.value.toLowerCase())
+      const available = dataset?.available_environments || Object.entries(dataset?.environment_breakdown || {}).filter(([, value]) => value.record_count > 0).map(([key]) => key)
+      selectedEnvironment.value = available?.length === 1 ? available[0] : 'production'
+    }
     if (selectedDatasetKey.value) {
-      await loadDatasetDetail()
+      await loadDatasetDetail(version)
+      if (version !== loadVersion) return
+      if (activeTab.value === 'exports') await ensureExportBundle()
+      if (version !== loadVersion) return
       globalConflictReview.value = []
       globalConflictReviewCount.value = 0
     } else {
@@ -771,10 +806,11 @@ const loadCurrent = async () => {
       await loadConflictReview()
     }
   } catch (err) {
+    if (version !== loadVersion) return
     console.error('Failed to load dataset workspace:', err)
     error.value = err.error?.message || err.error || err.message || 'Failed to load dataset workspace.'
   } finally {
-    loading.value = false
+    if (version === loadVersion) loading.value = false
   }
 }
 
@@ -786,7 +822,10 @@ const navigateToDataset = async () => {
 }
 
 const ensureExportBundle = async () => {
-  if (exportBundle.value || !selectedDatasetKey.value) return
+  if (exportBundle.value) return true
+  if (!selectedDatasetKey.value) return false
+  const version = loadVersion
+  const requestVersion = ++exportVersion
   exporting.value = true
   try {
     const response = await datasetService.exportDataset(selectedDatasetKey.value, {
@@ -794,15 +833,20 @@ const ensureExportBundle = async () => {
       environment: selectedEnvironment.value,
       authoritative_session_id: selectedAuthoritativeSessionId.value || undefined,
     })
+    if (version !== loadVersion || requestVersion !== exportVersion) return false
     exportBundle.value = response.data || {}
+    return true
+  } catch (err) {
+    if (version !== loadVersion || requestVersion !== exportVersion) return false
+    throw err
   } finally {
-    exporting.value = false
+    if (requestVersion === exportVersion) exporting.value = false
   }
 }
 
 const downloadExport = async (kind) => {
   try {
-    await ensureExportBundle()
+    if (!await ensureExportBundle()) return
     const datasetKey = selectedDatasetKey.value || 'dataset'
     if (kind === 'primary_json') {
       triggerDownload(
@@ -903,7 +947,7 @@ const createVersionDraft = async (record) => {
 }
 
 watch(
-  () => [route.params.datasetKey || '', route.query.environment || '', route.query.path || ''].join('|'),
+  () => JSON.stringify([route.params.datasetKey || '', route.query.environment || '', route.query.path || '']),
   () => {
     applyRouteState()
     loadCurrent()
@@ -913,8 +957,9 @@ watch(
 watch(
   () => route.query.tab,
   async () => {
-    applyRouteState()
-    if (activeTab.value === 'exports' && selectedDatasetKey.value) {
+    const tab = String(route.query.tab || 'overview')
+    activeTab.value = VALID_TABS.has(tab) ? tab : 'overview'
+    if (activeTab.value === 'exports' && selectedDatasetKey.value && !loading.value) {
       await ensureExportBundle()
     }
   }
@@ -928,13 +973,13 @@ watch(selectedAuthoritativeSessionId, () => {
 })
 
 watch(selectedEnvironment, async (nextValue, previousValue) => {
-  if (nextValue === previousValue) return
+  if (nextValue === previousValue || loading.value) return
   exportBundle.value = null
   await syncWorkspaceRoute({ environment: nextValue })
 })
 
 watch(activeTab, async (nextValue, previousValue) => {
-  if (nextValue === previousValue) return
+  if (nextValue === previousValue || loading.value) return
   await syncWorkspaceRoute({ tab: nextValue })
   if (nextValue === 'exports' && selectedDatasetKey.value) {
     await ensureExportBundle()

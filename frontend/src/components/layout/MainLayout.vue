@@ -84,7 +84,7 @@
     </nav>
 
     <main id="main-content" tabindex="-1">
-      <router-view />
+      <router-view :key="route.path" />
     </main>
 
     <footer class="border-t border-gray-200 bg-white px-4 py-5">

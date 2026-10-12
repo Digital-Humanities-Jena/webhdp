@@ -619,7 +619,12 @@ const datasetKey = computed(() => {
     || records.value.find((record) => record?.provenance?.dataset_key)?.provenance?.dataset_key
     || ''
 })
-const datasetWorkspaceRoute = computed(() => (datasetKey.value ? buildDatasetRoute(datasetKey.value) : ''))
+const datasetWorkspaceRoute = computed(() => {
+  if (!datasetKey.value) return ''
+  const environments = new Set(records.value.filter(record => typeof record.is_sandbox === 'boolean').map(record => record.is_sandbox ? 'sandbox' : 'production'))
+  const environment = environments.size > 1 ? 'all' : [...environments][0] || payload.value?.session?.default_zenodo_environment || 'production'
+  return buildDatasetRoute(datasetKey.value, { environment })
+})
 
 const formatDate = (dateString) => {
   if (!dateString) return 'N/A'

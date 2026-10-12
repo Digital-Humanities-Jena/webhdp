@@ -367,6 +367,129 @@ class TestDatasetIntegrityRoutes(unittest.TestCase):
     def _regular_headers(self):
         return {"Authorization": f"Bearer {self.regular_token}"}
 
+    def _add_dataset_session(self, name, records, *, dataset_key=None, shared=False):
+        with self.app.app_context():
+            session_dir = os.path.join(self.temp_dir, name)
+            os.makedirs(session_dir, exist_ok=True)
+            hdpc_path = os.path.join(session_dir, "session.hdpc")
+            _create_hdpc(hdpc_path, records)
+            session_row = DBSession(
+                user_id=self.user_id,
+                session_dir=session_dir,
+                hdpc_path=hdpc_path,
+                status="pending" if not records else "completed",
+                default_zenodo_environment="sandbox",
+                institution_id=self.institution_id if shared else None,
+                sharing_scope="institution" if shared else "private",
+            )
+            db.session.add(session_row)
+            db.session.flush()
+            if dataset_key:
+                root = os.path.join(session_dir, dataset_key)
+                os.makedirs(root, exist_ok=True)
+                db.session.add(UserMetadata(
+                    session_id=session_row.id,
+                    field_name="msf_profile",
+                    field_value=json.dumps({"source_file_path": os.path.join(root, "metadata.xlsx"), "directory_root": root}),
+                ))
+            db.session.commit()
+            return session_row.id
+
+    def test_direct_sandbox_dataset_has_empty_production_scope_and_usable_sandbox_scope(self):
+        session_id = self._add_dataset_session("direct_upload", [{
+            "record_id": 1, "file_id": 1, "title": "Terrain", "status": "draft", "is_sandbox": True,
+            "source_path": os.path.join(self.temp_dir, "direct_upload", "uploads", "terrain.glb"),
+            "zenodo_record_id": "619251",
+        }])
+        dataset_key = f"session_{session_id}_dataset"
+        base = f"/api/v1/datasets/{dataset_key}"
+        response = self.client.get(f"{base}/summary", headers=self._headers())
+        self.assertEqual(response.status_code, 200)
+        summary = response.get_json()["data"]
+        self.assertEqual(summary["environment"], "production")
+        self.assertEqual(summary["available_environments"], ["sandbox"])
+        self.assertEqual(summary["empty_reason"], "no_records_in_environment")
+        self.assertEqual(summary["record_count"], 0)
+        self.assertEqual(summary["sessions"], [])
+        response = self.client.get(f"{base}/summary?environment=sandbox", headers=self._headers())
+        self.assertEqual(response.status_code, 200)
+        summary = response.get_json()["data"]
+        self.assertEqual(summary["record_count"], 1)
+        self.assertEqual(summary["sessions"][0]["session_id"], session_id)
+        self.assertIsNone(summary["empty_reason"])
+        duplicates = self.client.get(f"{base}/duplicates", headers=self._headers())
+        self.assertEqual(duplicates.status_code, 200)
+        self.assertEqual(duplicates.get_json()["data"]["groups"], [])
+        self.assertEqual(duplicates.get_json()["data"]["available_environments"], ["sandbox"])
+        empty_export = self.client.post(f"{base}/export", headers=self._headers(), json={"format": "bundle"})
+        self.assertEqual(empty_export.status_code, 200)
+        self.assertEqual(empty_export.get_json()["data"]["secondary_record_count"], 0)
+        draft_export = self.client.post(f"{base}/export", headers=self._headers(), json={"format": "bundle", "environment": "sandbox"})
+        self.assertEqual(draft_export.status_code, 200)
+        self.assertEqual(draft_export.get_json()["data"]["secondary_record_count"], 1)
+
+    def test_prepared_batch_and_empty_direct_sessions_have_workspaces_and_catalog_entries(self):
+        batch_id = self._add_dataset_session("prepared_batch", [], dataset_key="Prepared_Dataset")
+        direct_id = self._add_dataset_session("empty_upload", [])
+        catalog_response = self.client.get("/api/v1/datasets?environment=sandbox", headers=self._headers())
+        self.assertEqual(catalog_response.status_code, 200)
+        catalog = {item["dataset_key"]: item for item in catalog_response.get_json()["data"]["datasets"]}
+        for dataset_key, session_id in [("Prepared_Dataset", batch_id), (f"session_{direct_id}_dataset", direct_id)]:
+            self.assertIn(dataset_key, catalog)
+            self.assertEqual(catalog[dataset_key]["session_count"], 1)
+            response = self.client.get(f"/api/v1/datasets/{dataset_key}/summary?environment=sandbox", headers=self._headers())
+            self.assertEqual(response.status_code, 200)
+            summary = response.get_json()["data"]
+            self.assertEqual(summary["record_count"], 0)
+            self.assertEqual(summary["empty_reason"], "no_records")
+            self.assertEqual(summary["available_environments"], ["sandbox"])
+            self.assertEqual(summary["sessions"][0]["session_id"], session_id)
+            duplicates = self.client.get(f"/api/v1/datasets/{dataset_key}/duplicates?environment=sandbox", headers=self._headers())
+            self.assertEqual(duplicates.status_code, 200)
+            self.assertEqual(duplicates.get_json()["data"]["group_count"], 0)
+            exported = self.client.post(f"/api/v1/datasets/{dataset_key}/export", headers=self._headers(), json={"format": "bundle", "environment": "sandbox"})
+            self.assertEqual(exported.status_code, 200)
+            self.assertEqual(exported.get_json()["data"]["primary_record_count"], 0)
+            self.assertEqual(exported.get_json()["data"]["secondary_record_count"], 0)
+        production_catalog = self.client.get("/api/v1/datasets?environment=production", headers=self._headers()).get_json()["data"]["datasets"]
+        self.assertNotIn("Prepared_Dataset", {item["dataset_key"] for item in production_catalog})
+
+    def test_empty_workspaces_preserve_private_session_access_and_unknown_key_404(self):
+        private_id = self._add_dataset_session("private_empty_upload", [])
+        self._add_dataset_session("shared_empty_batch", [], dataset_key="Shared_Empty_Dataset", shared=True)
+        self._add_dataset_session("private_production", [{
+            "record_id": 1, "file_id": 1, "title": "Private Production", "status": "draft",
+            "source_path": os.path.join(self.temp_dir, "private_production", "Shared_Empty_Dataset", "private.glb"),
+        }])
+        for dataset_key in [f"session_{private_id}_dataset", "Missing_Dataset"]:
+            for endpoint in ["summary", "duplicates"]:
+                response = self.client.get(f"/api/v1/datasets/{dataset_key}/{endpoint}?environment=all", headers=self._regular_headers())
+                self.assertEqual(response.status_code, 404)
+            response = self.client.post(f"/api/v1/datasets/{dataset_key}/export", headers=self._regular_headers(), json={"environment": "all"})
+            self.assertEqual(response.status_code, 404)
+        response = self.client.get("/api/v1/datasets/Shared_Empty_Dataset/summary?environment=sandbox", headers=self._regular_headers())
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["data"]["available_environments"], ["sandbox"])
+        admin_response = self.client.get("/api/v1/datasets/Shared_Empty_Dataset/summary?environment=all", headers=self._headers())
+        self.assertEqual(admin_response.get_json()["data"]["available_environments"], ["production", "sandbox"])
+        missing_response = self.client.get("/api/v1/datasets/Missing_Dataset/summary?environment=all", headers=self._headers())
+        self.assertEqual(missing_response.status_code, 404)
+        catalog = self.client.get("/api/v1/datasets?environment=all", headers=self._regular_headers()).get_json()["data"]["datasets"]
+        self.assertNotIn(f"session_{private_id}_dataset", {item["dataset_key"] for item in catalog})
+
+    def test_all_environment_conflicts_keep_sandbox_and_production_separate(self):
+        source_path = os.path.join(self.temp_dir, "mixed", "Mixed_Dataset", "model.glb")
+        self._add_dataset_session("mixed_environment", [
+            {"record_id": 1, "file_id": 1, "title": "Production", "status": "published", "source_path": source_path, "zenodo_record_id": "11"},
+            {"record_id": 2, "file_id": 2, "title": "Sandbox", "status": "published", "source_path": source_path, "zenodo_record_id": "22", "is_sandbox": True},
+        ])
+        summary = self.client.get("/api/v1/datasets/Mixed_Dataset/summary?environment=all", headers=self._headers()).get_json()["data"]
+        self.assertEqual(summary["available_environments"], ["production", "sandbox"])
+        self.assertEqual(summary["duplicate_published_source_path_count"], 0)
+        response = self.client.get("/api/v1/datasets/Mixed_Dataset/duplicates?environment=all", headers=self._headers())
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["data"]["groups"], [])
+
     def test_dataset_routes_summarize_and_export_records(self):
         list_response = self.client.get("/api/v1/datasets", headers=self._headers())
         self.assertEqual(list_response.status_code, 200)

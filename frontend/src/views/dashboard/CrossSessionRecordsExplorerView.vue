@@ -216,7 +216,7 @@
                     </router-link>
                     <router-link
                       v-if="record.dataset_key"
-                      :to="buildDatasetRoute(record.dataset_key)"
+                      :to="buildDatasetRoute(record.dataset_key, { environment: record.is_sandbox ? 'sandbox' : 'production' })"
                       class="block text-emerald-600 hover:text-emerald-800"
                     >
                       Dataset Workspace

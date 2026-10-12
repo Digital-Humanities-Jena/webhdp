@@ -176,7 +176,8 @@ def preview_template():
                      thumbnail_files=[],
                      additional_thumbnail_files=[],
                  )
-                 return APIResponse.success(data={"xml": rendered})
+                 prepared = current_app.edm_service.prepare_rendered_edm_with_report(rendered, metadata)
+                 return APIResponse.success(data={"xml": prepared["content"], "adjustments": prepared["adjustments"]})
              except jinja2.TemplateSyntaxError as e:
                  return APIResponse.validation_error(f"Template syntax error at line {e.lineno}: {e.message}")
              except jinja2.UndefinedError as e:
@@ -195,7 +196,8 @@ def preview_template():
         rendered = current_app.edm_service.render_template(template_id, metadata, zenodo, main_file_key=main_file_key)
         if rendered is None:
              return APIResponse.not_found("Template not found or empty")
-        return APIResponse.success(data={"xml": rendered})
+        prepared = current_app.edm_service.prepare_rendered_edm_with_report(rendered, metadata)
+        return APIResponse.success(data={"xml": prepared["content"], "adjustments": prepared["adjustments"]})
     except ValueError as e:
         return APIResponse.validation_error(str(e))
     except Exception as e:
