@@ -7,3 +7,6 @@
 *.pdf binary
 *.mp4 binary
 *.mov binary
+
+# Preserve the exact source bytes recorded in the Zenodo checksums.
+external_code/zenodo_component_runtime/upstream/** -text whitespace=-blank-at-eol

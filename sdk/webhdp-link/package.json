@@ -1,0 +1,1 @@
+{"name":"@webhdp/link","version":"0.1.0","type":"module","exports":"./client.mjs","files":["client.mjs"],"license":"EUPL-1.2","scripts":{"test":"node --test client.test.mjs"}}

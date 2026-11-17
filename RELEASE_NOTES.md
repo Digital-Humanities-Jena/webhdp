@@ -1,5 +1,27 @@
 # WebHDP Release Notes
 
+## 0.1.0-alpha.3 - 2026-11-17
+
+### Publication workflows
+
+- Pipeline runs and Zenodo requests preserve operation identities across retries. Use reconciliation to check the remote result when a response is lost. Guided submission restores in-progress drafts and shows records that need corrections before execution.
+- Readiness checks account for pipeline input alternatives, dataset scope, metadata requirements, and previously completed work. File selection retains linked metadata source names and keeps derived artifacts distinct from original inputs.
+- CPU detail generation for static GLBs checks geometry and preserves the source files. Metadata and validation reports include the provenance of their inputs and outputs.
+
+### Optional components and integrations
+
+- The historic reconstruction catalogue adds 11 installable components for photograph preparation, pair selection, COLMAP reconstruction, georeferencing, and separately provisioned research stages. The research stages require pinned external code, dependencies, and weights. See the [installation and input guide](docs/guides/historic_reconstruction.md) and [research runtime guide](docs/guides/historic_reconstruction_research.md).
+- Eight recipes integrate the published Zenodo HDP community components for OBJ conversion and analysis, material, GLB, and image metadata, HDPC export, file integrity validation, and rendering. See the [Zenodo component guide](docs/guides/zenodo_community_components.md).
+- Three separately installed [HMSM components](docs/guides/hmsm_components.md) cover piano-roll scan digitization, MIDI interpretation, and MIDI reconstruction.
+- Operators can register an existing Slurm GPU job as a private reservation. Approved users can claim it from WebHDP, run supported HPC components, then release the claim without cancelling the scheduler job. See the [live demo guide](docs/guides/prereserved_gpu_demo.md).
+- [WebHDP-Link](docs/guides/webhdp_link.md) lets registered applications invoke explicitly published native pipelines, track runs, and download artifacts. It includes scoped credentials, OAuth authorization code with S256 PKCE, hosted processing pages, a JavaScript SDK, and a separate worker. Browser and service integrations require explicit client registration and pipeline publication.
+
+### Security and upgrades
+
+- This release updates vulnerable Python and JavaScript dependencies. Production startup requires a signing key of at least 32 bytes. Use a randomly generated key and keep it out of the repository.
+- HPC-Link component inputs are confined to the job's staging area. Cloud staging and Link worker execution apply additional ownership and filesystem checks.
+- Back up the installation and apply the database migrations before starting the new backend and workers. The core deployment profile remains available for the predefined publication workflows. See the [upgrade guide](docs/guides/upgrade_alpha3.md).
+
 ## 0.1.0-alpha.2 - 2026-09-26
 
 - The installable 3DGeoRef component adds **3D Georeferencing & Preview** for static GLBs paired with reference GeoTIFFs. It produces a placed model, coordinate report, alignment overlay and five Fast Renderer previews. Weak or inconsistent matches fail explicitly; automatic location discovery and absolute elevation assignment are not enabled.

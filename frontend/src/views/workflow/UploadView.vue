@@ -266,6 +266,7 @@ textures/albedo.jpg</pre>
                 <input
                   id="file-upload"
                   type="file"
+                  accept=".obj,.mtl,.glb,.gltf,.bin,.ply,.stl,.fbx,.dae,.usdz,.jpg,.jpeg,.png,.webp,.tif,.tiff,.mid,.midi,.xml,.txt,.zip,.json,.hdpc,.sqlite,.pdf,.wav,.wave,.mp3,.flac,.ogg,.oga,.opus,.m4a,.aac,.aif,.aiff,.aifc"
                   class="sr-only"
                   aria-describedby="direct-file-help"
                   @change="handleFileSelect"
@@ -273,7 +274,7 @@ textures/albedo.jpg</pre>
               </div>
 
               <p id="direct-file-help" class="text-sm text-gray-500">
-                Upload a model, an image, or a ZIP scene for a component. Use ZIP batch when you want WebHDP to unpack the files before processing.
+                Upload a model, image, PDF, audio or MIDI file, or component input (ZIP, JSON, HDPC, SQLite). Direct ZIP uploads stay intact for component processing. For models with separate materials or textures that need unpacking, use a ZIP batch.
               </p>
             </div>
           </div>
@@ -2045,7 +2046,7 @@ const selectDirectFiles = (files) => {
   }
   if (!files.length) return
   if (files[0].size === 0) {
-    error.value = 'This file is empty. Choose a file that contains a model or image.'
+    error.value = 'This file is empty. Choose a non-empty file.'
     return
   }
   selectedFiles.value = [files[0]]
@@ -2666,13 +2667,10 @@ const handleUpload = async () => {
            }
          )
          const cloudUpload = streamResponse.data || {}
-         const cloudPath = cloudUpload.remote_path || cloudUpload.file_id
-         if (!cloudPath || !cloudUpload.storage_type) {
-           throw new Error('Cloud upload completed but did not return a usable cloud reference.')
+         if (!cloudUpload.cloud_upload_receipt) {
+           throw new Error('Cloud upload completed but did not return a usable upload receipt.')
          }
-         formData.append('cloud_path', cloudPath)
-         formData.append('cloud_storage_type', cloudUpload.storage_type)
-         formData.append('cloud_original_filename', zipFile.value.name)
+         formData.append('cloud_upload_receipt', cloudUpload.cloud_upload_receipt)
          formData.append('hpc_allocation_id', activeHpcAllocation.allocation_id)
          hpcAllocation.value = cloudUpload.hpc_staging?.allocation || hpcAllocation.value
        } else {

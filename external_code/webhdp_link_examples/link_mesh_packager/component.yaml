@@ -1,0 +1,112 @@
+metadata:
+  name: link_mesh_packager
+  label: 3D model packager
+  description: Check triangular geometry-only OBJ, normalize it to GLB, and prepare
+    a checksummed repository package. No Zenodo upload or publication.
+  version: 1.0.0
+  component_schema: 0.1.0-alpha.1
+  status: alpha
+  tags:
+  - webhdp-link
+  - reference-application
+distribution:
+  tier: operator_managed
+  bundled_with_webhdp: true
+inputs:
+- name: input_file
+  label: Source file
+  type: file_path
+  required: true
+outputs:
+- name: model_file
+  label: Model File
+  type: file_path
+  extensions:
+  - .glb
+  required: true
+- name: mesh_report
+  label: Mesh Report
+  type: file_path
+  extensions:
+  - .json
+  required: true
+- name: zenodo_metadata
+  label: Zenodo Metadata
+  type: file_path
+  extensions:
+  - .json
+  required: true
+- name: evidence_bundle
+  label: Evidence Bundle
+  type: file_path
+  extensions:
+  - .zip
+  required: true
+parameter_groups:
+- title: Processing
+  parameters:
+  - name: title
+    label: Dataset title
+    type: string
+    default: Model preparation
+  - name: target_extent
+    label: Normalized largest extent
+    type: number
+    default: 1
+    minimum: 0.01
+    maximum: 1000
+execution:
+  profiles:
+  - id: local
+    adapter: local_cli
+    entrypoint:
+    - python3
+    - runner.py
+    - mesh
+    output_collection:
+    - name: model_file
+      path: normalized.glb
+    - name: mesh_report
+      path: mesh-report.json
+    - name: zenodo_metadata
+      path: zenodo-metadata.json
+    - name: evidence_bundle
+      path: model-package.zip
+    resources:
+      gpu_count: 0
+      cpus: 2
+      memory_mb: 2048
+compatibility:
+  playground:
+    enabled: true
+ui:
+  playground:
+    fields:
+      input_file:
+        widget: file_picker
+        accept_extensions:
+        - .obj
+    result:
+      show_logs: false
+      show_result_json: true
+      artifact_views:
+      - id: model_file
+        label: Model File
+        widget: file_download
+        extensions:
+        - .glb
+      - id: mesh_report
+        label: Mesh Report
+        widget: file_download
+        extensions:
+        - .json
+      - id: zenodo_metadata
+        label: Zenodo Metadata
+        widget: file_download
+        extensions:
+        - .json
+      - id: evidence_bundle
+        label: Evidence Bundle
+        widget: file_download
+        extensions:
+        - .zip

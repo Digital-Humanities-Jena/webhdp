@@ -1,0 +1,136 @@
+metadata:
+  name: glb_metadata_extractor
+  label: GLB Metadata Extractor
+  description: Extract mesh, material, texture and extension metadata from GLB or
+    glTF using the published Zenodo processor. Bounds describe stored mesh-local accessor
+    values.
+  tags:
+  - metadata
+  - zenodo-community
+  category: Metadata Extraction
+  version: 1.0.1
+  status: alpha
+  component_schema: 0.1.0-alpha.1
+  license:
+    type: GPL-3.0-or-later
+distribution:
+  tier: external_installable
+  bundled_with_webhdp: false
+  installation_scope:
+  - local_container
+  - hpc_sif
+inputs:
+- name: input_file
+  label: Model or material file
+  type: file_path
+  required: true
+outputs:
+- name: metadata_report
+  label: Metadata report
+  type: file_path
+  extensions:
+  - .json
+  required: true
+parameter_groups:
+- title: Extraction settings
+  parameters:
+  - name: include_detailed_primitives
+    label: Include primitive details
+    description: Report vertex, index and attribute details for each stored primitive.
+    type: boolean
+    default: true
+  - name: calculate_volume
+    label: Calculate bounding-box volume
+    description: Report the product of mesh-local bounds; this is not enclosed mesh
+      volume.
+    type: boolean
+    default: true
+  - name: include_extension_details
+    label: Include extension details
+    description: Describe declared glTF extensions and whether they are required.
+    type: boolean
+    default: true
+execution:
+  timeout: 300
+  profiles:
+  - id: local_docker
+    adapter: container_cli
+    runtime: docker
+    image: webhdp-zenodo-components:local
+    entrypoint:
+    - python
+    - /app/component_runner.py
+    - glb_metadata_extractor
+    config:
+      webhdp_contract: true
+      network: none
+    resources:
+      gpu_count: 0
+      cpus: 2
+      memory_mb: 4096
+  - id: hpc_singularity
+    adapter: hpc_link
+    handler: generic_singularity_component
+    runtime: singularity
+    image: ''
+    entrypoint:
+    - python
+    - /app/component_runner.py
+    - glb_metadata_extractor
+    resources:
+      gpu_count: 0
+      cpus: 2
+      memory_mb: 4096
+compatibility:
+  playground:
+    enabled: true
+install:
+  strategies:
+  - id: local_container
+    runtime: docker
+    profile: local_docker
+    image: webhdp-zenodo-components:local
+  - id: hpc_sif
+    runtime: singularity
+    profile: hpc_singularity
+  test: &id001
+    description: Measured metadata fixture using the published processor; assertions
+      are verified by the runtime regression suite.
+    files:
+    - name: tetrahedron.glb
+      content_base64: Z2xURgIAAACsAgAASAIAAEpTT057ImFzc2V0Ijp7InZlcnNpb24iOiIyLjAiLCJnZW5lcmF0b3IiOiJXZWJIRFAgbWVhc3VyZWQgdGV0cmFoZWRyb24gZml4dHVyZSJ9LCJzY2VuZSI6MCwic2NlbmVzIjpbeyJub2RlcyI6WzBdfV0sIm5vZGVzIjpbeyJtZXNoIjowfV0sIm1lc2hlcyI6W3sicHJpbWl0aXZlcyI6W3siYXR0cmlidXRlcyI6eyJQT1NJVElPTiI6MH0sImluZGljZXMiOjEsIm1hdGVyaWFsIjowfV19XSwibWF0ZXJpYWxzIjpbeyJuYW1lIjoic3RvbmUifV0sImJ1ZmZlcnMiOlt7ImJ5dGVMZW5ndGgiOjcyfV0sImJ1ZmZlclZpZXdzIjpbeyJidWZmZXIiOjAsImJ5dGVPZmZzZXQiOjAsImJ5dGVMZW5ndGgiOjQ4LCJ0YXJnZXQiOjM0OTYyfSx7ImJ1ZmZlciI6MCwiYnl0ZU9mZnNldCI6NDgsImJ5dGVMZW5ndGgiOjI0LCJ0YXJnZXQiOjM0OTYzfV0sImFjY2Vzc29ycyI6W3siYnVmZmVyVmlldyI6MCwiY29tcG9uZW50VHlwZSI6NTEyNiwiY291bnQiOjQsInR5cGUiOiJWRUMzIiwibWluIjpbMCwwLDBdLCJtYXgiOlsxLDEsMV19LHsiYnVmZmVyVmlldyI6MSwiY29tcG9uZW50VHlwZSI6NTEyMywiY291bnQiOjEyLCJ0eXBlIjoiU0NBTEFSIn1dfSAgIEgAAABCSU4AAAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAACAAEAAAABAAMAAAADAAIAAQACAAMA
+    inputs:
+      input_file: tetrahedron.glb
+    parameters: {}
+hpc:
+  install:
+    runtime: singularity
+    sif_required: true
+  test: *id001
+ui:
+  playground:
+    fields:
+      input_file:
+        widget: file_picker
+        accept_extensions:
+        - .glb
+        - .gltf
+        - .zip
+      include_detailed_primitives:
+        widget: checkbox
+      calculate_volume:
+        widget: checkbox
+      include_extension_details:
+        widget: checkbox
+    result:
+      artifact_views:
+      - id: metadata-json
+        label: Metadata report
+        widget: file_download
+        extensions:
+        - .json
+      show_result_json: true
+      show_logs: true
+sources:
+  record: https://zenodo.org/records/16993202
+  doi: 10.5281/zenodo.16993202

@@ -120,6 +120,9 @@ export function getCompatiblePreviousOutput(field, earlierSteps) {
 }
 
 export function buildDefaultBindingForField(field, earlierSteps) {
+  if (field.type === 'file_path' && field.bind_source_by_default === false) {
+    return { enabled: false, target: field.name, type: 'artifact_file', source_step: '', source_output: '', selector: '' }
+  }
   const previousOutput = getCompatiblePreviousOutput(field, earlierSteps)
   if (previousOutput) {
     return {

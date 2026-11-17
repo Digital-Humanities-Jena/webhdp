@@ -1,0 +1,6 @@
+{
+  "photos": "Generated synthetic capture illustrations, not real photogrammetry photographs.",
+  "piano_roll": "Existing WebHDP HMSM synthetic 65-note scan fixture. Expected pitches in scan order: 60, 64, 67, 64, 60, 55, 48.",
+  "mesh": "Generated four-vertex closed tetrahedron with four consistently wound triangles.",
+  "rights": "Synthetic test data created for this repository; no external collection source data."
+}

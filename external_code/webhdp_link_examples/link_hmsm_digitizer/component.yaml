@@ -1,0 +1,132 @@
+metadata:
+  name: link_hmsm_digitizer
+  label: HMSM piano-roll digitizer
+  description: Extract candidate notes and MIDI from a scan using the actual HMSM
+    optical processor and a declared generic 65-note profile.
+  version: 1.0.0
+  component_schema: 0.1.0-alpha.1
+  status: alpha
+  tags:
+  - webhdp-link
+  - reference-application
+distribution:
+  tier: operator_managed
+  bundled_with_webhdp: true
+inputs:
+- name: input_file
+  label: Source file
+  type: file_path
+  required: true
+outputs:
+- name: midi_file
+  label: Midi File
+  type: file_path
+  extensions:
+  - .mid
+  required: true
+- name: piano_report
+  label: Piano Report
+  type: file_path
+  extensions:
+  - .json
+  required: true
+- name: scan_preview
+  label: Scan Preview
+  type: file_path
+  extensions:
+  - .webp
+  required: true
+- name: track_preview
+  label: Track Preview
+  type: file_path
+  extensions:
+  - .webp
+  required: true
+- name: evidence_bundle
+  label: Evidence Bundle
+  type: file_path
+  extensions:
+  - .zip
+  required: true
+parameter_groups:
+- title: Processing
+  parameters:
+  - name: model_id
+    label: Carrier profile
+    type: string_dropdown
+    options:
+    - generic_65_no_dynamics
+    default: generic_65_no_dynamics
+  - name: roll_speed
+    label: Roll speed (feet/minute)
+    type: number
+    default: 6
+    minimum: 0.2
+    maximum: 30
+execution:
+  profiles:
+  - id: local
+    adapter: local_cli
+    entrypoint:
+    - python3
+    - runner.py
+    - piano
+    output_collection:
+    - name: midi_file
+      path: result.mid
+    - name: piano_report
+      path: piano-report.json
+    - name: scan_preview
+      path: scan-preview.webp
+    - name: track_preview
+      path: track-preview.webp
+    - name: evidence_bundle
+      path: piano-evidence.zip
+    resources:
+      gpu_count: 0
+      cpus: 2
+      memory_mb: 2048
+compatibility:
+  playground:
+    enabled: true
+ui:
+  playground:
+    fields:
+      input_file:
+        widget: file_picker
+        accept_extensions:
+        - .png
+        - .jpg
+        - .jpeg
+        - .tif
+        - .tiff
+        - .webp
+    result:
+      show_logs: false
+      show_result_json: true
+      artifact_views:
+      - id: midi_file
+        label: Midi File
+        widget: file_download
+        extensions:
+        - .mid
+      - id: piano_report
+        label: Piano Report
+        widget: file_download
+        extensions:
+        - .json
+      - id: scan_preview
+        label: Scan Preview
+        widget: file_download
+        extensions:
+        - .webp
+      - id: track_preview
+        label: Track Preview
+        widget: file_download
+        extensions:
+        - .webp
+      - id: evidence_bundle
+        label: Evidence Bundle
+        widget: file_download
+        extensions:
+        - .zip

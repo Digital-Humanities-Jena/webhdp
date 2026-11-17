@@ -1,0 +1,46 @@
+# Opt-in overlay for docker-compose.prod.yml; never used by the default stack.
+# Supply immutable image digests and reviewed values through the existing .env.
+x-link-environment: &link-environment
+  RUN_DB_BOOTSTRAP: "0"
+  SKIP_DB_CREATE_ALL: "1"
+  WEBHDP_LINK_PUBLIC_BASE_URL: ${WEBHDP_LINK_PUBLIC_BASE_URL:?Set the externally reachable HTTPS origin}
+  FRONTEND_URL: ${FRONTEND_URL:?Set the externally reachable HTTPS frontend origin}
+  WEBHDP_LINK_STORAGE_PATH: /app/instance/webhdp-link
+  WEBHDP_LINK_MAX_CONCURRENT_RUNS: ${WEBHDP_LINK_MAX_CONCURRENT_RUNS:-1}
+  WEBHDP_LINK_HPC_WAIT_SECONDS: ${WEBHDP_LINK_HPC_WAIT_SECONDS:?Set the approved scheduler wait}
+  HPC_LINK_PARTITION_ATTEMPT_TIMEOUT_SECONDS: ${HPC_LINK_PARTITION_ATTEMPT_TIMEOUT_SECONDS:?Set the central partition wait}
+
+x-link-logging: &link-logging
+  driver: local
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  backend:
+    image: ${WEBHDP_BACKEND_IMAGE:?Set the reviewed backend image digest}
+    environment: *link-environment
+    # Path-only access logs: exclude OAuth query parameters, headers and bodies.
+    command: [gunicorn, --bind, "0.0.0.0:5000", --workers, "4", --timeout, "1200", --access-logfile, "-", --error-logfile, "-", --access-logformat, "%(h)s %(m)s %(U)s %(s)s %(L)s", --preload, "app:app"]
+    logging: *link-logging
+
+  frontend:
+    image: ${WEBHDP_FRONTEND_IMAGE:?Set the reviewed frontend image digest}
+    logging: *link-logging
+
+  link-worker:
+    extends:
+      file: docker-compose.prod.yml
+      service: worker
+    image: ${WEBHDP_BACKEND_IMAGE:?Set the reviewed backend image digest}
+    command: [python, scripts/webhdp_link_worker.py, --poll-seconds, "2"]
+    environment: *link-environment
+    restart: unless-stopped
+    init: true
+    stop_signal: SIGTERM
+    # SIGTERM drains the claimed job; this must cover queue wait + its full
+    # bounded pipeline runtime, not just one step. Preflight checks the bound.
+    stop_grace_period: ${WEBHDP_LINK_STOP_GRACE_SECONDS:?Set the reviewed whole-job drain bound}s
+    deploy:
+      replicas: ${WEBHDP_LINK_WORKER_REPLICAS:-1}
+    logging: *link-logging

@@ -281,8 +281,10 @@ shasum -a 256 image-inspector-1.0.0.sif
 
 Publish the SIF to one of:
 
-- HTTPS release asset URL ending in `.sif`
-- absolute path readable by the HPC-Link user
+- public HTTPS release asset URL ending in `.sif`. The only supported query
+  parameter is Zenodo's `?download=1`.
+- absolute path readable by the HPC-Link user. Stage private or signed
+  downloads on the cluster before entering the path in the installer.
 
 For shared indexes, HTTPS SIF assets are easier to verify and document. For
 private institutional deployments, an absolute HPC path may be more practical.

@@ -1,0 +1,139 @@
+metadata:
+  name: hmsm_midi_reconstruction
+  label: HMSM MIDI Reconstruction
+  description: Generate a declared piano-roll or supported cardboard-disc layout from MIDI with HMSM Studio. Review the representation ledger and obtain instrument and material acceptance before fabrication.
+  tags: [hmsm, reconstruction, piano-roll, cardboard-disc, midi]
+  category: Historical Musical Media
+  version: "1.0.0"
+  status: alpha
+  component_schema: "0.1.0-alpha.1"
+
+distribution:
+  tier: external_installable
+  bundled_with_webhdp: false
+  installation_scope: [local_container]
+
+inputs:
+  - name: input_file
+    label: Source MIDI
+    description: A Standard MIDI File containing the performance or note sequence to represent.
+    type: file_path
+    required: true
+  - name: model_file
+    label: Frozen HMSM model profile
+    description: Optional MediaModel JSON snapshot that takes precedence over the model ID and must support reconstruction. Use an exact built-in snapshot or a profile with a distinct ID.
+    type: file_path
+    bind_source_by_default: false
+  - name: options_file
+    label: Generation options
+    description: Optional HMSM GenerationOptions JSON with stream selection, expression policy, and geometry settings.
+    type: file_path
+    bind_source_by_default: false
+    mutex_with: [options_json]
+
+outputs:
+  - {name: result_file, label: Reconstruction manifest, type: file_path, extensions: [.json], required: true}
+  - {name: evidence_bundle, label: Verifiable reconstruction bundle, type: file_path, extensions: [.zip], required: true}
+  - {name: source_midi, label: Original MIDI, type: file_path, extensions: [.mid], required: true}
+  - {name: midi_file, label: Represented playback MIDI, type: file_path, extensions: [.mid], required: true}
+  - {name: medium_svg, label: Carrier layout SVG, type: file_path, extensions: [.svg], required: true}
+  - {name: physical_svg, label: Physical scale SVG, type: file_path, extensions: [.svg], required: true}
+  - {name: cutting_svg, label: Cutting layout SVG, type: file_path, extensions: [.svg], required: true}
+  - name: print_pdf
+    label: Tiled physical scale PDF
+    description: Produced when the layout fits the PDF renderer's page and geometry limits.
+    type: file_path
+    extensions: [.pdf]
+  - {name: source_preview, label: Carrier layout preview, type: file_path, extensions: [.webp], required: true}
+  - {name: performance_file, label: Carrier performance report, type: file_path, extensions: [.json], required: true}
+  - {name: events_file, label: Event and control ledger, type: file_path, extensions: [.json], required: true}
+  - {name: transform_file, label: HMSM transform record, type: file_path, extensions: [.json], required: true}
+  - name: punching_file
+    label: Punch profile report
+    description: Produced for a successful reconstruction with profile-based punching enabled.
+    type: file_path
+    extensions: [.json]
+  - {name: runtime_manifest, label: HMSM runtime provenance, type: file_path, extensions: [.json], required: true}
+
+parameter_groups:
+  - title: Physical layout
+    parameters:
+      - name: model_id
+        label: HMSM model ID
+        description: Select a supported roll or cardboard-disc reconstruction profile.
+        type: string
+        default: generic_65_no_dynamics
+      - name: title
+        label: Study title
+        type: string
+        default: Untitled reconstruction study
+      - name: roll_speed
+        label: Roll speed (feet/minute)
+        description: Nominal roll speed greater than 0.1 and at most 30 feet per minute.
+        type: number
+        default: 6
+      - name: revolution
+        label: Disc revolution (seconds)
+        description: Nominal disc period from 1 to 3600 seconds.
+        type: number
+        default: 60
+      - name: options_json
+        label: Generation options JSON
+        description: Inline HMSM GenerationOptions for this step. Use this field or a staged options file.
+        type: text
+        mutex_with: [options_file]
+
+execution:
+  profiles:
+    - id: local_docker
+      adapter: container_cli
+      runtime: docker
+      image: webhdp-hmsm-studio:local
+      entrypoint: [python, /app/component_runner.py, reconstruct]
+      config:
+        webhdp_contract: true
+        network: none
+      resources: {gpu_count: 0, cpus: 2, memory_mb: 2048}
+
+compatibility:
+  playground:
+    enabled: true
+
+install:
+  strategies:
+    - id: local_container
+      runtime: docker
+      profile: local_docker
+      image: webhdp-hmsm-studio:local
+  test:
+    files:
+      # Seven synthetic MIDI notes inside the generic 65-note profile.
+      - name: synthetic-study.mid
+        content_base64: "TVRoZAAAAAYAAQACAeBNVHJrAAAAHgD/Aw9TeW50aGV0aWMgc3R1ZHkA/1EDB6EgAP8vAE1UcmsAAABJAJA8UIFmgDwAgRqQQFCBZoBAAIEakENQgWaAQwCBGpBAUIFmgEAAgRqQPFCBZoA8AIEakDdQgWaANwCBGpAwUIFmgDAAAP8vAA=="
+    inputs:
+      input_file: synthetic-study.mid
+    parameters:
+      model_id: generic_65_no_dynamics
+      title: Synthetic reconstruction study
+
+ui:
+  playground:
+    fields:
+      input_file:
+        widget: file_picker
+        accept_extensions: [.mid, .midi]
+        help_text: For Type-2 MIDI, set the intended sequence_track in the generation options.
+      model_file:
+        widget: file_picker
+        accept_extensions: [.json]
+      options_file:
+        widget: file_picker
+        accept_extensions: [.json]
+    result:
+      artifact_views:
+        - {id: reconstruction-preview, label: Carrier layout preview, widget: image_gallery, extensions: [.webp]}
+        - {id: reconstruction-layouts, label: Layout files, widget: file_download, extensions: [.svg, .pdf]}
+        - {id: reconstruction-midi, label: Original and represented MIDI, widget: file_download, extensions: [.mid]}
+        - {id: reconstruction-evidence, label: Ledgers, reports, and bundle, widget: file_download, extensions: [.json, .zip]}
+      show_result_json: true
+      show_logs: true

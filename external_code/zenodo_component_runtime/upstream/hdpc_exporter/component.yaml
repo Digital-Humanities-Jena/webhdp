@@ -1,0 +1,147 @@
+metadata:
+  name: hdpc_exporter
+  label: "HDPC to CSV Exporter"
+  description: >
+    Exports data from Heritage Data Processor Container (.hdpc) or legacy (.db) database files to CSV format with configurable columns and export modes.
+  tags:
+    - data-migration
+    - export-tools
+    - csv-export
+    - database-tools
+  keywords:
+    - csv
+    - converter´
+  category: "Core"
+  version: "0.1.0"
+  status: alpha
+  created: "2025-08-21"
+  updated: "2025-08-21"
+  authors:
+    - name: "Ukolov, Dominik"
+      affiliation: "Friedrich-Schiller-University Jena"
+      orcid: "0000-0002-7904-3892"
+  contact:
+    email: "dominik.ukolov@uni-jena.de"
+  license:
+    type: GPLv3
+    url: "https://www.gnu.org/licenses/gpl-3.0.html.en"
+  component_schema: "0.1.0-alpha.2"
+
+sources:
+  record: ""
+  doi: ""
+  concept_doi: ""
+  git: ""
+
+structure:
+  required_files:
+    - "processor.py"
+    - "main.py"
+    - "requirements.txt"
+    - "tests/test.py"
+    - "tests/test.hdpc"
+  additional_files: []
+  directories:
+    - "output"
+
+inputs:
+  - name: input-file
+    label: Input Database File
+    description: "Path to database file (.hdpc for Heritage Data Processor Container format)"
+    type: file_path
+    required: true
+    validation_rules:
+      file_extensions: [".hdpc"]
+      min_size_bytes: "1"
+
+outputs:
+  - name: output-dir
+    label: Output Directory
+    description: "Directory for output files"
+    category: metadata
+    type: "application/octet-stream"
+
+parameter_groups:
+  - title: Export Configuration
+    description: "Configure the export mode and content"
+    parameters:
+      - name: export-mode
+        label: "Export Mode"
+        type: string_dropdown
+        default: "files_overview"
+        options: ["files_overview", "zenodo_records", "metadata_export", "project_summary", "api_log", "legacy_pmm", "custom"]
+        description: "Predefined export template or custom mode"
+      - name: include-tables
+        label: "Tables to Include (custom mode)"
+        type: string
+        default: "source_files"
+        description: "Comma-separated list of table names to include in custom export"
+      - name: custom-columns
+        label: "Custom Columns (custom mode)"
+        type: string
+        default: ""
+        description: "Comma-separated list of table.column names (e.g., source_files.filename,zenodo_records.record_title)"
+      - name: custom-sql-query
+        label: "Custom SQL Query"
+        type: string
+        default: ""
+        description: "Custom SQL SELECT query for advanced exports (overrides other column settings)"
+
+  - title: Filtering Options
+    description: "Filter the data to be exported"
+    parameters:
+      - name: include-project-info
+        label: "Include Project Information"
+        type: boolean
+        default: true
+        description: "Add project metadata columns to the export (HDPC databases only)"
+      - name: filter-status
+        label: "Filter by Status"
+        type: string
+        default: ""
+        description: "Filter records by status (e.g., 'published', 'draft', 'pending'). Leave empty for all."
+      - name: date-range-start
+        label: "Date Range Start (YYYY-MM-DD)"
+        type: string
+        default: ""
+        description: "Start date for filtering records (optional)"
+      - name: date-range-end
+        label: "Date Range End (YYYY-MM-DD)"
+        type: string
+        default: ""
+        description: "End date for filtering records (optional)"
+      - name: max-rows
+        label: "Maximum Rows"
+        type: integer
+        default: "0"
+        description: "Maximum number of rows to export (0 = no limit)"
+
+  - title: Utility Options
+    description: "General utility options"
+    parameters:
+      - name: test
+        label: "Run Internal Test Suite"
+        type: boolean
+        default: false
+        description: "If true, runs the component's built-in test suite instead of processing input files."
+      - name: verbose
+        label: "Enable Verbose Output"
+        type: boolean
+        default: false
+        description: "Enable verbose output"
+
+requirements:
+  python_environment:
+    python_version: ">=3.8"
+    packages:
+      - name: "pandas"
+        version: ">=1.5.0"
+      - name: "PyYAML"
+        version: "6.0.2"
+  system_dependencies: []
+  system_requirements:
+    min_memory_mb: 512
+
+execution:
+  idempotent: true
+  timeout: 300

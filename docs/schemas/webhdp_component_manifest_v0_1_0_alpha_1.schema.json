@@ -178,6 +178,17 @@
           "default": false
         },
         "default": {},
+        "bind_source_by_default": {
+          "type": "boolean",
+          "default": true,
+          "description": "For file_path inputs, bind the record source when the pipeline has no explicit binding."
+        },
+        "extensions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"type": "string", "pattern": "^\\.[a-zA-Z0-9]+$"},
+          "description": "File suffixes produced by a file_path output, used for artifact binding and output validation."
+        },
         "options": {
           "type": "array",
           "default": []

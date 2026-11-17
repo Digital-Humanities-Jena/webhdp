@@ -2528,8 +2528,7 @@ def start_session_directory():
     # Check cloud storage availability and get storage mode
     from services.cloud_upload_service import (
         CloudUploadService,
-        STORAGE_DROPBOX,
-        STORAGE_GDRIVE,
+        read_stream_receipt,
         STORAGE_MODE_PURE_CLOUD,
         STORAGE_MODE_CLOUD_BACKUP,
         STORAGE_MODE_SERVER_ONLY,
@@ -2573,7 +2572,6 @@ def start_session_directory():
     # Track original ZIP path for cloud upload (used in cloud_backup mode)
     original_zip_path = None
 
-    # NOTE: JSON request can now also contain cloud_path for streamed uploads
     current_user = db.session.get(User, user_id)
     session_workspace_payload = dict(data or {})
     for key in (
@@ -2604,12 +2602,18 @@ def start_session_directory():
         or "merge_non_empty"
     )
 
-    # Get cloud_path from JSON or Form Data
-    cloud_path = data.get("cloud_path") or request.form.get("cloud_path")
-    cloud_original_filename = data.get("cloud_original_filename") or request.form.get("cloud_original_filename")
-    cloud_storage_type = str(data.get("cloud_storage_type") or request.form.get("cloud_storage_type") or "").strip().lower()
-    if cloud_storage_type and cloud_storage_type not in {STORAGE_DROPBOX, STORAGE_GDRIVE}:
-        return APIResponse.validation_error("cloud_storage_type must be dropbox or gdrive")
+    cloud_path = cloud_original_filename = cloud_storage_type = None
+    receipt = data.get('cloud_upload_receipt') or request.form.get('cloud_upload_receipt')
+    if receipt or data.get('cloud_path') or request.form.get('cloud_path'):
+        if storage_mode != STORAGE_MODE_PURE_CLOUD:
+            return APIResponse.validation_error('Streamed cloud inputs require pure cloud storage mode.')
+        try:
+            cloud_reference = read_stream_receipt(receipt, user_id)
+        except SecurityError as exc:
+            return APIResponse.error('CLOUD_UPLOAD_RECEIPT_REQUIRED', str(exc), 403)
+        cloud_path, cloud_original_filename, cloud_storage_type = (
+            cloud_reference['path'], cloud_reference['name'], cloud_reference['provider']
+        )
     hpc_allocation_id = str(data.get("hpc_allocation_id") or request.form.get("hpc_allocation_id") or "").strip()
 
     # Determine input sources based on storage mode and provided data
@@ -2623,7 +2627,7 @@ def start_session_directory():
     try:
         # 1. Handle Remote/Streamed Upload (Pure Cloud)
         if cloud_path and storage_mode == STORAGE_MODE_PURE_CLOUD:
-            logger.info(f"Processing remote cloud file: {cloud_path}")
+            logger.info("Processing uploaded cloud file")
 
             if 'msf_file' in request.files:
                 msf_file = request.files.get('msf_file')

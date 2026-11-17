@@ -1,0 +1,29 @@
+# TEMPLATE ONLY. Install only on an approved persistent application-service host.
+# Replace every @...@ with reviewed local paths/account/drain bound. This unit
+# does not submit a Slurm job and is not a GPU allocation supervisor.
+[Unit]
+Description=WebHDP-Link durable queue worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@SERVICE_USER@
+Group=@SERVICE_GROUP@
+Environment=ROOT=@WEBHDP_ROOT@
+Environment=ENV_FILE=@PRIVATE_BACKEND_ENV_FILE@
+ExecStart=/bin/bash @WEBHDP_ROOT@/scripts/hpc_singularity/remote/run_link_worker.sh
+Restart=on-failure
+RestartSec=10
+KillSignal=SIGTERM
+# Signal the supervisor/main process first; allow the current invocation to
+# finish. Forced timeout then kills the cgroup. Drain before release upgrades.
+KillMode=mixed
+TimeoutStopSec=@WHOLE_JOB_DRAIN_SECONDS@
+UMask=0077
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=webhdp-link-worker
+
+[Install]
+WantedBy=multi-user.target

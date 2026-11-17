@@ -14,6 +14,7 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
 OUTPUT_PATH = ROOT / "docs" / "api" / "openapi.json"
+LINK_OUTPUT_PATH = ROOT / "docs" / "api" / "webhdp-link.openapi.json"
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -28,6 +29,11 @@ PUBLIC_PATH_PREFIXES = (
 PUBLIC_EXACT_PATHS = {
     "/api/v1/health",
     "/api/v1/docs/index",
+    "/api/v1/link/discovery",
+    "/api/v1/link/openapi.json",
+    "/api/v1/link/oauth/request",
+    "/api/v1/link/oauth/token",
+    "/api/v1/link/oauth/revoke",
 }
 
 
@@ -138,6 +144,12 @@ def _build_spec() -> dict[str, Any]:
                 operation["parameters"] = parameters
             if not _is_public(path):
                 operation["security"] = [{"bearerAuth": []}]
+            if path.startswith("/api/v1/link/"):
+                operation["description"] = "WebHDP-Link uses raw JSON successes and RFC 9457 Problem Details. See the complete OpenAPI 3.1 contract at /api/v1/link/openapi.json."
+                operation["responses"]["200"]["description"] = "See the dedicated WebHDP-Link contract for precise success status, response schema, and headers."
+                internal = path.startswith(("/api/v1/link/admin/", "/api/v1/link/grants", "/api/v1/link/jobs")) or path == "/api/v1/link/oauth/authorize"
+                if not internal and not _is_public(path):
+                    operation["security"] = [{"linkBearer": []}]
             path_item[method.lower()] = operation
 
     return {
@@ -157,6 +169,7 @@ def _build_spec() -> dict[str, Any]:
         ],
         "components": {
             "securitySchemes": {
+                "linkBearer": {"type": "http", "scheme": "bearer", "bearerFormat": "opaque WebHDP-Link token"},
                 "bearerAuth": {
                     "type": "http",
                     "scheme": "bearer",
@@ -169,11 +182,20 @@ def _build_spec() -> dict[str, Any]:
     }
 
 
+def contracts() -> dict[Path, dict[str, Any]]:
+    from services.webhdp_link_openapi import document
+
+    return {
+        OUTPUT_PATH: _build_spec(),
+        LINK_OUTPUT_PATH: document("https://webhdp.example"),
+    }
+
+
 def main() -> int:
-    spec = _build_spec()
-    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    OUTPUT_PATH.write_text(json.dumps(spec, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    print(f"Wrote {OUTPUT_PATH.relative_to(ROOT)} with {len(spec['paths'])} paths.")
+    for path, spec in contracts().items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(spec, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        print(f"Wrote {path.relative_to(ROOT)} with {len(spec['paths'])} paths.")
     return 0
 
 

@@ -1,0 +1,97 @@
+metadata:
+  name: historic_refine_keypoints
+  label: Historic Tracked Keypoint Refinement
+  description: Execute the original refine keypoints stage using an operator-provisioned,
+    source-pinned research runtime. Requires external dependencies and model weights;
+    see the historic reconstruction research guide.
+  tags:
+  - historic-reconstruction
+  - research
+  - gpu
+  category: Historic Reconstruction Research
+  version: 1.0.1
+  status: alpha
+  component_schema: 0.1.0-alpha.1
+distribution:
+  tier: external_installable
+  bundled_with_webhdp: false
+  installation_scope:
+  - hpc_sif
+inputs:
+- name: input_file
+  label: Research image or workspace ZIP
+  type: file_path
+  required: true
+outputs:
+- name: workspace_bundle
+  label: Workspace bundle
+  type: file_path
+  extensions:
+  - .zip
+  required: true
+- name: report
+  label: Report
+  type: file_path
+  extensions:
+  - .json
+  required: true
+parameter_groups:
+- title: Research stage settings
+  parameters:
+  - name: max_refine_num
+    label: Maximum tracks refined per pass
+    description: Limit each of the two passes, ordered by track length and then reprojection error.
+    type: integer
+    default: 100000
+    minimum: 1
+    maximum: 1000000
+  - name: run_ba
+    label: Run additional bundle adjustment
+    description: Enable additional adjustment and filtering loops. The upstream method always performs its base adjustment.
+    type: boolean
+    default: true
+execution:
+  timeout: 7200
+  profiles:
+  - id: hpc_singularity
+    adapter: hpc_link
+    handler: generic_singularity_component
+    runtime: singularity
+    image: ''
+    entrypoint:
+    - python
+    - /app/component_runner.py
+    - upstream-refine_keypoints
+    resources:
+      gpu_count: 1
+      cpus: 8
+      memory_mb: 65536
+compatibility:
+  playground:
+    enabled: true
+install:
+  strategies:
+  - id: hpc_sif
+    runtime: singularity
+    profile: hpc_singularity
+hpc:
+  install:
+    runtime: singularity
+    sif_required: true
+ui:
+  playground:
+    fields:
+      input_file:
+        widget: file_picker
+        accept_extensions:
+        - .zip
+    result:
+      artifact_views:
+      - id: research-results
+        label: Research workspace and evidence
+        widget: file_download
+        extensions:
+        - .zip
+        - .json
+      show_result_json: true
+      show_logs: true

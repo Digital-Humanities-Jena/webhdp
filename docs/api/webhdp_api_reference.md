@@ -4,8 +4,8 @@ Base URLs, default development environment:
 - `http://localhost:5000/api/v1`
 - `http://localhost:5000/api/v2`
 
-This document describes the WebHDP HTTP API currently registered under `/api/v1/...` and `/api/v2/...`.
-It was reconciled against the live Flask route map on April 29, 2026.
+This document describes the WebHDP HTTP API under `/api/v1/...` and
+`/api/v2/...`. For the connected application API, see [WebHDP-Link](#21-webhdp-link-api-apiv1link).
 
 A generated route inventory is available at `openapi.json`. Regenerate it with `make api-contract` after adding or removing API routes.
 
@@ -47,7 +47,8 @@ Workflow contract notes:
 
 ## 2. Authentication and Access Model
 
-- JWT bearer authentication is required for all protected routes.
+- WebHDP JWT bearer authentication is required for protected native routes.
+  WebHDP-Link has separate scoped tokens for external clients.
 - Role values: `user`, `moderator`, `admin`.
 - Additional access patterns appear throughout the API:
   - `Owner scope`: the authenticated user must own the session/submission or otherwise have explicit access.
@@ -753,14 +754,68 @@ Operators should use this endpoint as the API equivalent of the Settings -> EDM 
 | GET | `/test/gdrive` | Yes | Admin | Test Google Drive connectivity |
 | GET | `/test/dropbox` | Yes | Admin | Test Dropbox connectivity |
 
-## 20. Async and Degraded-Source Notes
+## 20. Reserved GPUs (`/api/v1/hpc-link`)
+
+| Method | Path | Access | Purpose |
+|---|---|---|---|
+| GET | `/reservations` | Verified account with HPC Access; explicit grant | List reservations granted to the account |
+| POST | `/reservations/<reservation_id>/claim` | Same; owner of the specified session | Claim a reservation and return its ordinary allocation handle |
+| GET | `/allocations/<allocation_id>` | Allocation access | Poll the claim and live scheduler status |
+| POST | `/allocations/<allocation_id>/preflight` | Allocation access | Check components and resources for the selected runtime |
+| POST | `/allocations/<allocation_id>/release` | Allocation access | Detach access to a reserved job after active work finishes |
+
+For a claim supply integer `session_id` and `purpose` of `workflow` or
+`playground`. Use the WebHDP reservation ID, which is distinct from the gateway
+registration ID and the scheduler job ID. Only one active claim per reservation
+is allowed. A repeat claim for the same session/account returns the existing
+allocation. The claim uses the existing global and user allocation limits.
+A release for an operator-held GPU detaches access without cancelling Slurm.
+
+Administrators register and edit WebHDP grants:
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/v1/admin/hpc-reservations` | List WebHDP registrations |
+| POST | `/api/v1/admin/hpc-reservations` | Register an available gateway reservation; supply `gateway_reservation_id`, `label` and `allowed_emails` |
+| PATCH | `/api/v1/admin/hpc-reservations/<reservation_id>` | Change `label`, `enabled` or `allowed_emails`; release an active claim before removing its grant |
+
+See the [demo runbook](../guides/prereserved_gpu_demo.md) for the separate,
+private HPC-Link registration and staging/rehearsal steps.
+
+## 21. WebHDP-Link API (`/api/v1/link`)
+
+The [Link OpenAPI contract](webhdp-link.openapi.json), also served at
+`/api/v1/link/openapi.json`, describes all request and response schemas.
+`GET /api/v1/link/discovery` is public. It supplies the issuer, endpoints and
+supported scopes. Link returns direct JSON responses and
+`application/problem+json` errors. It does not use the native response
+envelope above.
+
+| Route family | Access |
+|---|---|
+| `/oauth/request`, `/oauth/token`, `/oauth/revoke` | Registered client flow; authorization code exchange requires S256 PKCE |
+| `/oauth/authorize`, `/grants`, `/jobs` | Verified user with WebHDP JWT; user-owned consent and job views |
+| `/admin/*` | WebHDP administrator JWT |
+| `/pipelines`, `/uploads`, `/runs` | Scoped Link bearer token and approved application/publication; browser origin must match authorization |
+
+Submit a run with an `Idempotency-Key` and a list of authorized upload IDs.
+Retry uncertain submissions with the same key and inputs. A changed request
+with the same key returns a conflict. A durable job can wait for resources
+before a component starts. Check both `status` and `progress.phase`, and use
+the artifact's SHA-256 and size to verify its download. A user's token expiry
+does not cancel accepted work. Reconnect as the same user to recover it.
+See the [integration guide](../guides/webhdp_link.md) for the browser SDK and
+[API examples](webhdp_api_examples.md#16-use-webhdp-link-with-a-service-token)
+for a server-side client.
+
+## 22. Async and Degraded-Source Notes
 
 - Ingestion returns async task IDs via `/sessions/directory`; poll `/sessions/tasks/<task_id>`.
 - Native session batch operations and moderator tool tasks have dedicated task-status routes.
 - Some record and explorer endpoints can return `source_state: "hdpc_unavailable"` or `503 SOURCE_UNAVAILABLE` when the session `.hdpc` is not present on the current backend instance.
 - Shared `.hdpc` exports are sanitized allowlist copies intended for institution-safe exploration, not raw writable project replicas.
 
-## 21. Related References
+## 23. Related References
 
 - Practical examples: `webhdp_api_examples.md`
 - `.hdpc` schema: `../architecture/hdpc_schema.md`

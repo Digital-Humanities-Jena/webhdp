@@ -105,7 +105,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Run tests
-        run: uv run --with pytest --with-requirements requirements.txt python -m pytest
+        run: uv run --with pytest --with pytest-asyncio --with-requirements requirements.lock python -m pytest
 
   hpc-link-frontend:
     name: HPC Link Frontend

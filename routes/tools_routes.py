@@ -783,7 +783,10 @@ def tools_context():
             can_allocate_hpc = False
             active_hpc_allocation = False
 
-        input_root = current_app.project_service._translate_path(_resolve_local_input_root(), to_container=True)
+        input_root = (
+            current_app.project_service._translate_path(_resolve_local_input_root(), to_container=True)
+            if local_admin_enabled else ""
+        )
         msf_files = _list_local_msf_files(input_root) if local_admin_enabled else []
 
         return APIResponse.success(

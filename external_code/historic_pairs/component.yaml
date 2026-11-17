@@ -1,0 +1,158 @@
+metadata:
+  name: historic_pairs
+  label: Historic Image Pair Selection
+  description: Select exhaustive or GPS-neighbour image pairs for a prepared image
+    dataset.
+  tags:
+  - historic-reconstruction
+  - photogrammetry
+  - colmap
+  category: Historic Reconstruction
+  version: 1.0.1
+  status: alpha
+  component_schema: 0.1.0-alpha.1
+distribution:
+  tier: external_installable
+  bundled_with_webhdp: false
+  installation_scope:
+  - local_container
+  - hpc_sif
+inputs:
+- name: input_file
+  label: Prepared image dataset ZIP
+  type: file_path
+  required: true
+- name: gps_file
+  label: Image GPS coordinates (JSON)
+  type: file_path
+  bind_source_by_default: false
+  description: Required for GPS selection. Keys are original or prepared image names;
+    values are [latitude, longitude].
+outputs:
+- name: dataset
+  label: Dataset
+  type: file_path
+  extensions:
+  - .zip
+  required: true
+- name: pairs
+  label: Pairs
+  type: file_path
+  extensions:
+  - .txt
+  required: true
+- name: report
+  label: Report
+  type: file_path
+  extensions:
+  - .json
+  required: true
+parameter_groups:
+- title: Processing settings
+  parameters:
+  - name: method
+    label: Pair selection
+    type: string
+    default: exhaustive
+    enum:
+    - exhaustive
+    - gps
+  - name: max_neighbors
+    label: Maximum GPS neighbours
+    type: integer
+    default: 20
+    minimum: 1
+    maximum: 10000
+  - name: radius_m
+    label: GPS search radius (metres)
+    type: number
+    default: 1000
+    minimum: 1
+    maximum: 10000000
+execution:
+  timeout: 7200
+  profiles:
+  - id: local_docker
+    adapter: container_cli
+    runtime: docker
+    image: webhdp-historic-reconstruction:local
+    entrypoint:
+    - python
+    - /app/component_runner.py
+    - pairs
+    config:
+      webhdp_contract: true
+      network: none
+    resources:
+      gpu_count: 0
+      cpus: 4
+      memory_mb: 8192
+  - id: hpc_singularity
+    adapter: hpc_link
+    handler: generic_singularity_component
+    runtime: singularity
+    image: ''
+    entrypoint:
+    - python
+    - /app/component_runner.py
+    - pairs
+    resources:
+      gpu_count: 0
+      cpus: 2
+      memory_mb: 8192
+compatibility:
+  playground:
+    enabled: true
+install:
+  strategies:
+  - id: local_container
+    runtime: docker
+    profile: local_docker
+    image: webhdp-historic-reconstruction:local
+  - id: hpc_sif
+    runtime: singularity
+    profile: hpc_singularity
+  test:
+    description: Synthetic image preparation/pair contract fixture; no reconstruction
+      accuracy claim.
+    files:
+    - name: prepared-images.zip
+      content_base64: UEsDBC0AAAAIAAAAIQBjy7FQ//////////8MABQAZGF0YXNldC5qc29uAQAQAP0EAAAAAAAABAIAAAAAAACVlNtu2zAMhu/zFIGv00ykRFrqqwxDQElU4qI5zHF2Kvruk920AYqh9XRhyBRF/v5+WU+L5bJJx2Ofu4MMuim97LW5XzaXQ6/b7jxor7lZjVndXrZ6rmtf69ty+TQ9a/xw3WHGAeuH03bKn9aOfbethR83r0lTkTuzPh3+lXXu/uhbg3EAr25zvE6/vW087wSJx7pC2UQxgdkJSopKXHwOPtnkEYy6UHJMLZcgjFRUuBRWiZzZgAjexPy3huOlT7q5SVFQ9i5TiUiJMYMYAsiucBEwjmsoY7DowFAxHpwLhAWjCQJRUmimys+rDyjjLMowm3I7k3LrioacU5tblsSaDLSK3tlCCQySt65YQkbvtYUiVm1UiyW6kLwE+YjyJxreU26RgbnYEF001fhElitBhzY705KrGmLk6gRj8ilRHK1IAm3rgwLlGZTtLMo4m7KfSdlQPcMl5KKchDiDzeIkqxChKxATVhciJwDvBU2o5zoniMUnUuvAf0T5Ew3vKadgVLMGAEZjLXLFV9pMmaD+Zt5XA4jBjye3WlHQ1kxlQ6RiwTq9Ul5cmzR7HSTLIJte98cf9Wa5Xw79Rae1U68n6WXojocafrGkeTjpdvP9Io/d8LtGA71obfbyazPxf+UMbMziamhzTjvdy/gBPzXu8mm9qzdZdSbdjc3POnyBZvG8+AtQSwMELQAAAAgAAAAhABzgXKj//////////xEAFABpbWFnZXMvMDAwMDAxLmpwZwEAEAAfAQAAAAAAAIwAAAAAAAAAlY67DQIxDIZ/x4mTy6W4SLAAPTNQIJ0ECzEBe13BEMA1bGLio+LR8Fm27F9+6VUfGI7jYQQRQM2gM/ZwZFh0hmeLwXv2EkQWj11qHkVSn7pstKz0uVhhS16jLjCHHCXmv9EJNaFgYNrAVeJKesF6efWN1OTV8KnC1N+99bv3jsLUrnDFDudpyye9PQFQSwMELQAAAAgAAAAhADzPH1X//////////xEAFABpbWFnZXMvMDAwMDAyLmpwZwEAEAAiAQAAAAAAAI4AAAAAAAAAlY45DgIxDEW/48TJZFJMJKiRuAgF0kjQcxtuwKWm4BAsDTcx8VCxNDzLlm19L3rRB4b9uBtBBFAz6B1bODIsOsOzxeA9ewkis8cuNY8iqU9dNlpW+lyssCWvUReYQ44S89/ohJpQUJnWcJW4kp6xnF99I7X2YvjswsT0W1y/xTcUpnaGKzY4TYfuiJVen1BLAwQtAAAACAAAACEAKrype///////////EQAUAGltYWdlcy8wMDAwMDMuanBnAQAQACMBAAAAAAAAlQAAAAAAAACVjz0OwjAMhZ/j/DXN0CBgQkLiIgxIleAm3IMLcKMOPQQ/CzcJdpkKE19ky3l6tpN6qy90p/7YgwggOahPHGBI0WwUy5qdtWy9836K0ESJ4H1sY5MUqXKbsl50yKfVOGaXgg/pb+qAEpGxYNrBFOJCdcRqeuqMKPKy+1Yh6lq/MVfD5C6/7gcyk+zhgj2uw/mywbbe31BLAQItAy0AAAAIAAAAIQBjy7FQBAIAAP0EAAAMAAAAAAAAAAAAAACkgQAAAABkYXRhc2V0Lmpzb25QSwECLQMtAAAACAAAACEAHOBcqIwAAAAfAQAAEQAAAAAAAAAAAAAApIFCAgAAaW1hZ2VzLzAwMDAwMS5qcGdQSwECLQMtAAAACAAAACEAPM8fVY4AAAAiAQAAEQAAAAAAAAAAAAAApIERAwAAaW1hZ2VzLzAwMDAwMi5qcGdQSwECLQMtAAAACAAAACEAKrype5UAAAAjAQAAEQAAAAAAAAAAAAAApIHiAwAAaW1hZ2VzLzAwMDAwMy5qcGdQSwUGAAAAAAQABAD3AAAAugQAAAAA
+    inputs:
+      input_file: prepared-images.zip
+    parameters: {}
+hpc:
+  install:
+    runtime: singularity
+    sif_required: true
+  test:
+    description: Synthetic image preparation/pair contract fixture; no reconstruction
+      accuracy claim.
+    files:
+    - name: prepared-images.zip
+      content_base64: UEsDBC0AAAAIAAAAIQBjy7FQ//////////8MABQAZGF0YXNldC5qc29uAQAQAP0EAAAAAAAABAIAAAAAAACVlNtu2zAMhu/zFIGv00ykRFrqqwxDQElU4qI5zHF2Kvruk920AYqh9XRhyBRF/v5+WU+L5bJJx2Ofu4MMuim97LW5XzaXQ6/b7jxor7lZjVndXrZ6rmtf69ty+TQ9a/xw3WHGAeuH03bKn9aOfbethR83r0lTkTuzPh3+lXXu/uhbg3EAr25zvE6/vW087wSJx7pC2UQxgdkJSopKXHwOPtnkEYy6UHJMLZcgjFRUuBRWiZzZgAjexPy3huOlT7q5SVFQ9i5TiUiJMYMYAsiucBEwjmsoY7DowFAxHpwLhAWjCQJRUmimys+rDyjjLMowm3I7k3LrioacU5tblsSaDLSK3tlCCQySt65YQkbvtYUiVm1UiyW6kLwE+YjyJxreU26RgbnYEF001fhElitBhzY705KrGmLk6gRj8ilRHK1IAm3rgwLlGZTtLMo4m7KfSdlQPcMl5KKchDiDzeIkqxChKxATVhciJwDvBU2o5zoniMUnUuvAf0T5Ew3vKadgVLMGAEZjLXLFV9pMmaD+Zt5XA4jBjye3WlHQ1kxlQ6RiwTq9Ul5cmzR7HSTLIJte98cf9Wa5Xw79Rae1U68n6WXojocafrGkeTjpdvP9Io/d8LtGA71obfbyazPxf+UMbMziamhzTjvdy/gBPzXu8mm9qzdZdSbdjc3POnyBZvG8+AtQSwMELQAAAAgAAAAhABzgXKj//////////xEAFABpbWFnZXMvMDAwMDAxLmpwZwEAEAAfAQAAAAAAAIwAAAAAAAAAlY67DQIxDIZ/x4mTy6W4SLAAPTNQIJ0ECzEBe13BEMA1bGLio+LR8Fm27F9+6VUfGI7jYQQRQM2gM/ZwZFh0hmeLwXv2EkQWj11qHkVSn7pstKz0uVhhS16jLjCHHCXmv9EJNaFgYNrAVeJKesF6efWN1OTV8KnC1N+99bv3jsLUrnDFDudpyye9PQFQSwMELQAAAAgAAAAhADzPH1X//////////xEAFABpbWFnZXMvMDAwMDAyLmpwZwEAEAAiAQAAAAAAAI4AAAAAAAAAlY45DgIxDEW/48TJZFJMJKiRuAgF0kjQcxtuwKWm4BAsDTcx8VCxNDzLlm19L3rRB4b9uBtBBFAz6B1bODIsOsOzxeA9ewkis8cuNY8iqU9dNlpW+lyssCWvUReYQ44S89/ohJpQUJnWcJW4kp6xnF99I7X2YvjswsT0W1y/xTcUpnaGKzY4TYfuiJVen1BLAwQtAAAACAAAACEAKrype///////////EQAUAGltYWdlcy8wMDAwMDMuanBnAQAQACMBAAAAAAAAlQAAAAAAAACVjz0OwjAMhZ/j/DXN0CBgQkLiIgxIleAm3IMLcKMOPQQ/CzcJdpkKE19ky3l6tpN6qy90p/7YgwggOahPHGBI0WwUy5qdtWy9836K0ESJ4H1sY5MUqXKbsl50yKfVOGaXgg/pb+qAEpGxYNrBFOJCdcRqeuqMKPKy+1Yh6lq/MVfD5C6/7gcyk+zhgj2uw/mywbbe31BLAQItAy0AAAAIAAAAIQBjy7FQBAIAAP0EAAAMAAAAAAAAAAAAAACkgQAAAABkYXRhc2V0Lmpzb25QSwECLQMtAAAACAAAACEAHOBcqIwAAAAfAQAAEQAAAAAAAAAAAAAApIFCAgAAaW1hZ2VzLzAwMDAwMS5qcGdQSwECLQMtAAAACAAAACEAPM8fVY4AAAAiAQAAEQAAAAAAAAAAAAAApIERAwAAaW1hZ2VzLzAwMDAwMi5qcGdQSwECLQMtAAAACAAAACEAKrype5UAAAAjAQAAEQAAAAAAAAAAAAAApIHiAwAAaW1hZ2VzLzAwMDAwMy5qcGdQSwUGAAAAAAQABAD3AAAAugQAAAAA
+    inputs:
+      input_file: prepared-images.zip
+    parameters: {}
+ui:
+  playground:
+    fields:
+      input_file:
+        widget: file_picker
+        accept_extensions:
+        - .zip
+      gps_file:
+        widget: file_picker
+        accept_extensions:
+        - .json
+    result:
+      artifact_views:
+      - id: results
+        label: Scientific artifacts and reports
+        widget: file_download
+        extensions:
+        - .json
+        - .txt
+        - .zip
+      show_result_json: true
+      show_logs: true

@@ -166,11 +166,13 @@
 
 <script setup>
 import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
+import { linkLoginDestination } from '@/utils/webhdpLink'
 import { useAuthStore } from '@/stores/auth'
 import LegalLinks from '@/components/legal/LegalLinks.vue'
 
 const router = useRouter()
+const route = useRoute()
 const authStore = useAuthStore()
 
 const form = ref({
@@ -247,7 +249,7 @@ const handleLogin = async () => {
       step.value = 'mfa'
       return
     }
-    router.push('/workflow/upload')
+    router.push(linkLoginDestination(route.query?.redirect))
   } catch (err) {
     error.value = resolveLoginErrorMessage(err)
   } finally {
@@ -266,7 +268,7 @@ const handleVerifyCode = async () => {
     } else {
       await authStore.verifyLoginCode(mfaChallenge.value.token, code.value)
     }
-    router.push('/workflow/upload')
+    router.push(linkLoginDestination(route.query?.redirect))
   } catch (err) {
     error.value = resolveLoginErrorMessage(err)
     if (shouldReturnToCredentials(err)) {

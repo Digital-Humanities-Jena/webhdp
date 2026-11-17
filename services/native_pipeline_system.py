@@ -8,6 +8,7 @@ import copy
 import hashlib
 import json
 import logging
+import math
 import mimetypes
 import os
 import re
@@ -23,6 +24,8 @@ from itsdangerous import URLSafeTimedSerializer, BadSignature
 from services.registry_lock import serialize_registry, OperationConflict, registry_lock
 
 from constants import (
+    HMSM_COMPONENT_KEYS,
+    HMSM_PIPELINE_DEFINITIONS,
     LEGACY_PIPELINE_ALIASES,
     METADATA_ONLY_PIPELINE_DEFINITION,
     METADATA_ONLY_PIPELINE_ID,
@@ -63,7 +66,7 @@ from schemas.native_pipeline_schemas import (
     PipelineDefinitionSchema,
     PlaygroundExecutionRequestSchema,
 )
-from services.native_pipeline_adapters import AdapterExecutionRequest, build_default_adapter_registry
+from services.native_pipeline_adapters import AdapterExecutionRequest, build_default_adapter_registry, component_execution_timeout
 from services.hdpc_local_service import add_local_source_files
 from services.session_access_service import can_edit_session, can_view_session, is_session_mutable
 from services.hdpc_zenodo_service import create_api_draft as create_local_zenodo_draft
@@ -73,6 +76,12 @@ from services.hdp_component_policy import (
     hpc_required_component,
     hpc_required_message,
 )
+from services.historic_reconstruction_templates import (
+    HISTORIC_COMPONENT_KEYS, HISTORIC_PIPELINE_DEFINITIONS,
+    parameter_errors as historic_parameter_errors,
+)
+
+from services.zenodo_component_templates import ZENODO_COMPONENT_KEYS, ZENODO_PIPELINE_DEFINITIONS
 
 logger = logging.getLogger(__name__)
 
@@ -417,6 +426,9 @@ class NativePipelineSystemService:
         try:
             self._ensure_builtin_components_seeded()
             self._ensure_builtin_pipelines_seeded()
+            self.ensure_hmsm_pipeline_templates()
+            self.ensure_historic_pipeline_templates()
+            self.ensure_zenodo_pipeline_templates()
             self._seed_state = "complete"
         except Exception:
             self._seed_state = "idle"
@@ -482,6 +494,9 @@ class NativePipelineSystemService:
             version=component_version,
         ).first()
         if existing_version and existing_version.manifest_hash == manifest_hash:
+            self.ensure_hmsm_pipeline_templates(component_key=component_key)
+            self.ensure_historic_pipeline_templates(component_key=component_key)
+            self.ensure_zenodo_pipeline_templates(component_key=component_key)
             return self._serialize_component_version(component_definition, existing_version)
 
         if existing_version is not None:
@@ -502,6 +517,9 @@ class NativePipelineSystemService:
         db.session.flush()
         self._replace_component_profiles(version_row, manifest["execution"]["profiles"])
         db.session.commit()
+        self.ensure_hmsm_pipeline_templates(component_key=component_key)
+        self.ensure_historic_pipeline_templates(component_key=component_key)
+        self.ensure_zenodo_pipeline_templates(component_key=component_key)
         return self._serialize_component_version(component_definition, version_row)
 
     def list_components(self, *, playground_only: bool = False) -> List[Dict[str, Any]]:
@@ -621,9 +639,11 @@ class NativePipelineSystemService:
         ]
         steps = [step for step in normalized.get("steps", []) if step.get("enabled", True)]
         summary_steps: List[Dict[str, Any]] = []
+        file_errors: List[str] = []
 
         for step in steps:
-            step_component = self._get_component_manifest_by_key(step.get("component_ref") or step.get("id"), step.get("component_version"))
+            component_key = step.get("component_ref") or step["id"]
+            step_component = self._get_component_manifest_by_key(component_key, step.get("component_version"))
             step_resolution_rows = []
             if step.get("scope") == "batch":
                 input_definitions = self._field_definition_map(step_component.get("inputs") or [])
@@ -724,22 +744,26 @@ class NativePipelineSystemService:
                     record_context,
                     {"scope": step.get("scope", "record")},
                 )
+                effective_parameters = {
+                    **(step.get("parameters") or {}),
+                    **resolved_parameters,
+                    **_deepcopy(trigger_resolution.get("parameter_overrides") or {}),
+                }
+                if component_key in HMSM_COMPONENT_KEYS | HISTORIC_COMPONENT_KEYS | ZENODO_COMPONENT_KEYS and trigger_resolution["action"] == "run":
+                    effective_parameters = self._hmsm_parameters(step_component, effective_parameters)
+                    file_errors.extend(self._hmsm_preflight_input_errors(step["id"], step_component, resolved_inputs, record_context["filename"]))
                 step_resolution_rows.append(
                     {
                         "record_path": record_context["file_path"],
                         "action": trigger_resolution["action"],
                         "matched_rule_id": trigger_resolution.get("matched_rule_id"),
                         "resolved_inputs": _deepcopy(resolved_inputs),
-                        "effective_parameters": {
-                            **(step.get("parameters") or {}),
-                            **resolved_parameters,
-                            **_deepcopy(trigger_resolution.get("parameter_overrides") or {}),
-                        },
+                        "effective_parameters": effective_parameters,
                     }
                 )
             summary_steps.append({"step_id": step["id"], "scope": step.get("scope", "record"), "records": step_resolution_rows})
 
-            if (step.get("component_ref") or step.get("id")) == "input_file_classification":
+            if component_key == "input_file_classification":
                 for record_context in record_contexts:
                     record_context["step_outputs"].setdefault(
                         step["id"],
@@ -748,10 +772,12 @@ class NativePipelineSystemService:
                         },
                     )
 
+        if file_errors:
+            validation = {**validation, "valid": False, "errors": file_errors}
         return {
-            "valid": True,
+            "valid": validation["valid"],
             "pipeline": normalized,
-            "preflight_token": self._preflight_signer().dumps({"config_hash": _hash_payload(normalized), "session_id": request_model.session_id, "paths": request_model.local_file_paths, "user_id": user_id, "lod_hash": self._session_lod_hash(request_model.session_id)}),
+            "preflight_token": self._preflight_signer().dumps({"config_hash": _hash_payload(normalized), "session_id": request_model.session_id, "paths": request_model.local_file_paths, "user_id": user_id, "lod_hash": self._session_lod_hash(request_model.session_id)}) if validation["valid"] else None,
             "validation": validation,
             "steps": summary_steps,
         }
@@ -1324,7 +1350,7 @@ class NativePipelineSystemService:
             workdir=workdir,
             inputs=payload['inputs'],
             parameters=payload['parameters'],
-            metadata={"manifest": manifest, "timeout_seconds": payload.get('timeout_seconds', 3600),
+            metadata={"manifest": manifest, "timeout_seconds": component_execution_timeout(manifest, payload.get('timeout_seconds', 3600)),
                       "session_id": session_row.id, "initiated_by_user_id": user_id},
         )
         adapter = self._adapter_registry.get(adapter_name)
@@ -1423,6 +1449,68 @@ class NativePipelineSystemService:
                 activate=True,
                 mirror_legacy_config=False,
             )
+
+    def ensure_hmsm_pipeline_templates(self, *, component_key: Optional[str] = None) -> None:
+        """Register ready HMSM templates once while preserving saved definitions."""
+        for identifier, definition in HMSM_PIPELINE_DEFINITIONS.items():
+            steps = definition["steps"]
+            if component_key and not any(step["component_ref"] == component_key for step in steps):
+                continue
+            if PipelineDefinition.query.filter_by(identifier=identifier).first() is not None:
+                continue
+            if not all(self._has_hmsm_local_profile(step) for step in steps):
+                continue
+            with registry_lock("native-registry"):
+                if not all(self._has_hmsm_local_profile(step) for step in steps):
+                    continue
+                validation = self.validate_pipeline_config(definition)
+                if validation["valid"] and PipelineDefinition.query.filter_by(identifier=identifier).first() is None:
+                    self.create_pipeline_version_from_config(identifier, validation["normalized"])
+
+    def ensure_historic_pipeline_templates(self, *, component_key: Optional[str] = None) -> None:
+        """Offer recipes only after their exact execution profiles validate.
+
+        Preserve operator-edited and previously pinned recipes on reimport or
+        restart. Docker digests and SIF checksums are enforced by the existing
+        native publication validator, just as for user-authored pipelines.
+        """
+        for identifier, definition in HISTORIC_PIPELINE_DEFINITIONS.items():
+            if component_key and not any(step["component_ref"] == component_key for step in definition["steps"]):
+                continue
+            if PipelineDefinition.query.filter_by(identifier=identifier).first() is not None:
+                continue
+            with registry_lock("native-registry"):
+                if PipelineDefinition.query.filter_by(identifier=identifier).first() is not None:
+                    continue
+                validation = self.validate_pipeline_config(definition)
+                if validation["valid"]:
+                    self.create_pipeline_version_from_config(identifier, validation["normalized"])
+
+    def ensure_zenodo_pipeline_templates(self, *, component_key: Optional[str] = None) -> None:
+        """Create recipes only for installed immutable profiles; preserve saved versions."""
+        for identifier, definition in ZENODO_PIPELINE_DEFINITIONS.items():
+            if component_key and not any(step["component_ref"] == component_key for step in definition["steps"]):
+                continue
+            if PipelineDefinition.query.filter_by(identifier=identifier).first() is not None:
+                continue
+            with registry_lock("native-registry"):
+                if PipelineDefinition.query.filter_by(identifier=identifier).first() is not None:
+                    continue
+                validation = self.validate_pipeline_config(definition)
+                if validation["valid"]:
+                    self.create_pipeline_version_from_config(identifier, validation["normalized"])
+
+    def _has_hmsm_local_profile(self, step: Dict[str, Any]) -> bool:
+        try:
+            manifest = self._get_component_manifest_by_key(step["component_ref"])
+        except ValidationError:
+            return False
+        return any(
+            profile.get("id") == step["execution_profile_ref"]
+            and profile.get("adapter") == "container_cli"
+            and profile.get("runtime") == "docker"
+            for profile in manifest["execution"]["profiles"]
+        )
 
     def _load_effective_seed_config(self, identifier: str, default_definition: Dict[str, Any]) -> Dict[str, Any]:
         config = None
@@ -2005,9 +2093,9 @@ class NativePipelineSystemService:
             }
             if any(self._has_meaningful_bound_value(output.get(mutex_field)) for mutex_field in mutex_fields):
                 continue
-            if field_type == "file_path":
+            if field_type == "file_path" and field.get("bind_source_by_default") is not False:
                 output[field_name] = record_context.get("file_path")
-            elif field_type == "file_list":
+            elif field_type == "file_list" and field.get("bind_source_by_default") is not False:
                 source_files = self._candidate_source_files_for_inputs(
                     input_definitions,
                     output,
@@ -2589,6 +2677,18 @@ class NativePipelineSystemService:
 
         field_type = self._normalize_manifest_field_type(field.get("type"))
         field["type"] = field_type
+        if category == "output" and field_type == "file_path" and "extensions" in field:
+            extensions = field["extensions"]
+            if not isinstance(extensions, list) or not extensions or any(
+                not isinstance(extension, str) or not re.fullmatch(r"\.[a-zA-Z0-9]+", extension)
+                for extension in extensions
+            ):
+                raise ValidationError("Output extensions must be a non-empty list of file suffixes", details={"field": field_name})
+            field["extensions"] = list(dict.fromkeys(extension.lower() for extension in extensions))
+        if "bind_source_by_default" in field and (
+            category != "input" or field_type not in {"file_path", "file_list"} or not isinstance(field["bind_source_by_default"], bool)
+        ):
+            raise ValidationError("bind_source_by_default must be a boolean on file_path or file_list inputs", details={"field": field_name})
         field["required"] = bool(field.get("required", False))
         field["label"] = str(field.get("label") or field_name).strip()
         field["description"] = str(field.get("description") or "").strip()
@@ -2912,6 +3012,7 @@ class NativePipelineSystemService:
             "group_title": str((group or {}).get("title") or "").strip() or None,
             "group_description": str((group or {}).get("description") or "").strip() or None,
             "supported_source_kinds": self._get_supported_source_kinds(field_type),
+            **({"bind_source_by_default": field["bind_source_by_default"]} if "bind_source_by_default" in field else {}),
             "constraints": {
                 "mutex_with": [str(item).strip() for item in _listify(normalized_field.get("mutex_with")) if str(item).strip()],
             },
@@ -3259,6 +3360,56 @@ class NativePipelineSystemService:
             definitions.update(self._field_definition_map(group.get("parameters") or []))
         return definitions
 
+    @staticmethod
+    def _manifest_input_extensions(manifest: Dict[str, Any], field_name: str) -> List[str]:
+        fields = ((manifest.get("ui") or {}).get("playground") or {}).get("fields") or {}
+        return (fields.get(field_name) or {}).get("accept_extensions") or []
+
+    def _hmsm_preflight_input_errors(self, step_id, manifest, inputs, filename):
+        errors = []
+        for name, value in inputs.items():
+            extensions = self._manifest_input_extensions(manifest, name)
+            values = value if isinstance(value, list) else [value]
+            if extensions and any(item and Path(str(item)).suffix.lower() not in extensions for item in values):
+                errors.append(f"Step '{step_id}' input '{name}' for {filename} requires {', '.join(extensions)}.")
+        return errors
+
+    def _hmsm_parameters(self, manifest, parameters):
+        defaults = {
+            name: field["default"]
+            for name, field in self._component_parameter_definition_map(manifest).items()
+            if self._field_has_meaningful_default(field)
+        }
+        return {**defaults, **{name: value for name, value in parameters.items() if not self._is_missing_manifest_value(value)}}
+
+    def _hmsm_parameter_errors(self, step_id, definitions, parameters, input_names):
+        errors = []
+        for name, value in parameters.items():
+            field = definitions.get(name)
+            label = f"Step '{step_id}' parameter '{name}'"
+            if field is None:
+                errors.append(f"{label} is not declared by the component.")
+                continue
+            if self._is_missing_manifest_value(value):
+                continue
+            if field["type"] == "number" and (
+                isinstance(value, bool) or not isinstance(value, (int, float))
+                or (isinstance(value, float) and not math.isfinite(value))
+            ):
+                errors.append(f"{label} must be a finite number.")
+            elif field["type"] in {"string", "text"} and not isinstance(value, str):
+                errors.append(f"{label} must be text.")
+            elif name == "options_json":
+                try:
+                    valid_options = isinstance(json.loads(value), dict)
+                except ValueError:
+                    valid_options = False
+                if not valid_options:
+                    errors.append(f"{label} must contain a JSON object.")
+            for input_name in sorted(set(field.get("mutex_with", [])).intersection(input_names)):
+                errors.append(f"{label} cannot be used with input '{input_name}'.")
+        return errors
+
     def _binding_type_is_compatible(self, binding_type: str, target_type: str) -> bool:
         if binding_type == "pipeline_source_file":
             return target_type == "file_path"
@@ -3323,6 +3474,11 @@ class NativePipelineSystemService:
             manifests_by_step[step["id"]] = manifest
             profile = next((item for item in manifest.get("execution", {}).get("profiles", []) if item.get("id") == step.get("execution_profile_ref")), {})
             if step.get("enabled", True):
+                if component_key in HMSM_COMPONENT_KEYS and not (
+                    profile.get("adapter") == "container_cli" and profile.get("runtime") == "docker"
+                    and (profile.get("config") or {}).get("webhdp_contract") is True
+                ):
+                    errors.append(f"Step '{step['id']}' requires a WebHDP Docker contract execution profile.")
                 if profile.get("adapter") == "container_cli" and profile.get("runtime") == "docker":
                     if not re.fullmatch(r"(?:sha256:|.+@sha256:)[a-fA-F0-9]{64}", str(profile.get("image") or "")):
                         errors.append(f"Step '{step['id']}' uses a mutable Docker image. Install this component through HDP Components or specify an immutable SHA-256 image digest before publishing.")
@@ -3331,6 +3487,27 @@ class NativePipelineSystemService:
                         errors.append(f"Step '{step['id']}' has no pinned SIF checksum. Install and verify this component through HDP Components before publishing.")
             input_definitions = self._field_definition_map(manifest.get("inputs") or [])
             parameter_definitions = self._component_parameter_definition_map(manifest)
+            if component_key in HISTORIC_COMPONENT_KEYS | ZENODO_COMPONENT_KEYS and step.get("enabled", True):
+                parameters = {
+                    **step["parameters"],
+                    **{binding["target"]: binding["value"] for binding in step["parameter_bindings"] if binding["type"] == "literal"},
+                }
+                errors.extend(historic_parameter_errors(step["id"], parameter_definitions, parameters))
+                for rule in (step.get("triggers") or {}).get("rules", []):
+                    if rule.get("action") == "run":
+                        errors.extend(historic_parameter_errors(step["id"], parameter_definitions, rule.get("parameter_overrides") or {}))
+            if component_key in HMSM_COMPONENT_KEYS and step.get("enabled", True):
+                if step.get("scope") != "record":
+                    errors.append(f"Step '{step['id']}' requires record scope.")
+                bound_inputs = {binding["target"] for binding in step["input_bindings"]}
+                parameters = {
+                    **step["parameters"],
+                    **{binding["target"]: binding["value"] for binding in step["parameter_bindings"] if binding["type"] == "literal"},
+                }
+                errors.extend(self._hmsm_parameter_errors(step["id"], parameter_definitions, parameters, bound_inputs))
+                for rule in (step.get("triggers") or {}).get("rules", []):
+                    if rule.get("action") == "run" and rule.get("parameter_overrides"):
+                        errors.extend(self._hmsm_parameter_errors(step["id"], parameter_definitions, rule["parameter_overrides"], bound_inputs))
             input_types = {
                 str(field.get("type") or "").strip().lower()
                 for field in input_definitions.values()
@@ -3388,6 +3565,11 @@ class NativePipelineSystemService:
                             errors.append(
                                 f"Step '{step['id']}' binding '{target}' cannot read output '{source_output}' of type '{output_type}' from step '{source_step}'"
                             )
+                        if component_key in HMSM_COMPONENT_KEYS | HISTORIC_COMPONENT_KEYS | ZENODO_COMPONENT_KEYS and binding_type == "artifact_file":
+                            expected = self._manifest_input_extensions(manifest, target)
+                            produced = output_definition.get("extensions") or []
+                            if expected and produced and not set(expected).intersection(produced):
+                                errors.append(f"Step '{step['id']}' binding '{target}' requires {', '.join(expected)}, but '{source_step}.{source_output}' produces {', '.join(produced)}.")
 
             for action in step.get("output_actions", []):
                 action_type = str(action.get("action_type") or "").strip()
@@ -4067,6 +4249,8 @@ class NativePipelineSystemService:
             **resolved_parameters,
             **_deepcopy(parameter_overrides or {}),
         }
+        if component_key in HMSM_COMPONENT_KEYS | HISTORIC_COMPONENT_KEYS | ZENODO_COMPONENT_KEYS:
+            resolved_parameters = self._hmsm_parameters(manifest, resolved_parameters)
         adapter_name = profile.adapter
         self._ensure_component_runtime_available(
             component_key,
@@ -4100,6 +4284,7 @@ class NativePipelineSystemService:
                 "step": step,
                 "pipeline_run_id": pipeline_run.public_id,
                 "component_manifest": manifest,
+                "timeout_seconds": component_execution_timeout(manifest, step.get("timeout_seconds")),
             },
         )
         adapter = self._adapter_registry.get(adapter_name)

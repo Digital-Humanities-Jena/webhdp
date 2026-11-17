@@ -2,6 +2,10 @@
 
 This guide is for administrators and operators preparing WebHDP for production or a public scientific demonstration.
 
+For an existing deployment, start with the [alpha.3 upgrade checklist](upgrade_alpha3.md).
+For a public presentation, use the [pre-reserved GPU runbook](prereserved_gpu_demo.md).
+For external applications, use the separate [WebHDP-Link deployment runbook](webhdp_link_deployment.md).
+
 ## 1. Deployment Modes
 Use one of the compose profiles depending on resource budget:
 - Standard: `docker-compose.yml`
@@ -23,7 +27,8 @@ Do not enable workstation-local compute on a small public VPS merely because Doc
 ## 2. Minimum Environment Configuration
 Start from `.env.example` and define at least:
 - `FLASK_ENV`
-- `SECRET_KEY`
+- `SECRET_KEY`: at least 32 bytes in production for HS256 JWT signing
+- `CREDENTIAL_ENCRYPTION_KEY`: separate persistent production secret
 - `FRONTEND_URL`
 - `PUBLIC_BASE_URL` if the public WebHDP origin differs from `FRONTEND_URL`
 - `WEBHDP_SESSIONS_PATH`

@@ -14,6 +14,7 @@ import fnmatch
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -30,6 +31,7 @@ from flask import current_app
 from database.database import db
 from database.models import ComponentDefinition, ComponentVersion, HpcComponentInstallation, PipelineStep, User
 from exceptions import ResourceNotFoundError, ValidationError, APITimeoutError, APIConnectionError
+from services.native_pipeline_adapters import contract_file_output_error
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -140,16 +142,25 @@ class HpcComponentInstallerService:
             raise ValidationError("sif_source is required")
         if "\x00" in source:
             raise ValidationError("sif_source contains an invalid character")
-        parsed = urlparse(source)
+        try:
+            parsed = urlparse(source)
+            port = parsed.port
+        except ValueError as exc:
+            raise ValidationError("Invalid SIF source") from exc
         if parsed.scheme:
-            if parsed.scheme != "https":
-                raise ValidationError("Only HTTPS SIF URLs are supported in v1")
+            if (parsed.scheme != "https" or not parsed.hostname or port not in (None, 443)
+                    or parsed.username is not None or parsed.password is not None
+                    or parsed.params or ";" in parsed.path or "#" in source or "\\" in source
+                    or any(ord(char) <= 32 or ord(char) == 127 for char in source)):
+                raise ValidationError("Use a public HTTPS SIF URL without credentials or an absolute HPC path")
+            if parsed.query and not (parsed.hostname in {"zenodo.org", "sandbox.zenodo.org"} and parsed.query == "download=1"):
+                raise ValidationError("SIF URLs cannot contain query parameters. Stage private SIFs on HPC and use the absolute path")
             if not parsed.path.lower().endswith(".sif"):
                 raise ValidationError("SIF URLs must end with .sif")
             return {"source_type": "https_url", "sif_source": source}
 
         path = PurePosixPath(source)
-        if not source.startswith("/") or ".." in path.parts or not source.lower().endswith(".sif"):
+        if parsed.netloc or not source.startswith("/") or ".." in path.parts or not source.lower().endswith(".sif"):
             raise ValidationError("Remote SIF paths must be absolute .sif paths without traversal")
         return {"source_type": "remote_path", "sif_source": source}
 
@@ -389,6 +400,13 @@ class HpcComponentInstallerService:
             else:
                 component_warnings.append("No install.test smoke-test metadata is declared.")
         extra = extra or {}
+        sources = manifest.get("sources") if isinstance(manifest.get("sources"), dict) else {}
+        zenodo = extra.get("zenodo") or {}
+        if not zenodo:
+            doi = str(sources.get("doi") or "")
+            match = re.fullmatch(r"10\.5281/zenodo\.(\d+)", doi)
+            if match:
+                zenodo = {"doi": doi, "record_url": f"https://zenodo.org/records/{match.group(1)}"}
         artifacts = extra.get("artifacts") if isinstance(extra.get("artifacts"), dict) else {}
         docker = artifacts.get("docker") if isinstance(artifacts.get("docker"), dict) else {}
         sif = artifacts.get("sif") if isinstance(artifacts.get("sif"), dict) else {}
@@ -424,7 +442,7 @@ class HpcComponentInstallerService:
             "trust_level": extra.get("trust_level") or ("local" if catalog_source == "local" else "unknown"),
             "git": extra.get("git") or {},
             "release": extra.get("release") or {},
-            "zenodo": extra.get("zenodo") or {},
+            "zenodo": zenodo,
             "compatibility": extra.get("compatibility") or {},
             "license": extra.get("license"),
             "citation": extra.get("citation"),
@@ -595,6 +613,50 @@ class HpcComponentInstallerService:
             "logs": {"stdout": completed.stdout[-2000:], "stderr": completed.stderr[-2000:]},
             **({} if completed.returncode == 0 else {"error": "Docker image is not available locally."}),
         }
+
+    @staticmethod
+    def _retain_local_container_image(image_id: str, docker_path: str) -> Dict[str, Any]:
+        """Keep the inspected image addressable when its original build tag moves.
+
+        Docker's containerd image store can discard an unreferenced OCI index
+        even though component profiles still contain its immutable ID. Retain
+        a deterministic local tag, while keeping execution pinned to the ID.
+        Retention tags are never pushed or automatically removed.
+        """
+        if not isinstance(image_id, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", image_id):
+            raise ValidationError("Docker did not report a valid immutable image ID")
+        retention_tag = "webhdp-component-runtime:sha256-" + image_id.removeprefix("sha256:")
+        try:
+            tagged = subprocess.run(
+                [docker_path, "image", "tag", image_id, retention_tag],
+                capture_output=True, text=True, timeout=30, check=False,
+            )
+            if tagged.returncode != 0:
+                raise ValidationError(
+                    "Could not preserve the local Docker image before registration",
+                    details={"image_id": image_id, "retention_tag": retention_tag,
+                             "stderr": tagged.stderr[-2000:]},
+                )
+            verified = subprocess.run(
+                [docker_path, "image", "inspect", retention_tag],
+                capture_output=True, text=True, timeout=15, check=False,
+            )
+            try:
+                retained_id = json.loads(verified.stdout)[0]["Id"] if verified.returncode == 0 else None
+            except (ValueError, KeyError, IndexError, TypeError):
+                retained_id = None
+            if retained_id != image_id:
+                raise ValidationError(
+                    "Retained Docker image verification failed before registration",
+                    details={"image_id": image_id, "retention_tag": retention_tag,
+                             "retained_image_id": retained_id, "stderr": verified.stderr[-2000:]},
+                )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise ValidationError(
+                "Could not preserve the local Docker image before registration",
+                details={"image_id": image_id, "retention_tag": retention_tag, "error": str(exc)},
+            ) from exc
+        return {"success": True, "image_id": image_id, "retention_tag": retention_tag}
 
     def validate_install_payload(self, payload: Dict[str, Any], *, check_duplicate: bool = True) -> Dict[str, Any]:
         strategy = self._install_strategy(payload)
@@ -779,6 +841,9 @@ class HpcComponentInstallerService:
             definition.source_type = "multi_strategy_installed"
         current_app.native_pipeline_service._replace_component_profiles(version_row, merged_profiles)
         db.session.commit()
+        current_app.native_pipeline_service.ensure_hmsm_pipeline_templates(component_key=component_key)
+        current_app.native_pipeline_service.ensure_historic_pipeline_templates(component_key=component_key)
+        current_app.native_pipeline_service.ensure_zenodo_pipeline_templates(component_key=component_key)
         return current_app.native_pipeline_service._serialize_component_version(definition, version_row)
 
     @staticmethod
@@ -937,6 +1002,8 @@ class HpcComponentInstallerService:
                 except ValueError:
                     response_payload = {}
             success = completed.returncode == 0 and bool(response_payload) and response_payload.get("success") is True
+            contract_error = contract_file_output_error(manifest, response_payload, output_dir) if success else None
+            success = success and not contract_error
             return {
                 "success": success,
                 "status": "completed" if success else "failed",
@@ -948,7 +1015,7 @@ class HpcComponentInstallerService:
                 "files": written_files,
                 "response": response_payload,
                 "logs": {"stdout": completed.stdout[-4000:], "stderr": completed.stderr[-4000:]},
-                **({} if success else {"error": response_payload.get("error") or "Local container smoke test did not produce a successful response."}),
+                **({} if success else {"error": contract_error or response_payload.get("error") or "Local container smoke test did not produce a successful response."}),
             }
 
     @serialize_registry("component-installation")
@@ -1008,6 +1075,11 @@ class HpcComponentInstallerService:
                 image_id = validation["checks"]["local_container"].get("image_id")
                 if not image_id:
                     raise ValidationError("Docker did not report an immutable image ID")
+                retention = self._retain_local_container_image(
+                    image_id, validation["checks"]["local_container"]["docker_path"],
+                )
+                validation["checks"]["image_retention"] = retention
+                row.checks_json = _json_dumps({"install_strategy": strategy, **validation["checks"]})
                 installed_manifest = self._with_local_container_image(manifest, image_id)
                 imported = self._register_installed_component(
                     installed_manifest,

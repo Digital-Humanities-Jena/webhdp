@@ -319,7 +319,10 @@ class WebHdpSessionCreateRequest(BaseModel):
     partition: Optional[str] = None
     gpu_type: Optional[str] = None
     gpu_count: int = Field(default=1, ge=0, le=4)
-    duration_minutes: int = Field(default=30, ge=5, le=480)
+    # The authenticated principal's policy applies the operational limit. Allow
+    # multi-day reservations here so an explicitly authorized 12-hour hold is
+    # not rejected by an unrelated historical eight-hour schema ceiling.
+    duration_minutes: int = Field(default=30, ge=5, le=10080)
     cuda_module: Optional[str] = Field(default=None, min_length=1, max_length=64)
     webhdp_session_id: Optional[int] = None
     purpose: str = Field(default="workflow", min_length=1, max_length=32)

@@ -1,0 +1,146 @@
+metadata:
+  name: hmsm_scan_digitizer
+  label: HMSM Scan Digitizer
+  description: Digitize piano rolls, supported cardboard discs, and unwrapped pinned cylinders with the HMSM Studio optical pipeline. Review candidate events against the retained scan evidence.
+  tags: [hmsm, digitization, piano-roll, cardboard-disc, cylinder, midi]
+  category: Historical Musical Media
+  version: "1.0.0"
+  status: alpha
+  component_schema: "0.1.0-alpha.1"
+
+distribution:
+  tier: external_installable
+  bundled_with_webhdp: false
+  installation_scope: [local_container]
+
+inputs:
+  - name: input_file
+    label: Carrier scan
+    description: Original scan or photograph in the coordinate frame expected by the carrier profile.
+    type: file_path
+    required: true
+  - name: model_file
+    label: Frozen HMSM model profile
+    description: Optional MediaModel JSON snapshot that takes precedence over the model ID. Use an exact built-in snapshot or a profile with a distinct ID.
+    type: file_path
+    bind_source_by_default: false
+  - name: options_file
+    label: Extraction options
+    description: Optional HMSM ExtractionOptions JSON with registration, segmentation, transport, and evidence settings.
+    type: file_path
+    bind_source_by_default: false
+    mutex_with: [options_json]
+  - name: classifier_file
+    label: Frozen optical classifier
+    description: Optional HMSM numeric classifier export and promotion proof. The extraction options must include its matching ID and SHA-256.
+    type: file_path
+    bind_source_by_default: false
+
+outputs:
+  - {name: midi_file, label: Extracted MIDI, type: file_path, extensions: [.mid], required: true}
+  - {name: result_file, label: Extraction report, type: file_path, extensions: [.json], required: true}
+  - {name: project_file, label: HMSM project manifest, type: file_path, extensions: [.json], required: true}
+  - {name: evidence_bundle, label: Scan evidence bundle, type: file_path, extensions: [.zip], required: true}
+  - {name: source_preview, label: Source preview, type: file_path, extensions: [.webp], required: true}
+  - {name: track_preview, label: Track overlay, type: file_path, extensions: [.webp], required: true}
+  - {name: validation_preview, label: Validation preview, type: file_path, extensions: [.webp], required: true}
+  - name: physical_observations
+    label: Physical aperture observations
+    description: Sealed observations of detected aperture geometry in the scan coordinate frame.
+    type: file_path
+    extensions: [.json]
+    required: true
+  - name: interpretation_decisions
+    label: Optical interpretation decisions
+    description: Sealed ledger of accepted, merged, suppressed, and withheld candidates linked to physical observations.
+    type: file_path
+    extensions: [.json]
+    required: true
+  - name: substrate_support
+    label: Roll substrate support report
+    description: Roll scan row intervals with recorded paper support and any decisions withheld outside that support.
+    type: file_path
+    extensions: [.json]
+  - name: source_coverage
+    label: Disc source coverage report
+    description: Coverage of declared disc tracks and any candidates withheld where acquisition coverage is unknown.
+    type: file_path
+    extensions: [.json]
+  - name: source_coverage_mask
+    label: Disc source coverage mask
+    description: Registered PNG mask showing which disc pixels have source support.
+    type: file_path
+    extensions: [.png]
+  - {name: runtime_manifest, label: HMSM runtime provenance, type: file_path, extensions: [.json], required: true}
+
+parameter_groups:
+  - title: Carrier profile
+    parameters:
+      - name: model_id
+        label: HMSM model ID
+        description: Select a profile that matches the physical carrier. The default is the generic 65-note piano-roll study profile.
+        type: string
+        default: generic_65_no_dynamics
+      - name: options_json
+        label: Extraction options JSON
+        description: Inline HMSM ExtractionOptions for this step. Use this field or a staged options file.
+        type: text
+        mutex_with: [options_file]
+
+execution:
+  profiles:
+    - id: local_docker
+      adapter: container_cli
+      runtime: docker
+      image: webhdp-hmsm-studio:local
+      entrypoint: [python, /app/component_runner.py, scan]
+      config:
+        webhdp_contract: true
+        network: none
+      resources: {gpu_count: 0, cpus: 2, memory_mb: 4096}
+
+compatibility:
+  playground:
+    enabled: true
+
+install:
+  strategies:
+    - id: local_container
+      runtime: docker
+      profile: local_docker
+      image: webhdp-hmsm-studio:local
+  test:
+    files:
+      # Synthetic 600 × 720 roll with seven gates on the declared track map.
+      # Expected MIDI pitches in order are 60, 64, 67, 64, 60, 55, and 48.
+      - name: synthetic-65-note-roll.png
+        content_base64: "iVBORw0KGgoAAAANSUhEUgAAAlgAAALQAgMAAAAx6+b6AAAADFBMVEXkzKAkJygXFxkAAABNbxXYAAACP0lEQVR42u3csQ3CQAwFUHOiiJgiNfsgUTLKjUKJxD6pMwVKFVFkhFMiJ3le4J7uu/zy5REREd/IMounRMrBwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCOh2rvFOyuk6IWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYu2JNU0rW/BIiFhYWFhYWFhYWFlaCvukqrPa+qd3CwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLalNXeN12F1d43tVtYWFhYWFhYWFhYWHlZt5qS1fdCxMLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCSsIax5SsXxUiFhYWFhYWFhYWFhYWVjjkHg65Y2FhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWGFs/d2CwsLCwsLCwsL62is9v7pKqz2/qndwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCiiy9+VVY7b15u4WFhYWFhYWFhYWFhYWFhXUE1iclqxQhYmFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhnYI1zzl/6ylELCwsLCwsLCwsLCwsLCwsrGXuOVm1ChELCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLC+uQrOumr9Uh5W8NdgsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwtrp6w/nSYhTWyKOWQAAAAASUVORK5CYII="
+    inputs:
+      input_file: synthetic-65-note-roll.png
+    parameters:
+      model_id: generic_65_no_dynamics
+
+ui:
+  playground:
+    fields:
+      input_file:
+        widget: file_picker
+        accept_extensions: [.tif, .tiff, .png, .jpg, .jpeg, .webp]
+        help_text: Supply a complete scan or declare its coverage in extraction options. Cylinders require an already unwrapped panorama.
+      model_file:
+        widget: file_picker
+        accept_extensions: [.json]
+      options_file:
+        widget: file_picker
+        accept_extensions: [.json]
+      classifier_file:
+        widget: file_picker
+        accept_extensions: [.json]
+    result:
+      artifact_views:
+        - {id: scan-previews, label: Scan and validation previews, widget: image_gallery, extensions: [.webp]}
+        - {id: disc-coverage, label: Disc source coverage mask, widget: image_gallery, extensions: [.png]}
+        - {id: scan-midi, label: Extracted MIDI, widget: file_download, extensions: [.mid]}
+        - {id: scan-evidence, label: Reports, evidence ledgers, and bundle, widget: file_download, extensions: [.json, .zip]}
+      show_result_json: true
+      show_logs: true

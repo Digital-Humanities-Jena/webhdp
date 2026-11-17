@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "deployment": {
+    "public_base_url": null,
+    "frontend_url": null,
+    "backend_image": null,
+    "frontend_image": null
+  },
+  "worker": {
+    "replicas": 1,
+    "global_concurrency": 1,
+    "hpc_wait_seconds": 14400,
+    "partition_attempt_timeout_seconds": 14400,
+    "stop_grace_seconds": null
+  },
+  "storage": {
+    "link_path": "/app/instance/webhdp-link",
+    "quota_enforcement": "filesystem",
+    "quota_reference": null,
+    "backup_restore_reference": null,
+    "retention_mode": "manual_review",
+    "review_after_days": 30,
+    "retention_owner": null
+  },
+  "secret_references": {
+    "signing": "env:SECRET_KEY",
+    "credential_encryption": "env:CREDENTIAL_ENCRYPTION_KEY",
+    "hpc_username": "env:HPC_LINK_USERNAME",
+    "hpc_password": "env:HPC_LINK_PASSWORD"
+  },
+  "hpc_authority": {
+    "allowed_partitions": [],
+    "allowed_gpu_types": [],
+    "max_gpus": 1,
+    "max_walltime_hours": 12,
+    "policy_reference": null
+  },
+  "publications": [],
+  "clients": [
+    {
+      "allow_loopback": true,
+      "loopback_reason": "Explicit review required: local HMSM-Studio integration, not a public web origin.",
+      "registration": {
+        "id": "hmsm-studio",
+        "name": "HMSM-Studio",
+        "enabled": false,
+        "origins": ["http://127.0.0.1:5194"],
+        "redirect_uris": ["http://127.0.0.1:5194/?webhdp=1"],
+        "pipeline_ids": [],
+        "max_queued_runs": 8,
+        "max_concurrent_runs": 1,
+        "max_upload_bytes": 104857600,
+        "max_storage_bytes": 2147483648
+      }
+    },
+    {
+      "allow_loopback": true,
+      "loopback_reason": "Explicit review required: fixed local Reprojector desktop bridge callback.",
+      "registration": {
+        "id": "reprojector-desktop",
+        "name": "Reprojector desktop",
+        "enabled": false,
+        "origins": ["http://127.0.0.1:5195"],
+        "redirect_uris": ["http://127.0.0.1:5195/callback/"],
+        "pipeline_ids": [],
+        "max_queued_runs": 4,
+        "max_concurrent_runs": 1,
+        "max_upload_bytes": 104857600,
+        "max_storage_bytes": 21474836480
+      }
+    }
+  ]
+}

@@ -8,6 +8,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from flask import current_app
 
 from constants import (
+    HMSM_COMPONENT_KEYS,
     LEGACY_PIPELINE_ALIASES,
     PIPELINE_DEFINITION,
     PREDEFINED_PIPELINE_ID,
@@ -36,6 +37,8 @@ from services.hdpc_local_service import (
 from services.publishing_context_service import PublishingContextService
 from services.zenodo_metadata_normalizer import normalize_zenodo_metadata
 from services.zenodo_config_service import ZenodoConfigService
+from services.historic_reconstruction_templates import HISTORIC_COMPONENT_KEYS
+from services.zenodo_component_templates import ZENODO_COMPONENT_KEYS
 
 logger = logging.getLogger(__name__)
 publishing_context_service = PublishingContextService()
@@ -734,7 +737,43 @@ def record_submission_metadata(record):
     return _merge_non_empty_metadata({}, payload.get('metadata', payload))
 
 
-def prepare_submission_sources(db_session, local_file_paths, execution_items, record_ids, *, lod_snapshot=None):
+def pipeline_requires_record_metadata(steps):
+    """Known source-only processors can run without publication metadata drafts."""
+    source_only_components = HMSM_COMPONENT_KEYS | HISTORIC_COMPONENT_KEYS | ZENODO_COMPONENT_KEYS
+    enabled_steps = [step for step in steps if step.get('enabled', True)]
+    for step in enabled_steps:
+        if (step.get('component_ref') or step['id']) not in source_only_components:
+            return True
+        bindings = step.get('input_bindings', []) + step.get('parameter_bindings', [])
+        if any(binding.get('type') == 'record_metadata_field' for binding in bindings):
+            return True
+        if any(action.get('action_type') in {'zenodo_metadata_field', 'edm_metadata_field', 'record_metadata_field'}
+               for action in step.get('output_actions', [])):
+            return True
+    return not enabled_steps
+
+
+def reusable_local_processing_records(session, is_sandbox):
+    """Find unique unpublished records for source-only processing in this session."""
+    by_path = {}
+    ambiguous = set()
+    for row in read_session_records(session):
+        source = row.get('source_file_path')
+        if not source or bool(row.get('is_sandbox')) != bool(is_sandbox):
+            continue
+        path = os.path.realpath(source)
+        if path in by_path:
+            ambiguous.add(path)
+        by_path[path] = row
+    return {
+        path: row for path, row in by_path.items()
+        if path not in ambiguous and row.get('record_status') == 'prepared'
+        and not row.get('zenodo_record_id') and not row.get('concept_rec_id')
+    }
+
+
+def prepare_submission_sources(db_session, local_file_paths, execution_items, record_ids, *,
+                               lod_snapshot=None, require_metadata=True):
     """Resolve source identity and metadata without registering records or writing bundles."""
     hdpc_path = db_session.hdpc_path
     inspect_data = inspect_hdpc_project(hdpc_path, show_files=True)
@@ -826,7 +865,7 @@ def prepare_submission_sources(db_session, local_file_paths, execution_items, re
     has_per_file_msf_rows = bool(lod_mapping_config and msf_rows_by_filename)
     uses_per_file_metadata = has_batch_metadata or has_per_file_msf_rows
 
-    if not uses_per_file_metadata and not shared_zenodo_metadata and not record_ids and not execution_items:
+    if require_metadata and not uses_per_file_metadata and not shared_zenodo_metadata and not record_ids and not execution_items:
         raise FileProcessingError("No metadata found. Please fill in metadata before running the pipeline.")
 
     uploads_dir = os.path.join(os.path.dirname(hdpc_path), "uploads")
@@ -1099,8 +1138,14 @@ def execute_submission_pipeline(
         },
     )
 
+    if queued_run:
+        pipeline_config = json.loads(db.session.get(PipelineVersion, queued_run.pipeline_version_id).config_json)
+    else:
+        pipeline_config = current_app.native_pipeline_service.get_pipeline(identifier).get("config", {})
+    require_metadata = pipeline_requires_record_metadata(pipeline_config.get('steps', []))
     load_start = time.time()
-    sources = prepare_submission_sources(db_session, local_file_paths, execution_items, record_ids, lod_snapshot=lod_snapshot)
+    sources = prepare_submission_sources(db_session, local_file_paths, execution_items, record_ids,
+                                         lod_snapshot=lod_snapshot, require_metadata=require_metadata)
     lod_snapshot = sources['lod_snapshot']
     inspect_data = sources["inspect_data"]
     pipeline_timings["project_loading"] = time.time() - load_start
@@ -1304,6 +1349,7 @@ def execute_submission_pipeline(
                 },
             )
     else:
+        reusable_records = reusable_local_processing_records(db_session, effective_is_sandbox) if not require_metadata else {}
         for idx, file_path in enumerate(local_file_paths):
             if not file_path:
                 logger.warning("Received null file_path in pipeline execution request. Skipping.")
@@ -1327,6 +1373,14 @@ def execute_submission_pipeline(
                 skipped_files.append(file_path)
                 continue
             try:
+                reusable = reusable_records.get(os.path.realpath(source_context["effective_file_path"]))
+                if reusable:
+                    local_record_id = int(reusable['local_record_id'])
+                    ensure_record_operation_allowed(db_session, local_record_id=local_record_id, allow_allowed_versioning=True)
+                    record_ids_to_process.append(local_record_id)
+                    record_info_list.append((local_record_id, source_context["effective_file_path"], source_context["lod_base_metadata"]))
+                    remember_registration(local_record_id, source_context['effective_file_path'], source_context['lod_base_metadata'], source_file_path=file_path)
+                    continue
                 ensure_fresh_record_creation_allowed(
                     db_session,
                     source_file_path=source_context["effective_file_path"],
@@ -1386,11 +1440,6 @@ def execute_submission_pipeline(
     outputs_dir = os.path.join(session_dir, "outputs")
     os.makedirs(outputs_dir, exist_ok=True)
 
-    if queued_run:
-        from database.models import PipelineVersion
-        pipeline_config = json.loads(db.session.get(PipelineVersion, queued_run.pipeline_version_id).config_json)
-    else:
-        pipeline_config = current_app.native_pipeline_service.get_pipeline(identifier).get("config", {})
     steps_map = {step["id"]: step for step in pipeline_config.get("steps", [])}
     if not current_app.config.get("ENABLE_RENDERER", True) and steps_map.get("fast_renderer"):
         steps_map["fast_renderer"]["enabled"] = False

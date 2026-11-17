@@ -227,7 +227,11 @@ test.describe('Governance and maintenance flows', () => {
 
     await expect(page.getByText('Authoritative Session Intelligence')).toBeVisible()
     await page.getByRole('button', { name: 'Duplicates' }).click()
-    await expect(page).toHaveURL(/\/datasets\/dataset-alpha\?tab=duplicates$/)
+    await expect(page).toHaveURL(url =>
+      url.pathname === '/datasets/dataset-alpha' &&
+      url.searchParams.get('tab') === 'duplicates' &&
+      url.searchParams.get('environment') === 'production'
+    )
     await expect(page.locator('p').filter({ hasText: 'models/alpha.glb' })).toBeVisible()
     await expect(page.getByText('Alpha model')).toBeVisible()
   })

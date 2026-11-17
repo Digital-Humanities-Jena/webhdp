@@ -81,7 +81,7 @@ class SSHManager:
         """Check if SSH connection is active."""
         return self._connection is not None and not self._connection.is_closed
 
-    async def run_command(self, command: str, timeout: float = 60.0) -> tuple[str, str, int]:
+    async def run_command(self, command: str, timeout: float = 60.0, *, stdin: str | None = None) -> tuple[str, str, int]:
         """
         Execute a command on the HPC.
 
@@ -89,16 +89,15 @@ class SSHManager:
             Tuple of (stdout, stderr, exit_code)
         """
         conn = await self.connect()
-        logger.info("Executing command", command=command[:100])
 
         try:
             result = await asyncio.wait_for(
-                conn.run(command, check=False),
+                conn.run(command, check=False, input=stdin) if stdin is not None else conn.run(command, check=False),
                 timeout=timeout
             )
             return result.stdout or "", result.stderr or "", result.exit_status or 0
         except asyncio.TimeoutError:
-            logger.error("Command timeout", command=command[:50])
+            logger.error("HPC command timed out", timeout=timeout)
             raise TimeoutError(f"Command timed out after {timeout}s")
 
     async def get_hostname(self) -> str:

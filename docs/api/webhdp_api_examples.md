@@ -795,6 +795,84 @@ The response contains non-secret onboarding diagnostics:
 }
 ```
 
+## 16. Use WebHDP-Link with a service token
+
+Use the [WebHDP-Link browser SDK](../guides/webhdp_link.md#browser-integration)
+for interactive applications. For a trusted server-side integration, have a
+WebHDP administrator issue a short-lived service token for an approved client,
+named verified account and required scopes only. This example assumes
+`pipelines:read uploads:write runs:write runs:read artifacts:read` and a
+private header file whose only line is `Authorization: Bearer <link-token>`.
+Keep the file owner-readable, outside the repository, and set
+`LINK_AUTH_HEADERS` to its path. The service token is separate from `TOKEN`.
+
+```sh
+LINK_ORIGIN=https://processing.example.org
+LINK_API="$LINK_ORIGIN/api/v1/link"
+curl --fail-with-body "$LINK_API/discovery"
+curl --fail-with-body --header "@$LINK_AUTH_HEADERS" "$LINK_API/pipelines"
+curl --fail-with-body --header "@$LINK_AUTH_HEADERS" \
+  --form 'file=@sample.png' "$LINK_API/uploads"
+```
+
+Save the returned upload `id`, then prepare `run.json` using the approved
+publication's input and parameter contract:
+
+```json
+{"pipeline_id":"approved-pipeline-id","inputs":["returned-upload-id"],"parameters":{}}
+```
+
+```sh
+RUN_KEY=$(python3 -c 'import uuid; print(uuid.uuid4())')
+curl --fail-with-body --header "@$LINK_AUTH_HEADERS" \
+  --header "Idempotency-Key: $RUN_KEY" \
+  --json @run.json "$LINK_API/runs"
+```
+
+Keep `RUN_KEY` and the request body private and reuse both if submission is
+uncertain. Set `RUN_ID` to the returned run `id` and poll it with backoff. For a
+successful run, choose an `ARTIFACT_ID` from its artifact list:
+
+```sh
+curl --fail-with-body --header "@$LINK_AUTH_HEADERS" "$LINK_API/runs/$RUN_ID"
+curl --fail-with-body --header "@$LINK_AUTH_HEADERS" \
+  --output artifact.bin "$LINK_API/runs/$RUN_ID/artifacts/$ARTIFACT_ID"
+shasum -a 256 artifact.bin
+wc -c < artifact.bin
+```
+
+Compare both values with the artifact metadata before using the downloaded file.
+Keep authenticated requests on the approved deployment origin and avoid
+following redirects. Link errors use `application/problem+json`.
+
+## 17. Claim and release a pre-reserved GPU
+
+This example assumes that an operator already registered the running GPU job
+and the verified, HPC-enabled user already has an explicit grant and owns the
+upload session. Use the user's WebHDP JWT, not a Link service token.
+
+```sh
+curl --fail-with-body -H "Authorization: Bearer $TOKEN" \
+  "$BASE_URL/hpc-link/reservations?purpose=playground"
+curl --fail-with-body -H "Authorization: Bearer $TOKEN" \
+  --json '{"session_id":123,"purpose":"playground"}' \
+  "$BASE_URL/hpc-link/reservations/$RESERVATION_ID/claim"
+```
+
+Use the `reservation_id` from `data.reservations` for `RESERVATION_ID`. Use
+`data.allocation.allocation_id` from the claim for `ALLOCATION_ID`. Supply the
+actual session ID instead of `123`. Once the run has finished and you have
+downloaded its results, release:
+
+```sh
+curl --fail-with-body -X POST -H "Authorization: Bearer $TOKEN" \
+  "$BASE_URL/hpc-link/allocations/$ALLOCATION_ID/release"
+```
+
+The response confirms detachment; the operator-held Slurm job keeps running.
+See the [reserved GPU runbook](../guides/prereserved_gpu_demo.md) for private
+gateway registration and the presenter flow.
+
 Related references:
 - Full endpoint inventory: `webhdp_api_reference.md`
 - Generated OpenAPI route inventory: `openapi.json`

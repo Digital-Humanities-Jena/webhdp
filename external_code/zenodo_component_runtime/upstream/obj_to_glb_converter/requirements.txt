@@ -1,0 +1,2 @@
+# No Python packages needed - Blender has its own Python environment
+# This component requires Blender to be installed on the system

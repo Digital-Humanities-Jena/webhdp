@@ -1,97 +1,160 @@
 metadata:
   name: image_metadata_extractor
   label: Image Metadata Extractor
-  description: Extracts stable file and image facts from PNG, JPEG, GIF, and WebP inputs for component testing.
+  description: Extract image dimensions, EXIF, camera details and privacy-filtered
+    metadata using the published Zenodo processor. Source images remain unchanged.
   tags:
-    - image
-    - metadata
-    - qa
-    - testing
-  keywords:
-    - image metadata
-    - file facts
-    - image dimensions
-  category: Image QA
-  version: "1.0.0"
+  - metadata
+  - zenodo-community
+  category: Metadata Extraction
+  version: 1.1.1
   status: alpha
-  component_schema: "0.1.0-alpha.1"
-
-structure:
-  required_files:
-    - "extractor.py"
-    - "requirements.txt"
-
+  component_schema: 0.1.0-alpha.1
+  license:
+    type: GPL-3.0-or-later
+distribution:
+  tier: external_installable
+  bundled_with_webhdp: false
+  installation_scope:
+  - local_container
+  - hpc_sif
 inputs:
-  - name: input_file
-    label: Input Image
-    description: Image file to inspect.
-    type: file_path
-    required: true
-
+- name: input_file
+  label: Image file
+  type: file_path
+  required: true
 outputs:
-  - name: metadata_report
-    label: Metadata Report
-    description: JSON report containing file facts, detected format, dimensions, and optional hash.
-    type: file_path
-    default: "./output/image_metadata.json"
-    required: false
-
+- name: metadata_report
+  label: Metadata report
+  type: file_path
+  extensions:
+  - .json
+  required: true
 parameter_groups:
-  - title: Extraction
-    description: Configure metadata extraction.
-    parameters:
-      - name: include_hash
-        label: Include SHA-256
-        description: Compute a SHA-256 checksum for the input file.
-        type: boolean
-        default: true
-      - name: probe_bytes
-        label: Probe Bytes
-        description: Number of leading bytes to inspect for image headers.
-        type: integer
-        default: 65536
-
+- title: Extraction settings
+  parameters:
+  - name: remove_address
+    label: Filter addresses
+    description: Heuristically filter addresses from selected text fields.
+    type: boolean
+    default: true
+  - name: remove_mail
+    label: Filter email addresses
+    description: Heuristically filter email addresses from selected text fields.
+    type: boolean
+    default: true
+  - name: include_technical_details
+    label: Include technical EXIF
+    description: Include camera exposure and technical EXIF fields.
+    type: boolean
+    default: true
+  - name: readable_maker_notes_only
+    label: Readable maker notes only
+    description: Omit binary maker notes that the published processor considers unreadable.
+    type: boolean
+    default: true
+  - name: include_hash
+    label: Include SHA-256
+    description: Include the source checksum in basic image facts.
+    type: boolean
+    default: true
+  - name: remove_gps
+    label: Omit GPS metadata
+    description: Omit GPS fields from the report. The source image is unchanged.
+    type: boolean
+    default: true
 execution:
+  timeout: 300
   profiles:
-    - id: local_default
-      adapter: local_cli
-      entrypoint:
-        - python
-        - extractor.py
-      working_directory: "."
-      output_collection:
-        - name: metadata_report
-          path: output/image_metadata.json
-          artifact_kind: file
-          metadata:
-            content_type: application/json
-
+  - id: local_docker
+    adapter: container_cli
+    runtime: docker
+    image: webhdp-zenodo-components:local
+    entrypoint:
+    - python
+    - /app/component_runner.py
+    - image_metadata_extractor
+    config:
+      webhdp_contract: true
+      network: none
+    resources:
+      gpu_count: 0
+      cpus: 2
+      memory_mb: 4096
+  - id: hpc_singularity
+    adapter: hpc_link
+    handler: generic_singularity_component
+    runtime: singularity
+    image: ''
+    entrypoint:
+    - python
+    - /app/component_runner.py
+    - image_metadata_extractor
+    resources:
+      gpu_count: 0
+      cpus: 2
+      memory_mb: 4096
 compatibility:
   playground:
     enabled: true
-
+install:
+  strategies:
+  - id: local_container
+    runtime: docker
+    profile: local_docker
+    image: webhdp-zenodo-components:local
+  - id: hpc_sif
+    runtime: singularity
+    profile: hpc_singularity
+  test: &id001
+    description: Measured metadata fixture using the published processor; assertions
+      are verified by the runtime regression suite.
+    files:
+    - name: metadata-photo.jpg
+      content_base64: /9j/4AAQSkZJRgABAQAAAQABAAD/4QDeRXhpZgAATU0AKgAAAAgAAwEPAAIAAAAWAAAAMgE7AAIAAAAoAAAASIglAAQAAAABAAAAcAAAAABXZWJIRFAgZml4dHVyZSBjYW1lcmEARXhhbXBsZSBDcmVhdG9yIGV4YW1wbGVAZXhhbXBsZS5pbnZhbGlkAAAEAAEAAgAAAAJOAAAAAAIABQAAAAMAAACmAAMAAgAAAAJFAAAAAAQABQAAAAMAAAC+AAAAAAAAADIAAAABAAAAAAAAAAEAAAAAAAAAAQAAAAsAAAABAAAAAAAAAAEAAAAAAAAAAf/bAEMACAYGBwYFCAcHBwkJCAoMFA0MCwsMGRITDxQdGh8eHRocHCAkLicgIiwjHBwoNyksMDE0NDQfJzk9ODI8LjM0Mv/bAEMBCQkJDAsMGA0NGDIhHCEyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMv/AABEIAEAAYAMBIgACEQEDEQH/xAAfAAABBQEBAQEBAQAAAAAAAAAAAQIDBAUGBwgJCgv/xAC1EAACAQMDAgQDBQUEBAAAAX0BAgMABBEFEiExQQYTUWEHInEUMoGRoQgjQrHBFVLR8CQzYnKCCQoWFxgZGiUmJygpKjQ1Njc4OTpDREVGR0hJSlNUVVZXWFlaY2RlZmdoaWpzdHV2d3h5eoOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4eLj5OXm5+jp6vHy8/T19vf4+fr/xAAfAQADAQEBAQEBAQEBAAAAAAAAAQIDBAUGBwgJCgv/xAC1EQACAQIEBAMEBwUEBAABAncAAQIDEQQFITEGEkFRB2FxEyIygQgUQpGhscEJIzNS8BVictEKFiQ04SXxFxgZGiYnKCkqNTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqCg4SFhoeIiYqSk5SVlpeYmZqio6Slpqeoqaqys7S1tre4ubrCw8TFxsfIycrS09TV1tfY2dri4+Tl5ufo6ery8/T19vf4+fr/2gAMAwEAAhEDEQA/APPaKKK+hPMCiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooA//2Q==
+    inputs:
+      input_file: metadata-photo.jpg
+    parameters: {}
+hpc:
+  install:
+    runtime: singularity
+    sif_required: true
+  test: *id001
 ui:
   playground:
     fields:
       input_file:
         widget: image_input
         accept_extensions:
-          - ".png"
-          - ".jpg"
-          - ".jpeg"
-          - ".gif"
-          - ".webp"
-        help_text: Select a staged image file.
+        - .png
+        - .jpg
+        - .jpeg
+        - .gif
+        - .webp
+        - .tif
+        - .tiff
+        - .bmp
+      remove_address:
+        widget: checkbox
+      remove_mail:
+        widget: checkbox
+      include_technical_details:
+        widget: checkbox
+      readable_maker_notes_only:
+        widget: checkbox
       include_hash:
         widget: checkbox
-      probe_bytes:
-        widget: number_input
+      remove_gps:
+        widget: checkbox
     result:
       artifact_views:
-        - id: metadata-json
-          label: Metadata JSON
-          widget: file_download
-          extensions:
-            - ".json"
+      - id: metadata-json
+        label: Metadata report
+        widget: file_download
+        extensions:
+        - .json
       show_result_json: true
       show_logs: true
+sources:
+  record: https://zenodo.org/records/16944352
+  doi: 10.5281/zenodo.16944352

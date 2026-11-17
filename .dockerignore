@@ -50,4 +50,15 @@ hpc-link/data/
 **/secrets/
 private-secrets/
 hpc-auth/
+**/.deployment/
+**/.ssh/
+**/*.pem
+**/*.key
+**/*.ppk
+**/*.p12
+**/*.pfx
+**/id_rsa
+**/id_dsa
+**/id_ecdsa
+**/id_ed25519
 *-profile.yml

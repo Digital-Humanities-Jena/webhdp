@@ -1,0 +1,148 @@
+metadata:
+  name: obj_statistics_extractor
+  label: OBJ Statistics Extractor
+  description: >
+    Extracts comprehensive statistics from OBJ 3D model files including geometric elements, 
+    material data, bounding box information, face areas, and volume calculations.
+  tags:
+    - 3d
+    - model
+    - obj
+    - analysis
+  keywords:
+    - 3d model
+    - obj
+    - geometry
+    - bounding box
+    - mesh analysis
+  category: 3D Processing
+  version: "0.1.0"
+  status: alpha
+  created: "2025-08-22"
+  updated: "2025-08-22"
+  authors:
+    - name: "Ukolov, Dominik"
+      affiliation: "Friedrich-Schiller-University Jena"
+      orcid: "0000-0002-7904-3892"
+  contact:
+    email: "dominik.ukolov@uni-jena.de"
+  license:
+    type: GPLv3
+    url: "https://www.gnu.org/licenses/gpl-3.0.html.en"
+  component_schema: "0.1.0-alpha.2"
+
+sources:
+  record: ""
+  doi: ""
+  concept_doi: ""
+  git: ""
+
+structure:
+  required_files:
+    - processor.py
+    - main.py
+    - tests/test.py
+    - tests/test_model.obj
+    - tests/reference_data/test_model_obj_statistics.json
+    - CHANGELOG.md
+  additional_files: []
+  directories:
+    - tests/output_reports
+
+inputs:
+  - name: input-file
+    label: Input OBJ File
+    description: >
+      Path to the input OBJ file that will be analyzed.
+    type: file_path
+    default: ""
+    required: true
+    validation_rules:
+      file_extensions: [".obj"]
+    mutex_with: ["input-dir"]
+
+  - name: input-dir
+    label: Input Directory
+    description: >
+      Path to the directory containing OBJ files that will be analyzed in batch.
+    type: dir_path
+    default: ""
+    required: true
+    validation_rules:
+      file_extensions: [".obj"]
+    mutex_with: ["input-file"]
+
+outputs:
+  - name: output-file
+    label: OBJ Statistics Report
+    pattern: "{original_stem}_obj_statistics.json"
+    description: >
+      JSON report containing comprehensive statistics and analysis of the OBJ file(s).
+    category: metadata
+    type: "application/json"
+
+parameter_groups:
+  - title: Analysis Options
+    description: Configure the depth and scope of the OBJ file analysis.
+    parameters:
+      - name: calculate-detailed-geometry
+        label: Calculate Detailed Geometry
+        type: boolean
+        default: true
+        description: >
+          If true, calculates face areas, volume estimates, and other detailed geometric metrics.
+      - name: include-material-analysis
+        label: Include Material Analysis
+        type: boolean
+        default: true
+        description: >
+          If true, analyzes material libraries (.mtl) and material usage statistics.
+      - name: compute-mesh-quality
+        label: Compute Mesh Quality Metrics
+        type: boolean
+        default: false
+        description: >
+          If true, calculates advanced mesh quality metrics like aspect ratios and degenerate faces.
+
+  - title: Execution Options
+    description: Configure execution behavior and logging.
+    parameters:
+      - name: test
+        label: Run Internal Test Suite
+        type: boolean
+        default: false
+        description: >
+          If true, runs the component's built-in test suite instead of processing input files.
+      - name: progress-reporting
+        label: Enable Progress Reporting
+        type: boolean
+        default: true
+        description: >
+          If true, reports processing progress for large OBJ files.
+      - name: config
+        label: Configuration File
+        type: file_path
+        description: >
+          Optional path to a JSON configuration file with advanced settings.
+        validation_rules:
+          file_extensions: [".json"]
+      - name: verbose
+        label: Enable Verbose Logging
+        type: boolean
+        default: false
+        description: >
+          If enabled, prints detailed processing steps and results to the console.
+
+requirements:
+  python_environment:
+    python_version: ">=3.8"
+    packages: []
+  system_dependencies: []
+  system_requirements:
+    min_memory_mb: 512
+    recommended_memory_mb: 2048
+
+execution:
+  idempotent: true
+  timeout: 300
+  on_error: continue_with_warning

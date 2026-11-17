@@ -1,0 +1,15 @@
+node_modules/
+dist/
+playwright-report/
+test-results/
+.git/
+.env
+.env.*
+!.env.development
+!.env.production
+*.env
+.deployment/
+credentials/
+secrets/
+**/*.pem
+**/*.key

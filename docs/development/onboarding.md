@@ -133,11 +133,13 @@ Best for the optional bridge that connects WebHDP to HPC resources.
 
 ```bash
 cd hpc-link
-python -m venv .venv
-. .venv/bin/activate
-pip install -r requirements.txt pytest
-python -m pytest
+uv run --with pytest --with pytest-asyncio --with-requirements requirements.lock python -m pytest
 ```
+
+The gateway image installs the hash-pinned dependencies in
+`hpc-link/requirements.lock`. After changing `hpc-link/requirements.txt`, run the
+compile command recorded at the top of the lockfile from the gateway directory,
+then audit and test the resulting lock.
 
 For the HPC Link frontend:
 

@@ -1,0 +1,157 @@
+metadata:
+  name: historic_prepare
+  label: Historic Image Preparation
+  description: Orient, resize and normalize historical photographs while recording
+    source checksums and the image-name mapping.
+  tags:
+  - historic-reconstruction
+  - photogrammetry
+  - colmap
+  category: Historic Reconstruction
+  version: 1.0.1
+  status: alpha
+  component_schema: 0.1.0-alpha.1
+distribution:
+  tier: external_installable
+  bundled_with_webhdp: false
+  installation_scope:
+  - local_container
+  - hpc_sif
+inputs:
+- name: input_file
+  label: Photograph ZIP or image
+  type: file_path
+  required: false
+  mutex_with:
+  - input_files
+- name: input_files
+  label: Photographs
+  type: file_list
+  mutex_with:
+  - input_file
+outputs:
+- name: dataset
+  label: Dataset
+  type: file_path
+  extensions:
+  - .zip
+  required: true
+- name: report
+  label: Report
+  type: file_path
+  extensions:
+  - .json
+  required: true
+parameter_groups:
+- title: Processing settings
+  parameters:
+  - name: max_image_size
+    label: Maximum image dimension
+    type: integer
+    default: 1600
+    minimum: 256
+    maximum: 8192
+  - name: jpeg_quality
+    label: JPEG quality
+    type: integer
+    default: 95
+    minimum: 50
+    maximum: 100
+execution:
+  timeout: 7200
+  profiles:
+  - id: local_docker
+    adapter: container_cli
+    runtime: docker
+    image: webhdp-historic-reconstruction:local
+    entrypoint:
+    - python
+    - /app/component_runner.py
+    - prepare
+    config:
+      webhdp_contract: true
+      network: none
+    resources:
+      gpu_count: 0
+      cpus: 4
+      memory_mb: 8192
+  - id: hpc_singularity
+    adapter: hpc_link
+    handler: generic_singularity_component
+    runtime: singularity
+    image: ''
+    entrypoint:
+    - python
+    - /app/component_runner.py
+    - prepare
+    resources:
+      gpu_count: 0
+      cpus: 2
+      memory_mb: 8192
+compatibility:
+  playground:
+    enabled: true
+install:
+  strategies:
+  - id: local_container
+    runtime: docker
+    profile: local_docker
+    image: webhdp-historic-reconstruction:local
+  - id: hpc_sif
+    runtime: singularity
+    profile: hpc_singularity
+  test:
+    description: Synthetic image preparation/pair contract fixture; no reconstruction
+      accuracy claim.
+    files:
+    - name: synthetic-images.zip
+      content_base64: UEsDBBQAAAAAAAAAIQDUwx2+UwAAAFMAAAALAAAAaW1hZ2UtMC5wbmeJUE5HDQoaCgAAAA1JSERSAAAAEAAAAAwIAgAAAOSFqtYAAAAaSURBVHicY2SImsZACmAiSTXDqAbiwHAIVgBCxAEILocZPwAAAABJRU5ErkJgglBLAwQUAAAAAAAAACEAxkjzilYAAABWAAAACwAAAGltYWdlLTEucG5niVBORw0KGgoAAAANSUhEUgAAABEAAAAMCAIAAAALR8HoAAAAHUlEQVR4nGMUiZrGQCJgIlXDqB4wYIJQJIHhpgcAlwQBHFcIYFoAAAAASUVORK5CYIJQSwMEFAAAAAAAAAAhALMza69VAAAAVQAAAAsAAABpbWFnZS0yLnBuZ4lQTkcNChoKAAAADUlIRFIAAAASAAAADAgCAAAA4HB66wAAABxJREFUeJxj1IiaxkA6YCJDD8OoNixgNCQZ0AEA8OQBMCYACw8AAAAASUVORK5CYIJQSwECFAMUAAAAAAAAACEA1MMdvlMAAABTAAAACwAAAAAAAAAAAAAAgAEAAAAAaW1hZ2UtMC5wbmdQSwECFAMUAAAAAAAAACEAxkjzilYAAABWAAAACwAAAAAAAAAAAAAAgAF8AAAAaW1hZ2UtMS5wbmdQSwECFAMUAAAAAAAAACEAszNrr1UAAABVAAAACwAAAAAAAAAAAAAAgAH7AAAAaW1hZ2UtMi5wbmdQSwUGAAAAAAMAAwCrAAAAeQEAAAAA
+    inputs:
+      input_file: synthetic-images.zip
+    parameters: {}
+hpc:
+  install:
+    runtime: singularity
+    sif_required: true
+  test:
+    description: Synthetic image preparation/pair contract fixture; no reconstruction
+      accuracy claim.
+    files:
+    - name: synthetic-images.zip
+      content_base64: UEsDBBQAAAAAAAAAIQDUwx2+UwAAAFMAAAALAAAAaW1hZ2UtMC5wbmeJUE5HDQoaCgAAAA1JSERSAAAAEAAAAAwIAgAAAOSFqtYAAAAaSURBVHicY2SImsZACmAiSTXDqAbiwHAIVgBCxAEILocZPwAAAABJRU5ErkJgglBLAwQUAAAAAAAAACEAxkjzilYAAABWAAAACwAAAGltYWdlLTEucG5niVBORw0KGgoAAAANSUhEUgAAABEAAAAMCAIAAAALR8HoAAAAHUlEQVR4nGMUiZrGQCJgIlXDqB4wYIJQJIHhpgcAlwQBHFcIYFoAAAAASUVORK5CYIJQSwMEFAAAAAAAAAAhALMza69VAAAAVQAAAAsAAABpbWFnZS0yLnBuZ4lQTkcNChoKAAAADUlIRFIAAAASAAAADAgCAAAA4HB66wAAABxJREFUeJxj1IiaxkA6YCJDD8OoNixgNCQZ0AEA8OQBMCYACw8AAAAASUVORK5CYIJQSwECFAMUAAAAAAAAACEA1MMdvlMAAABTAAAACwAAAAAAAAAAAAAAgAEAAAAAaW1hZ2UtMC5wbmdQSwECFAMUAAAAAAAAACEAxkjzilYAAABWAAAACwAAAAAAAAAAAAAAgAF8AAAAaW1hZ2UtMS5wbmdQSwECFAMUAAAAAAAAACEAszNrr1UAAABVAAAACwAAAAAAAAAAAAAAgAH7AAAAaW1hZ2UtMi5wbmdQSwUGAAAAAAMAAwCrAAAAeQEAAAAA
+    inputs:
+      input_file: synthetic-images.zip
+    parameters: {}
+ui:
+  playground:
+    fields:
+      input_file:
+        widget: file_picker
+        accept_extensions:
+        - .zip
+        - .jpg
+        - .jpeg
+        - .png
+        - .tif
+        - .tiff
+        - .webp
+      input_files:
+        widget: file_picker
+        accept_extensions:
+        - .zip
+        - .jpg
+        - .jpeg
+        - .png
+        - .tif
+        - .tiff
+        - .webp
+    result:
+      artifact_views:
+      - id: results
+        label: Scientific artifacts and reports
+        widget: file_download
+        extensions:
+        - .json
+        - .zip
+      show_result_json: true
+      show_logs: true

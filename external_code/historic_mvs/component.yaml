@@ -1,0 +1,106 @@
+metadata:
+  name: historic_mvs
+  label: Historic MVS Anywhere Meshing
+  description: Execute the original mvs stage using an operator-provisioned, source-pinned
+    research runtime. Requires external dependencies and model weights; see the historic
+    reconstruction research guide.
+  tags:
+  - historic-reconstruction
+  - research
+  - gpu
+  category: Historic Reconstruction Research
+  version: 1.0.1
+  status: alpha
+  component_schema: 0.1.0-alpha.1
+distribution:
+  tier: external_installable
+  bundled_with_webhdp: false
+  installation_scope:
+  - hpc_sif
+inputs:
+- name: input_file
+  label: Research image or workspace ZIP
+  type: file_path
+  required: true
+outputs:
+- name: workspace_bundle
+  label: Workspace bundle
+  type: file_path
+  extensions:
+  - .zip
+  required: true
+- name: report
+  label: Report
+  type: file_path
+  extensions:
+  - .json
+  required: true
+parameter_groups:
+- title: Research stage settings
+  parameters:
+  - name: batch_size
+    label: Inference batch size
+    type: integer
+    default: 1
+    minimum: 1
+    maximum: 4
+  - name: fusion_max_depth
+    label: Maximum fusion depth (model units)
+    description: Depth clipping distance in the input model's coordinate units.
+      Unscaled COLMAP reconstructions do not necessarily use metres.
+    type: number
+    default: 3.0
+    minimum: 0.01
+    maximum: 10000
+  - name: fusion_resolution
+    label: Fusion voxel size (model units)
+    description: TSDF voxel size in the input model's coordinate units.
+    type: number
+    default: 0.04
+    minimum: 0.001
+    maximum: 10
+execution:
+  timeout: 7200
+  profiles:
+  - id: hpc_singularity
+    adapter: hpc_link
+    handler: generic_singularity_component
+    runtime: singularity
+    image: ''
+    entrypoint:
+    - python
+    - /app/component_runner.py
+    - upstream-mvs
+    resources:
+      gpu_count: 1
+      cpus: 8
+      memory_mb: 65536
+compatibility:
+  playground:
+    enabled: true
+install:
+  strategies:
+  - id: hpc_sif
+    runtime: singularity
+    profile: hpc_singularity
+hpc:
+  install:
+    runtime: singularity
+    sif_required: true
+ui:
+  playground:
+    fields:
+      input_file:
+        widget: file_picker
+        accept_extensions:
+        - .zip
+    result:
+      artifact_views:
+      - id: research-results
+        label: Research workspace and evidence
+        widget: file_download
+        extensions:
+        - .zip
+        - .json
+      show_result_json: true
+      show_logs: true

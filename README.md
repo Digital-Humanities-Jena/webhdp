@@ -7,7 +7,7 @@ Zenodo workflows, and generated EDM, CIDOC-CRM, JSON-LD, IIIF, and METS/MODS out
 Canonical source repository:
 `https://github.com/Digital-Humanities-Jena/webhdp`
 
-Release version: `v0.1.0-alpha.2`
+Release version: `v0.1.0-alpha.3`
 
 ## What WebHDP Does
 
@@ -46,6 +46,12 @@ placed model. See the [3DGeoRef component guide](external_code/georeferencer/REA
 for input preparation, installation and accuracy limits. Automatic external
 geolocation services are not enabled by this integration.
 
+Operators can register an existing Slurm GPU allocation with HPC-Link for a
+live demonstration. WebHDP exposes it to approved, signed-in users with the
+corresponding HPC capability. One session can claim it at a time, and detaching
+returns it to the demonstration pool for the remainder of the allocation.
+See the [reserved GPU guide](docs/guides/prereserved_gpu_demo.md).
+
 Models whose dependencies span directories include a `<model>.sources.zip` in
 their Zenodo draft. Extract that archive to restore the original paths before
 opening the model locally. It preserves parent-directory references and files
@@ -61,8 +67,38 @@ HDP Component installation, Pipeline Constructor workflows, local Docker-backed
 components, and SIF execution remain optional evaluation features outside the
 validated core profile.
 
+[Historic reconstruction components and pipelines](docs/guides/historic_reconstruction.md)
+add portable photograph preparation, pair selection, COLMAP reconstruction and
+measured georeferencing, with separate adapters for the original research
+workflows. Native recipes become available after their runtime artifacts are
+installed and pinned.
+
+[Published Zenodo community components](docs/guides/zenodo_community_components.md)
+provide OBJ conversion and analysis, material/GLB/image metadata, read-only HDPC
+export and file integrity reports through a shared Docker runtime, alongside
+the existing Fast Renderer service. Eight native recipes preserve installed
+component versions and explicit artifact mappings.
+
 This repository does not contain private HPC credentials, local runtime data,
 deployment secrets, generated reports, or vendored local-edm-validator source.
+
+[HMSM mechanical music components](docs/guides/hmsm_components.md) add piano-roll
+scan digitization, MIDI interpretation, and MIDI reconstruction after the
+licensed HMSM runtime is installed.
+
+## WebHDP-Link application integration
+
+WebHDP-Link exposes explicitly published native pipelines to registered web
+applications through a scoped API. Applications can upload inputs, queue work,
+poll progress and download verified outputs, or send users to WebHDP's hosted
+processing pages. The central WebHDP operator manages component runtimes and HPC
+access. See the [integration and operator guide](docs/guides/webhdp_link.md),
+[SDK](sdk/webhdp-link/README.md), and
+[three real processing examples](external_code/webhdp_link_examples/README.md).
+
+Existing installations should follow the
+[alpha.3 upgrade guide](docs/guides/upgrade_alpha3.md) before enabling these
+optional execution paths.
 
 ## Repository Layout
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import hashlib
 import logging
+import math
 import os
 import shutil
 import subprocess
@@ -12,8 +13,70 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from uuid import uuid4
 
 logger = logging.getLogger(__name__)
+
+PATH_INPUT_TYPES = {"file_path", "file_list", "dir_path"}
+PRIVATE_ENVIRONMENT_KEYS = {"PATH", "LANG", "LC_ALL", "LC_CTYPE", "TZ"}
+
+
+def _file_inputs(request):
+    manifest = request.metadata.get("component_manifest") or {}
+    declared = {field["name"] for field in manifest.get("inputs", []) if field.get("type") in PATH_INPUT_TYPES}
+    return {name: value for name, value in request.inputs.items() if name in declared}
+
+
+def _private_input(path: Path, root: Path) -> bool:
+    try:
+        return path.is_absolute() and path.is_relative_to(root) and path.resolve(strict=True) == path and (path.is_file() or path.is_dir())
+    except (OSError, RuntimeError, ValueError):
+        return False
+
+
+def component_execution_timeout(manifest: dict, requested: Any = None) -> float | None:
+    """Use the tighter declared/requested deadline without inventing a default."""
+    declared = (manifest.get("execution") or {}).get("timeout")
+    limits = []
+    for value in (declared, requested):
+        if value is None:
+            continue
+        if type(value) not in {int, float} or not math.isfinite(value) or value <= 0:
+            raise ValueError("Component execution timeout must be a positive finite number")
+        limits.append(value)
+    return min(limits) if limits else None
+
+
+def contract_file_output_error(manifest: dict, response: dict, output_dir: Path) -> str | None:
+    """Check file outputs promised by a WebHDP container contract before using them."""
+    values = response.get("outputs")
+    values = values if isinstance(values, dict) else {}
+    root = output_dir.resolve()
+    for field in manifest.get("outputs") or []:
+        if field.get("type") != "file_path":
+            continue
+        name = field["name"]
+        extensions = field.get("extensions") or []
+        if not field.get("required") and (name not in values or not extensions):
+            continue
+        value = values.get(name)
+        if not isinstance(value, str) or not value.startswith("/outputs/"):
+            return f"File output '{name}' must name a file under /outputs."
+        relative = Path(value.removeprefix("/outputs/"))
+        path = root / relative
+        try:
+            if (
+                relative.is_absolute()
+                or ".." in relative.parts
+                or path.resolve(strict=True) != path
+                or not path.is_file()
+            ):
+                return f"File output '{name}' is missing or outside the container output directory."
+        except (OSError, RuntimeError, ValueError):
+            return f"File output '{name}' is missing or outside the container output directory."
+        if extensions and path.suffix.lower() not in extensions:
+            return f"File output '{name}' must have one of these extensions: {', '.join(extensions)}."
+    return None
 
 
 @dataclass
@@ -42,9 +105,10 @@ class SubprocessExecutionAdapter(BaseExecutionAdapter):
         workdir: str,
         environment: Optional[Dict[str, str]] = None,
         timeout: Optional[int] = None,
+        inherit_environment: bool = True,
     ) -> Dict[str, Any]:
         started = time.time()
-        env = os.environ.copy()
+        env = os.environ.copy() if inherit_environment else {key: os.environ[key] for key in PRIVATE_ENVIRONMENT_KEYS if key in os.environ}
         if environment:
             env.update({str(key): str(value) for key, value in environment.items()})
 
@@ -160,6 +224,7 @@ class SubprocessExecutionAdapter(BaseExecutionAdapter):
             workdir=workdir,
             environment=request.environment,
             timeout=request.metadata.get("timeout_seconds"),
+            inherit_environment=not request.metadata.get("private_execution_root"),
         )
         if result.get("success"):
             collected = self._collect_declared_outputs(request, execution_cwd=workdir)
@@ -266,24 +331,40 @@ class ContainerCliAdapter(SubprocessExecutionAdapter):
     def _stage_contract_inputs(request: AdapterExecutionRequest, input_dir: Path) -> Dict[str, Any]:
         staged: Dict[str, Any] = {}
         used_names: set[str] = set()
-        for key, value in request.inputs.items():
+        staged_sources: Dict[Path, str] = {}
+        private_root = request.metadata.get("private_execution_root")
+        allowed_paths = _file_inputs(request) if private_root else request.inputs
+        root = Path(private_root) if private_root else None
+
+        def stage_value(key: str, value: Any) -> Any:
+            if isinstance(value, list):
+                return [stage_value(key, item) for item in value]
             if not isinstance(value, str) or not value.strip():
-                staged[key] = value
-                continue
+                return value
             source = Path(value)
+            if root is not None and not _private_input(source, root):
+                raise ValueError("A component input is outside its private workspace")
             if not source.exists():
-                staged[key] = value
-                continue
+                return value
+            identity = source.resolve()
+            if identity in staged_sources:
+                return staged_sources[identity]
             safe_name = source.name or str(key)
-            if safe_name in used_names:
+            while safe_name.casefold() in used_names:
                 safe_name = f"{key}_{safe_name}"
-            used_names.add(safe_name)
+            used_names.add(safe_name.casefold())
             target = input_dir / safe_name
             if source.is_dir():
+                if root is not None and any(not _private_input(child, root) for child in source.rglob("*")):
+                    raise ValueError("A component directory contains a link or nonregular file")
                 shutil.copytree(source, target, dirs_exist_ok=True)
             else:
                 shutil.copy2(source, target)
-            staged[key] = safe_name
+            staged_sources[identity] = safe_name
+            return safe_name
+
+        for key, value in request.inputs.items():
+            staged[key] = stage_value(key, value) if key in allowed_paths else value
         return staged
 
     @staticmethod
@@ -309,6 +390,26 @@ class ContainerCliAdapter(SubprocessExecutionAdapter):
         image: str,
         entrypoint: List[str],
     ) -> Dict[str, Any]:
+        manifest = request.metadata.get("component_manifest") or request.metadata.get("manifest") or {}
+        try:
+            timeout = component_execution_timeout(manifest, request.metadata.get("timeout_seconds"))
+            resources = request.profile.get("resources") or {}
+            if not isinstance(resources, dict):
+                raise ValueError("Container resources must be an object")
+            resource_arguments = []
+            for name, option in (("cpus", "--cpus"), ("memory_mb", "--memory")):
+                if name not in resources:
+                    continue
+                value = resources[name]
+                if type(value) not in {int, float} or not math.isfinite(value) or value <= 0:
+                    raise ValueError(f"Container {name} must be a positive finite number")
+                if name == "memory_mb":
+                    value = int(value * 1024 * 1024)
+                    if value <= 0:
+                        raise ValueError("Container memory_mb must represent at least one byte")
+                resource_arguments.extend([option, str(value)])
+        except (ValueError, TypeError, OverflowError) as exc:
+            return {"success": False, "status": "failed", "error": str(exc), "command": []}
         workdir = Path(request.workdir)
         input_dir = workdir / "inputs"
         output_dir = workdir / "outputs"
@@ -316,12 +417,16 @@ class ContainerCliAdapter(SubprocessExecutionAdapter):
         request_dir = workdir / "request"
         for directory in (input_dir, output_dir, response_dir, request_dir):
             directory.mkdir(parents=True, exist_ok=True)
-        staged_inputs = self._stage_contract_inputs(request, input_dir)
+        try:
+            staged_inputs = self._stage_contract_inputs(request, input_dir)
+        except (OSError, ValueError) as exc:
+            return {"success": False, "status": "failed", "error": str(exc), "command": []}
         request_path = request_dir / "request.json"
         response_path = response_dir / "response.json"
-        manifest = request.metadata.get("manifest") if isinstance(request.metadata.get("manifest"), dict) else {}
+        response_path.unlink(missing_ok=True)
+        component_key = (manifest.get("metadata") or {}).get("name") or request.step_id
         payload = {
-            "component_key": request.step_id,
+            "component_key": component_key,
             "inputs": staged_inputs,
             "parameters": request.parameters,
             "profile": request.profile,
@@ -331,6 +436,7 @@ class ContainerCliAdapter(SubprocessExecutionAdapter):
         request_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
         config = request.profile.get("config") or {}
         network = str(config.get("network") or "none").strip() or "none"
+        container_name = f"webhdp-contract-{uuid4().hex}"
         command = [
             "docker",
             "run",
@@ -354,18 +460,39 @@ class ContainerCliAdapter(SubprocessExecutionAdapter):
             "-e",
             "WEBHDP_COMPONENT_RESPONSE=/tmp/webhdp/response/response.json",
             "-e",
-            f"WEBHDP_COMPONENT_KEY={request.step_id}",
+            f"WEBHDP_COMPONENT_KEY={component_key}",
         ]
         for key, value in (request.profile.get("environment") or {}).items():
             command.extend(["-e", f"{key}={value}"])
+        command.extend(resource_arguments)
+        command.extend(["--name", container_name])
         command.append(image)
         command.extend(entrypoint)
         result = self._run_command(
             command,
             workdir=request.workdir,
             environment=request.environment,
-            timeout=request.metadata.get("timeout_seconds"),
+            timeout=timeout,
+            inherit_environment=not request.metadata.get("private_execution_root"),
         )
+        # Killing a timed-out Docker client alone can leave its workload alive.
+        # Its invocation-unique name is available even if Docker times out
+        # between daemon-side creation and writing a client-side cidfile.
+        if not result.get("success"):
+            result["container_name"] = container_name
+            try:
+                cleanup = subprocess.run(["docker", "rm", "--force", container_name], capture_output=True,
+                                         text=True, timeout=15, check=False)
+                result["cleanup_status"] = "removed" if cleanup.returncode == 0 else "unconfirmed"
+                if cleanup.returncode:
+                    # A queued daemon-side create may complete after rm/inspect
+                    # report NoSuch. Absence now is not confirmed cancellation.
+                    result.setdefault("warnings", []).append(
+                        f"Removal of container {container_name} is unconfirmed; Docker may still create it asynchronously. "
+                        "Reconcile this container name before retrying. " + cleanup.stderr[-1000:])
+            except (OSError, subprocess.SubprocessError) as exc:
+                result["cleanup_status"] = "unconfirmed"
+                result.setdefault("warnings", []).append(f"Container cleanup failed: {exc}")
         response_payload: Dict[str, Any] = {}
         if response_path.exists():
             try:
@@ -382,6 +509,10 @@ class ContainerCliAdapter(SubprocessExecutionAdapter):
             except ValueError:
                 response_payload = {}
         if response_payload:
+            if result.get("success") is True and response_payload.get("success") is True:
+                contract_error = contract_file_output_error(manifest, response_payload, output_dir)
+                if contract_error:
+                    response_payload = {"success": False, "error": contract_error}
             translated = self._translate_container_path(response_payload, output_dir)
             if isinstance(translated, dict):
                 result.update(
@@ -466,7 +597,8 @@ class HpcLinkExecutionAdapter(BaseExecutionAdapter):
     @classmethod
     def _local_paths_for_request(cls, request: AdapterExecutionRequest) -> List[str]:
         paths: List[str] = []
-        cls._collect_existing_local_paths(request.inputs, paths)
+        private_root = request.metadata.get("private_execution_root")
+        cls._collect_existing_local_paths(_file_inputs(request) if private_root else request.inputs, paths)
         execution_context = request.metadata.get("execution_context") or {}
         cls._collect_existing_local_paths(execution_context.get("bucket_source_files"), paths)
 
@@ -491,6 +623,8 @@ class HpcLinkExecutionAdapter(BaseExecutionAdapter):
         seen: set[str] = set()
         for path in paths:
             resolved = os.path.abspath(path)
+            if private_root and not _private_input(Path(path), Path(private_root)):
+                raise ValueError("An HPC input is outside its private workspace")
             if resolved in seen:
                 continue
             seen.add(resolved)

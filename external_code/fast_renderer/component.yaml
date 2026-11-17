@@ -22,7 +22,7 @@ metadata:
     - parallel computing
     - hpc
   category: 3D Processing
-  version: "0.1.0"
+  version: "0.1.1"
   status: alpha
   created: "2025-11-16"
   updated: "2025-11-16"
@@ -38,8 +38,8 @@ metadata:
   component_schema: "0.1.0-alpha.1"
 
 sources:
-  record: ""
-  doi: ""
+  record: "https://zenodo.org/records/17622912"
+  doi: "10.5281/zenodo.17622912"
   concept_doi: ""
   changelog: ""
   git: "https://github.com/hdp-components/fast_renderer"

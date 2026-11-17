@@ -170,7 +170,7 @@ def _build_cors_origins() -> list[str]:
 
 CORS(
     app,
-    resources={r"/api/*": {"origins": _build_cors_origins()}},
+    resources={r"/api/(?!v1/link(?:/|$)).*": {"origins": _build_cors_origins()}},
     supports_credentials=True,
     allow_headers=[
         "Content-Type",
@@ -189,7 +189,7 @@ os.chmod(app.config["SESSION_FILE_DIR"], 0o700)  # Secure permissions
 Session(app)
 
 # Initialize JWT
-app.config["JWT_SECRET_KEY"] = app.config.get("SECRET_KEY", "dev-secret-key-change-in-production")
+app.config["JWT_SECRET_KEY"] = app.config["SECRET_KEY"]
 app.config["JWT_ACCESS_TOKEN_EXPIRES"] = 86400  # 24 hours
 app.config["JWT_TOKEN_LOCATION"] = ["headers"]
 jwt = JWTManager(app)

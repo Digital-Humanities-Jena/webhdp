@@ -1,0 +1,98 @@
+metadata:
+  name: link_photo_inspector
+  label: Photo set inspector
+  description: Inspect photographs and create a contact sheet with a checksummed reconstruction
+    handoff. No photogrammetry is performed.
+  version: 1.0.0
+  component_schema: 0.1.0-alpha.1
+  status: alpha
+  tags:
+  - webhdp-link
+  - reference-application
+distribution:
+  tier: operator_managed
+  bundled_with_webhdp: true
+inputs:
+- name: input_files
+  label: Source files
+  type: file_list
+  required: true
+outputs:
+- name: contact_sheet
+  label: Contact Sheet
+  type: file_path
+  extensions:
+  - .jpg
+  required: true
+- name: photo_report
+  label: Photo Report
+  type: file_path
+  extensions:
+  - .json
+  required: true
+- name: reconstruction_request
+  label: Reconstruction Request
+  type: file_path
+  extensions:
+  - .json
+  required: true
+parameter_groups:
+- title: Processing
+  parameters:
+  - name: max_side
+    label: Contact sheet image size
+    type: integer
+    default: 320
+    minimum: 64
+    maximum: 1024
+execution:
+  profiles:
+  - id: local
+    adapter: local_cli
+    entrypoint:
+    - python3
+    - runner.py
+    - photos
+    output_collection:
+    - name: contact_sheet
+      path: contact-sheet.jpg
+    - name: photo_report
+      path: photo-report.json
+    - name: reconstruction_request
+      path: reconstruction-request.json
+    resources:
+      gpu_count: 0
+      cpus: 2
+      memory_mb: 2048
+compatibility:
+  playground:
+    enabled: true
+ui:
+  playground:
+    fields:
+      input_files:
+        widget: file_picker
+        accept_extensions:
+        - .jpg
+        - .jpeg
+        - .png
+        - .webp
+    result:
+      show_logs: false
+      show_result_json: true
+      artifact_views:
+      - id: contact_sheet
+        label: Contact Sheet
+        widget: file_download
+        extensions:
+        - .jpg
+      - id: photo_report
+        label: Photo Report
+        widget: file_download
+        extensions:
+        - .json
+      - id: reconstruction_request
+        label: Reconstruction Request
+        widget: file_download
+        extensions:
+        - .json

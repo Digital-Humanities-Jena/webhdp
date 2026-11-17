@@ -1,0 +1,163 @@
+[
+  {
+    "component": "glb_metadata_extractor",
+    "record_id": 16993202,
+    "doi": "10.5281/zenodo.16993202",
+    "version": "0.1.0",
+    "license": "gpl-3.0-or-later",
+    "url": "https://zenodo.org/records/16993202",
+    "copyright": "Copyright (C) 2025 Dominik Ukolov",
+    "files": [
+      {
+        "key": "processor.py",
+        "checksum": "md5:9ce89bdb5ed022aacbaa2eb8896525d7"
+      },
+      {
+        "key": "component.yaml",
+        "checksum": "md5:1b65cb8b5600eebafd608a3f96abc9ff"
+      },
+      {
+        "key": "requirements.txt",
+        "checksum": "md5:04e5b5dac0d52b1b1f279678da66e3d9"
+      }
+    ]
+  },
+  {
+    "component": "hdpc_exporter",
+    "record_id": 16995063,
+    "doi": "10.5281/zenodo.16995063",
+    "version": "0.1.0",
+    "license": "gpl-3.0-or-later",
+    "url": "https://zenodo.org/records/16995063",
+    "copyright": "Copyright (C) 2025 Dominik Ukolov",
+    "files": [
+      {
+        "key": "processor.py",
+        "checksum": "md5:906678ca6b980921a864c81a83c06346"
+      },
+      {
+        "key": "component.yaml",
+        "checksum": "md5:5a0247566d2222b800ce5e82e8035028"
+      },
+      {
+        "key": "requirements.txt",
+        "checksum": "md5:ee784684fd7b42a968916ffd7c7cddf1"
+      }
+    ]
+  },
+  {
+    "component": "image_metadata_extractor",
+    "record_id": 16944352,
+    "doi": "10.5281/zenodo.16944352",
+    "version": "0.1.1",
+    "license": "gpl-3.0-or-later",
+    "url": "https://zenodo.org/records/16944352",
+    "copyright": "Copyright (C) 2025 Dominik Ukolov",
+    "files": [
+      {
+        "key": "requirements.txt",
+        "checksum": "md5:dc3215dc5f351f4ab8331812761ad910"
+      },
+      {
+        "key": "component.yaml",
+        "checksum": "md5:57f753d4339e4a06ceebc68afe837be2"
+      },
+      {
+        "key": "processor.py",
+        "checksum": "md5:5e8449de656fe94aae51088d709ca949"
+      }
+    ]
+  },
+  {
+    "component": "mtl_metadata_extractor",
+    "record_id": 16993305,
+    "doi": "10.5281/zenodo.16993305",
+    "version": "0.1.0",
+    "license": "gpl-3.0-or-later",
+    "url": "https://zenodo.org/records/16993305",
+    "copyright": "Copyright (C) 2025 Dominik Ukolov",
+    "files": [
+      {
+        "key": "requirements.txt",
+        "checksum": "md5:8001da68a29194200597ff4253ee1360"
+      },
+      {
+        "key": "processor.py",
+        "checksum": "md5:6ac961486e71c3b74bda9aae78a5cdaf"
+      },
+      {
+        "key": "component.yaml",
+        "checksum": "md5:5791f98b1adda24c5b7455fd15e266fd"
+      }
+    ]
+  },
+  {
+    "component": "obj_statistics_extractor",
+    "record_id": 16993382,
+    "doi": "10.5281/zenodo.16993382",
+    "version": "0.1.0",
+    "license": "gpl-3.0-or-later",
+    "url": "https://zenodo.org/records/16993382",
+    "copyright": "Copyright (C) 2025 Dominik Ukolov",
+    "files": [
+      {
+        "key": "processor.py",
+        "checksum": "md5:256e4bcea3109f0472350ebde1d5e566"
+      },
+      {
+        "key": "requirements.txt",
+        "checksum": "md5:32a6dfd046f7ff45565210be380ebb73"
+      },
+      {
+        "key": "component.yaml",
+        "checksum": "md5:123c0c41f1ccbc34e559c2dcbe0615ec"
+      }
+    ]
+  },
+  {
+    "component": "obj_to_glb_converter",
+    "record_id": 16995481,
+    "doi": "10.5281/zenodo.16995481",
+    "version": "0.1.0",
+    "license": "gpl-3.0-or-later",
+    "url": "https://zenodo.org/records/16995481",
+    "copyright": "Copyright (C) 2025 Dominik Ukolov",
+    "files": [
+      {
+        "key": "requirements.txt",
+        "checksum": "md5:bc0ed7b6db2fa3a3b8fdb186e3d452d7"
+      },
+      {
+        "key": "processor.py",
+        "checksum": "md5:fa99c77aec3974d66a217e23d9ae5b79"
+      },
+      {
+        "key": "component.yaml",
+        "checksum": "md5:b597aaf5209e73b13a381da8b6f13591"
+      }
+    ]
+  },
+  {
+    "component": "validate_file_integrity",
+    "record_id": 16993089,
+    "doi": "10.5281/zenodo.16993089",
+    "version": "0.1.0",
+    "license": "gpl-3.0-or-later",
+    "url": "https://zenodo.org/records/16993089",
+    "copyright": "Copyright (C) 2025 Dominik Ukolov",
+    "files": [
+      {
+        "key": "processor.py",
+        "checksum": "md5:ed4ca97cc62e6165d735fcd4a39820ba"
+      },
+      {
+        "key": "component.yaml",
+        "checksum": "md5:786f52fa0e226534c72d4a8708fb58d2"
+      },
+      {
+        "key": "requirements.txt",
+        "checksum": "md5:da493e8a14ba6537b411066d8e5f954f"
+      }
+    ]
+  }
+]

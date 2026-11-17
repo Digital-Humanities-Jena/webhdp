@@ -36,6 +36,8 @@ def _upload_disk_roots(app) -> list[str]:
 
 
 def _ensure_upload_capacity(app):
+    if request.path.startswith("/api/v1/link/"):
+        return None  # Link streams and enforces its own per-client upload/storage quotas.
     content_length = request.content_length
     if request.method not in {"POST", "PUT", "PATCH"} or not content_length:
         return None
@@ -88,6 +90,8 @@ def _enforce_required_password_change():
     if request.path in PASSWORD_CHANGE_ALLOWED_PATHS:
         return None
     auth_header = request.headers.get("Authorization", "")
+    if request.path.startswith("/api/v1/link/") and auth_header.startswith("Bearer whl_"):
+        return None  # Link checks account state and token-version revocation itself.
     if not auth_header.startswith("Bearer "):
         return None
 

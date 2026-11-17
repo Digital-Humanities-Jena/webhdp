@@ -84,6 +84,27 @@ const routes = [
     meta: { requiresAuth: true },
     children: [
       {
+        path: 'link/jobs',
+        name: 'LinkedProcessing',
+        component: () => import('@/views/link/LinkedProcessingView.vue'),
+      },
+      {
+        path: 'link/jobs/:runId',
+        name: 'LinkedProcessingDetail',
+        component: () => import('@/views/link/LinkedProcessingView.vue'),
+      },
+      {
+        path: 'link/authorize',
+        name: 'LinkAuthorize',
+        component: () => import('@/views/link/LinkAuthorizeView.vue'),
+      },
+      {
+        path: 'admin/webhdp-link',
+        name: 'WebHdpLinkAdmin',
+        component: () => import('@/views/admin/WebHdpLinkView.vue'),
+        meta: { requiresAdmin: true },
+      },
+      {
         path: 'dashboard',
         name: 'Dashboard',
         component: () => import('@/views/dashboard/DashboardView.vue'),
@@ -416,6 +437,11 @@ const routes = [
         ]
       },
       {
+        path: 'account/connected-apps',
+        name: 'ConnectedApplications',
+        component: () => import('@/views/link/ConnectedApplicationsView.vue'),
+      },
+      {
         path: 'account/configuration',
         name: 'AccountConfiguration',
         component: () => import('@/views/account/AccountConfigurationView.vue'),
@@ -478,7 +504,7 @@ router.beforeEach(async (to, from, next) => {
   }
 
   if (to.meta.requiresAuth && !authStore.isAuthenticated) {
-    next('/login')
+    next(['LinkAuthorize', 'LinkedProcessing', 'LinkedProcessingDetail'].includes(to.name) ? { path: '/login', query: { redirect: to.fullPath } } : '/login')
   } else if (to.meta.requiresAuth) {
     if (!authStore.user) {
       await authStore.fetchCurrentUser()
@@ -487,7 +513,7 @@ router.beforeEach(async (to, from, next) => {
       next('/account/configuration?passwordChangeRequired=1')
       return
     }
-    if (authStore.user?.onboarding_required && to.name !== 'Onboarding' && to.name !== 'AccountConfiguration' && to.name !== 'HpcResources') {
+    if (authStore.user?.onboarding_required && to.name !== 'Onboarding' && to.name !== 'AccountConfiguration' && to.name !== 'HpcResources' && to.name !== 'LinkAuthorize' && to.name !== 'ConnectedApplications' && !['LinkedProcessing', 'LinkedProcessingDetail'].includes(to.name)) {
       next('/onboarding')
       return
     }

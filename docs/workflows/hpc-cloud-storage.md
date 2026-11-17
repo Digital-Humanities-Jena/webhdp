@@ -58,11 +58,13 @@ Entry points:
 
 Workflow:
 1. Check HPC-Link availability.
-2. Request an allocation.
+2. Request an allocation, or claim a [pre-reserved GPU](../guides/prereserved_gpu_demo.md)
+   that an operator granted to this verified account for its own upload session.
 3. Run preflight for the allocation.
-4. Stage files or cloud object references.
+4. Stage files or recorded cloud mirrors from that upload session.
 5. Optionally upload a Zenodo draft from the allocation context.
-6. Release the allocation when finished.
+6. Release the allocation when finished. Releasing a pre-reserved GPU detaches
+   WebHDP access and leaves the operator's Slurm job running.
 
 Complete when:
 - HPC resources are staged, used, and released cleanly.

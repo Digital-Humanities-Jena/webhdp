@@ -9,8 +9,9 @@ from unittest.mock import MagicMock, patch
 import subprocess
 
 from flask import Flask
+import yaml
 
-from constants import OPTIONAL_3D_PIPELINE_DEFINITIONS, PIPELINE_DEFINITION
+from constants import HMSM_PIPELINE_DEFINITIONS, OPTIONAL_3D_PIPELINE_DEFINITIONS, PIPELINE_DEFINITION
 from database.database import db
 from database.models import (
     ComponentDefinition,
@@ -188,11 +189,11 @@ class NativePipelineSystemTestCase(unittest.TestCase):
             "steps_map": {step["id"]: step for step in pipeline_steps},
         }
 
-    def _prepare_generic_pipeline_session(self, name: str):
+    def _prepare_generic_pipeline_session(self, name: str, filename: str = "model.glb"):
         session_dir = Path(self.temp_dir) / name
         uploads_dir = session_dir / "uploads"
         uploads_dir.mkdir(parents=True, exist_ok=True)
-        source_file = uploads_dir / "model.glb"
+        source_file = uploads_dir / filename
         source_file.write_text("glb-data", encoding="utf-8")
         hdpc_path = session_dir / "session.hdpc"
         self._create_hdpc_source_file(hdpc_path, source_file, file_id=101)
@@ -537,6 +538,169 @@ class NativePipelineSystemTestCase(unittest.TestCase):
             self.native_service._seed_state = "idle"
             self.native_service.ensure_seeded()
             self.assertEqual(PipelineVersion.query.count(), version_count)
+
+    def _import_hmsm_component(self, component_key, *, pin_image=True, version=None):
+        path = Path(__file__).resolve().parents[1] / "external_code" / component_key / "component.yaml"
+        manifest = yaml.safe_load(path.read_text())
+        if pin_image:
+            manifest["execution"]["profiles"][0]["image"] = "sha256:" + "a" * 64
+        if version:
+            manifest["metadata"]["version"] = version
+        return self.native_service.import_component_from_manifest(manifest)
+
+    def test_hmsm_templates_require_pinned_profiles_and_preserve_saved_versions(self):
+        with self.app.app_context():
+            self._import_hmsm_component("hmsm_midi_reconstruction", pin_image=False)
+            self._import_hmsm_component("hmsm_scan_digitizer")
+            registered = {row["identifier"] for row in self.native_service.list_pipelines()}
+            self.assertEqual(registered.intersection(HMSM_PIPELINE_DEFINITIONS), {"hmsm_scan_digitization"})
+
+            self._import_hmsm_component("hmsm_midi_interpretation")
+            identifier = "hmsm_digitize_and_interpret"
+            config = self.native_service.get_pipeline(identifier)["config"]
+            self.assertTrue(self.native_service.validate_pipeline_config(config)["valid"])
+            updated = self.native_service.create_pipeline_version_from_config(identifier, {**config, "name": "My digitization"})
+            self._import_hmsm_component("hmsm_midi_interpretation")
+            upgraded = self._import_hmsm_component("hmsm_midi_interpretation", version="1.1.0")
+            self._import_hmsm_component("hmsm_midi_reconstruction", version="1.1.0")
+            version_count = PipelineVersion.query.count()
+            self.native_service._seed_state = "idle"
+            self.native_service.ensure_seeded()
+
+            pipeline = self.native_service.get_pipeline(identifier)
+            self.assertEqual(pipeline["active_version"], updated["active_version"])
+            self.assertEqual(pipeline["name"], "My digitization")
+            self.assertEqual(pipeline["config"]["steps"][1]["component_version"], config["steps"][1]["component_version"])
+            self.assertEqual(PipelineVersion.query.count(), version_count)
+            registered = {row["identifier"] for row in self.native_service.list_pipelines()}
+            self.assertTrue(HMSM_PIPELINE_DEFINITIONS.keys() <= registered)
+
+            updated_config = pipeline["config"]
+            updated_config["steps"][1].pop("component_manifest_hash")
+            updated_config["steps"][1]["component_version"] = upgraded["version"]
+            upgraded_pipeline = self.native_service.create_pipeline_version_from_config(identifier, updated_config)
+            self.assertNotEqual(upgraded_pipeline["active_version"], updated["active_version"])
+            self.assertEqual(upgraded_pipeline["config"]["steps"][1]["component_version"], "1.1.0")
+
+    def test_hmsm_preflight_checks_selected_file_types_and_resolves_manifest_defaults(self):
+        with self.app.app_context():
+            for key in ("hmsm_scan_digitizer", "hmsm_midi_interpretation", "hmsm_midi_reconstruction"):
+                self._import_hmsm_component(key)
+            _, scan, session = self._prepare_generic_pipeline_session("hmsm_preflight", "scan.png")
+            midi = scan.with_name("source.MIDI")
+            midi.write_bytes(b"synthetic MIDI")
+            for identifier, valid_source, invalid_source in (
+                ("hmsm_scan_digitization", scan, midi),
+                ("hmsm_digitize_and_interpret", scan, midi),
+                ("hmsm_midi_interpretation", midi, scan),
+                ("hmsm_midi_reconstruction", midi, scan),
+            ):
+                with self.subTest(identifier=identifier):
+                    config = self.native_service.get_pipeline(identifier)["config"]
+                    request = {"pipeline_definition": config, "session_id": session.id}
+                    valid = self.native_service.preflight_pipeline_constructor({**request, "local_file_paths": [str(valid_source)]}, self.user_id)
+                    self.assertTrue(valid["valid"], valid["validation"])
+                    self.assertTrue(valid["preflight_token"])
+                    first = valid["steps"][0]["records"][0]
+                    self.assertEqual(first["resolved_inputs"], {"input_file": str(valid_source.resolve())})
+                    if identifier == "hmsm_midi_reconstruction":
+                        self.assertEqual(first["effective_parameters"], {
+                            "model_id": "generic_65_no_dynamics", "title": "Untitled reconstruction study", "roll_speed": 6, "revolution": 60,
+                        })
+                    if identifier == "hmsm_digitize_and_interpret":
+                        self.assertEqual(valid["steps"][1]["records"][0]["resolved_inputs"], {"input_file": None})
+                    invalid = self.native_service.preflight_pipeline_constructor({**request, "local_file_paths": [str(invalid_source)]}, self.user_id)
+                    self.assertFalse(invalid["valid"])
+                    self.assertIsNone(invalid["preflight_token"])
+                    self.assertIn(invalid_source.name, invalid["validation"]["errors"][0])
+                    self.assertNotIn(str(invalid_source.parent), invalid["validation"]["errors"][0])
+
+            config = self.native_service.get_pipeline("hmsm_midi_interpretation")["config"]
+            config["steps"][0]["triggers"] = {"default_behavior": "skip", "rules": [{
+                "id": "only_midi", "action": "run",
+                "conditions": [{"source_type": "file_fact", "field": "extension", "operator": "in", "values": [".mid", ".midi"]}],
+            }]}
+            mixed = self.native_service.preflight_pipeline_constructor({
+                "pipeline_definition": config, "session_id": session.id, "local_file_paths": [str(scan), str(midi)],
+            }, self.user_id)
+            self.assertTrue(mixed["valid"], mixed["validation"])
+            self.assertEqual([row["action"] for row in mixed["steps"][0]["records"]], ["skip", "run"])
+
+    def test_hmsm_pipeline_definition_rejects_incompatible_bindings_and_parameters(self):
+        with self.app.app_context():
+            self._import_hmsm_component("hmsm_scan_digitizer")
+            self._import_hmsm_component("hmsm_midi_interpretation")
+            self._import_hmsm_component("hmsm_midi_reconstruction")
+            chain = self.native_service.get_pipeline("hmsm_digitize_and_interpret")["config"]
+            digitize, interpret = chain["steps"]
+            binding = interpret["input_bindings"][0]
+            options_binding = {**binding, "target": "options_file", "source_output": "result_file"}
+            reconstruction = self.native_service.get_pipeline("hmsm_midi_reconstruction")["config"]
+            for config, expected in (
+                ({**chain, "steps": [interpret, digitize]}, "earlier step"),
+                ({**chain, "steps": [digitize, {**interpret, "input_bindings": [{**binding, "source_output": "result_file"}]}]}, "requires .mid, .midi"),
+                ({**chain, "steps": [{**digitize, "execution_profile_ref": "unknown"}, interpret]}, "requires a WebHDP Docker contract"),
+                ({**chain, "steps": [{**digitize, "scope": "pipeline"}, interpret]}, "requires record scope"),
+                ({**chain, "steps": [digitize, {**interpret, "parameters": {"options_json": "[]"}}]}, "must contain a JSON object"),
+                ({**chain, "steps": [digitize, {**interpret, "parameters": {"options_json": "{}"},
+                                                "input_bindings": [binding, options_binding]}]}, "cannot be used with input 'options_file'"),
+                ({**chain, "steps": [digitize, {**interpret, "parameters": {"undeclared": 1}}]}, "is not declared"),
+                ({**reconstruction, "steps": [{**reconstruction["steps"][0], "parameters": {"roll_speed": "fast"}}]}, "must be a finite number"),
+            ):
+                with self.subTest(expected=expected):
+                    validation = self.native_service.validate_pipeline_config(config)
+                    self.assertFalse(validation["valid"])
+                    self.assertTrue(any(expected in message for message in validation["errors"]), validation["errors"])
+
+    def test_hmsm_pipeline_passes_midi_and_preserves_identically_named_artifacts(self):
+        identifier = "hmsm_digitize_and_interpret"
+        midi_data = b"MThd synthetic MIDI from step one"
+
+        def run_container(command, *, workdir, **_options):
+            workdir = Path(workdir)
+            request = json.loads((workdir / "request/request.json").read_text())
+            self.assertEqual(set(request["inputs"]), {"input_file"})
+            input_file = workdir / "inputs" / request["inputs"]["input_file"]
+            output_dir = workdir / "outputs"
+            if request["component_key"] == "hmsm_scan_digitizer":
+                self.assertEqual(input_file.name, "scan.png")
+                self.assertEqual(request["parameters"], {"model_id": "generic_65_no_dynamics"})
+                (output_dir / "digitized.mid").write_bytes(midi_data)
+                filenames = {"midi_file": "digitized.mid"}
+            else:
+                self.assertEqual(request["component_key"], "hmsm_midi_interpretation")
+                self.assertEqual(input_file.read_bytes(), midi_data)
+                filenames = {}
+            filenames["runtime_manifest"] = "hmsm-source.json"
+            for field in manifests[request["component_key"]]["outputs"]:
+                if field.get("required"):
+                    filenames.setdefault(field["name"], field["name"] + field["extensions"][0])
+            for filename in filenames.values():
+                if not (output_dir / filename).exists():
+                    (output_dir / filename).write_bytes(b"synthetic contract output")
+            (output_dir / "hmsm-source.json").write_text(request["component_key"])
+            (workdir / "response/response.json").write_text(json.dumps({
+                "success": True,
+                "outputs": {key: f"/outputs/{filename}" for key, filename in filenames.items()},
+                "artifacts": [{"name": "hmsm-source.json", "path": "/outputs/hmsm-source.json"}],
+            }))
+            return {"success": True, "command": command, "logs": {}}
+
+        with self.app.app_context():
+            manifests = {
+                key: self._import_hmsm_component(key)["manifest"]
+                for key in ("hmsm_scan_digitizer", "hmsm_midi_interpretation")
+            }
+            session_dir, source_file, session_row = self._prepare_generic_pipeline_session("hmsm", "scan.png")
+            context = self._build_generic_execution_context(session_dir, source_file, session_row, [])
+            adapter = self.native_service._adapter_registry["container_cli"]
+            with patch.object(adapter, "_run_command", side_effect=run_container) as run:
+                result = self.native_service.execute_registered_submission(identifier, context)
+            self.assertTrue(result["success"], result["details"])
+            self.assertEqual(run.call_count, 2)
+            artifacts = ExecutionArtifact.query.filter_by(name="hmsm-source.json").order_by(ExecutionArtifact.id).all()
+            self.assertEqual([Path(item.path).read_text() for item in artifacts], ["hmsm_scan_digitizer", "hmsm_midi_interpretation"])
+            self.assertTrue(all(Path(item.path).is_relative_to(session_dir.resolve()) for item in artifacts))
 
     def test_failed_optimizer_does_not_render_original_as_fallback(self):
         import yaml

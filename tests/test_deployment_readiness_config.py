@@ -43,6 +43,16 @@ def test_production_config_accepts_real_secret_and_bootstrap_values(monkeypatch)
     assert module.ProductionConfig.CREDENTIAL_ENCRYPTION_KEY.startswith("credential-secret-")
 
 
+def test_production_config_rejects_short_jwt_signing_key(monkeypatch):
+    monkeypatch.setenv("FLASK_ENV", "production")
+    monkeypatch.setenv("SECRET_KEY", "synthetic-short-key")
+    monkeypatch.setenv("CREDENTIAL_ENCRYPTION_KEY", "credential-secret-" + "b" * 32)
+    monkeypatch.setenv("SETUP_BOOTSTRAP_TOKEN", "setup-token-" + "c" * 32)
+
+    with pytest.raises(ValueError, match="at least 32 bytes"):
+        _load_config_module()
+
+
 def test_storage_mode_defaults_to_pure_cloud(monkeypatch):
     monkeypatch.setenv("PYTHON_DOTENV_DISABLED", "1")
     monkeypatch.delenv("STORAGE_MODE", raising=False)

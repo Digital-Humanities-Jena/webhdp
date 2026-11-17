@@ -1,0 +1,4 @@
+# CPU runtime: learned upstream dependencies remain operator managed and separate.
+numpy==2.4.1
+Pillow==13.0.0
+pycolmap==3.13.0

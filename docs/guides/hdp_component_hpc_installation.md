@@ -41,7 +41,11 @@ Every installable component provides:
 
 For `local_container`, the artifact is a Docker image already available to the
 machine running WebHDP's backend/worker process. For `hpc_sif`, the artifact is
-a prebuilt `.sif` image available as an absolute HPC path or HTTPS URL.
+a prebuilt `.sif` image available as an absolute HPC path or a public HTTPS
+URL ending in `.sif`. Use an administrator-approved host. Public Zenodo file
+URLs may include `?download=1`. If a SIF needs authentication or a signed
+download link, stage it on the cluster and enter its absolute path readable by
+HPC-Link.
 
 Dockerfiles may be used to build images outside WebHDP. WebHDP does not build
 Docker images or SIF images during installation.

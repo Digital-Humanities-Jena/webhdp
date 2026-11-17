@@ -1,11 +1,15 @@
 import axios from 'axios'
 import { useToast } from '@/composables/useToast'
 import { buildApiBaseUrl } from './apiBase'
+import { linkLoginDestination } from '@/utils/webhdpLink'
 
 const RAW_API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000'
 
 function defaultRedirectToLogin() {
-  window.location.href = '/login'
+  const current = window.location.pathname + window.location.search
+  window.location.href = linkLoginDestination(current) === current
+    ? `/login?redirect=${encodeURIComponent(current)}`
+    : '/login'
 }
 
 export function attachInterceptors(client, {

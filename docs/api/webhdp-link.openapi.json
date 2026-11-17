@@ -1,0 +1,5446 @@
+{
+  "components": {
+    "schemas": {
+      "AdminRun": {
+        "additionalProperties": false,
+        "properties": {
+          "artifacts": {
+            "items": {
+              "$ref": "#/components/schemas/Artifact"
+            },
+            "type": "array"
+          },
+          "cancel_requested": {
+            "type": "boolean"
+          },
+          "client_id": {
+            "type": "string"
+          },
+          "completed_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "error": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "code": {
+                    "type": "string"
+                  },
+                  "detail": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "code",
+                  "detail"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "hpc_cleanup_pending": {
+            "type": "boolean"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "pipeline_id": {
+            "type": "string"
+          },
+          "pipeline_name": {
+            "type": "string"
+          },
+          "pipeline_version": {
+            "type": "string"
+          },
+          "progress": {
+            "$ref": "#/components/schemas/Progress"
+          },
+          "progress_url": {
+            "format": "uri-reference",
+            "type": "string"
+          },
+          "reused": {
+            "type": "boolean"
+          },
+          "started_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "enum": [
+              "queued",
+              "running",
+              "succeeded",
+              "failed",
+              "cancelled"
+            ]
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/RunStep"
+            },
+            "type": "array"
+          },
+          "user_id": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "pipeline_id",
+          "pipeline_name",
+          "pipeline_version",
+          "status",
+          "progress_url",
+          "cancel_requested",
+          "progress",
+          "steps",
+          "artifacts",
+          "error",
+          "created_at",
+          "started_at",
+          "completed_at",
+          "client_id",
+          "user_id",
+          "hpc_cleanup_pending"
+        ],
+        "type": "object"
+      },
+      "Artifact": {
+        "additionalProperties": false,
+        "properties": {
+          "download_url": {
+            "format": "uri-reference",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "media_type": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "sha256": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "size": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "size",
+          "sha256",
+          "media_type",
+          "download_url"
+        ],
+        "type": "object"
+      },
+      "AuthorizationRequest": {
+        "properties": {
+          "approve": {
+            "type": "boolean"
+          },
+          "client_id": {
+            "type": "string"
+          },
+          "code_challenge": {
+            "type": "string"
+          },
+          "code_challenge_method": {
+            "type": "string"
+          },
+          "redirect_uri": {
+            "type": "string"
+          },
+          "response_type": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "client_id",
+          "redirect_uri",
+          "response_type",
+          "code_challenge",
+          "code_challenge_method",
+          "state",
+          "approve"
+        ],
+        "type": "object"
+      },
+      "Client": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "enabled": {
+            "default": true,
+            "type": "boolean"
+          },
+          "id": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$",
+            "type": "string"
+          },
+          "max_concurrent_runs": {
+            "default": 1,
+            "maximum": 64,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "max_queued_runs": {
+            "default": 20,
+            "maximum": 10000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "max_storage_bytes": {
+            "default": 1073741824,
+            "maximum": 1099511627776,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "max_upload_bytes": {
+            "default": 104857600,
+            "maximum": 21474836480,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "name": {
+            "maxLength": 160,
+            "minLength": 1,
+            "type": "string"
+          },
+          "origins": {
+            "description": "Exact HTTPS origins; loopback HTTP is allowed for development. No wildcard or path.",
+            "items": {
+              "format": "uri",
+              "type": "string"
+            },
+            "maxItems": 50,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "pipeline_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 50,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "redirect_uris": {
+            "description": "Exact redirect URI allowlist belonging to the registered origins. No fragment or OAuth response query parameters.",
+            "items": {
+              "format": "uri",
+              "type": "string"
+            },
+            "maxItems": 50,
+            "type": "array",
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "enabled",
+          "origins",
+          "redirect_uris",
+          "pipeline_ids",
+          "max_queued_runs",
+          "max_concurrent_runs",
+          "max_upload_bytes",
+          "max_storage_bytes",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "ClientCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "default": true,
+            "type": "boolean"
+          },
+          "id": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$",
+            "type": "string"
+          },
+          "max_concurrent_runs": {
+            "default": 1,
+            "maximum": 64,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "max_queued_runs": {
+            "default": 20,
+            "maximum": 10000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "max_storage_bytes": {
+            "default": 1073741824,
+            "maximum": 1099511627776,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "max_upload_bytes": {
+            "default": 104857600,
+            "maximum": 21474836480,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "name": {
+            "maxLength": 160,
+            "minLength": 1,
+            "type": "string"
+          },
+          "origins": {
+            "description": "Exact HTTPS origins; loopback HTTP is allowed for development. No wildcard or path.",
+            "items": {
+              "format": "uri",
+              "type": "string"
+            },
+            "maxItems": 50,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "pipeline_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 50,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "redirect_uris": {
+            "description": "Exact redirect URI allowlist belonging to the registered origins. No fragment or OAuth response query parameters.",
+            "items": {
+              "format": "uri",
+              "type": "string"
+            },
+            "maxItems": 50,
+            "type": "array",
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "ClientPatch": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "default": true,
+            "type": "boolean"
+          },
+          "max_concurrent_runs": {
+            "default": 1,
+            "maximum": 64,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "max_queued_runs": {
+            "default": 20,
+            "maximum": 10000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "max_storage_bytes": {
+            "default": 1073741824,
+            "maximum": 1099511627776,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "max_upload_bytes": {
+            "default": 104857600,
+            "maximum": 21474836480,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "name": {
+            "maxLength": 160,
+            "minLength": 1,
+            "type": "string"
+          },
+          "origins": {
+            "description": "Exact HTTPS origins; loopback HTTP is allowed for development. No wildcard or path.",
+            "items": {
+              "format": "uri",
+              "type": "string"
+            },
+            "maxItems": 50,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "pipeline_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 50,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "redirect_uris": {
+            "description": "Exact redirect URI allowlist belonging to the registered origins. No fragment or OAuth response query parameters.",
+            "items": {
+              "format": "uri",
+              "type": "string"
+            },
+            "maxItems": 50,
+            "type": "array",
+            "uniqueItems": true
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "ComponentParameterOption": {
+        "additionalProperties": false,
+        "properties": {
+          "default": {
+            "type": [
+              "string",
+              "number",
+              "boolean",
+              "null"
+            ]
+          },
+          "description": {
+            "type": "string"
+          },
+          "enum": {
+            "items": {
+              "type": [
+                "string",
+                "number",
+                "boolean",
+                "null"
+              ]
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "type": "array"
+          },
+          "label": {
+            "type": "string"
+          },
+          "maxLength": {
+            "maximum": 10000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "maximum": {
+            "type": "number"
+          },
+          "minLength": {
+            "maximum": 10000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "minimum": {
+            "type": "number"
+          },
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "string",
+              "number",
+              "integer",
+              "boolean"
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "type",
+          "label"
+        ],
+        "type": "object"
+      },
+      "Grant": {
+        "additionalProperties": false,
+        "properties": {
+          "client_id": {
+            "type": "string"
+          },
+          "client_name": {
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "revoked": {
+            "type": "boolean"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "service": {
+            "type": "boolean"
+          },
+          "user_id": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "client_id",
+          "user_id",
+          "scope",
+          "service",
+          "created_at",
+          "expires_at",
+          "revoked",
+          "client_name"
+        ],
+        "type": "object"
+      },
+      "HpcPolicy": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "default": false,
+            "type": "boolean"
+          },
+          "gpu_count": {
+            "default": 1,
+            "maximum": 8,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "gpu_type": {
+            "type": "string"
+          },
+          "partition": {
+            "type": "string"
+          },
+          "retain_allocation": {
+            "default": false,
+            "description": "Retain a running job-owned allocation only when explicitly enabled. Retained allocations require administrator management unless both publications explicitly enable same-user reuse.",
+            "type": "boolean"
+          },
+          "reuse_retained_allocation": {
+            "default": false,
+            "description": "Requires retain_allocation. Serially reuse an idle retained Link allocation for the same user and identical resource policy, without extending or resetting its expiry.",
+            "type": "boolean"
+          },
+          "walltime_hours": {
+            "description": "If omitted, use the central HPC configuration duration.",
+            "maximum": 168,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "InputContract": {
+        "additionalProperties": false,
+        "properties": {
+          "extensions": {
+            "items": {
+              "pattern": "^\\.[a-z0-9]{1,12}$",
+              "type": "string"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "type": "array"
+          },
+          "max_files": {
+            "maximum": 1000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "min_files": {
+            "maximum": 1000,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "min_files",
+          "max_files",
+          "extensions"
+        ],
+        "type": "object"
+      },
+      "Job": {
+        "additionalProperties": false,
+        "properties": {
+          "artifacts": {
+            "items": {
+              "$ref": "#/components/schemas/Artifact"
+            },
+            "type": "array"
+          },
+          "cancel_requested": {
+            "type": "boolean"
+          },
+          "client_id": {
+            "type": "string"
+          },
+          "client_name": {
+            "type": "string"
+          },
+          "completed_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "error": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "code": {
+                    "type": "string"
+                  },
+                  "detail": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "code",
+                  "detail"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "pipeline_id": {
+            "type": "string"
+          },
+          "pipeline_name": {
+            "type": "string"
+          },
+          "pipeline_version": {
+            "type": "string"
+          },
+          "progress": {
+            "$ref": "#/components/schemas/Progress"
+          },
+          "progress_url": {
+            "format": "uri-reference",
+            "type": "string"
+          },
+          "reused": {
+            "type": "boolean"
+          },
+          "started_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "enum": [
+              "queued",
+              "running",
+              "succeeded",
+              "failed",
+              "cancelled"
+            ]
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/RunStep"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "pipeline_id",
+          "pipeline_name",
+          "pipeline_version",
+          "status",
+          "progress_url",
+          "cancel_requested",
+          "progress",
+          "steps",
+          "artifacts",
+          "error",
+          "created_at",
+          "started_at",
+          "completed_at",
+          "client_id",
+          "client_name"
+        ],
+        "type": "object"
+      },
+      "ParameterMapping": {
+        "additionalProperties": false,
+        "properties": {
+          "default": {
+            "type": [
+              "string",
+              "number",
+              "boolean",
+              "null"
+            ]
+          },
+          "description": {
+            "type": "string"
+          },
+          "enum": {
+            "items": {
+              "type": [
+                "string",
+                "number",
+                "boolean",
+                "null"
+              ]
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "type": "array"
+          },
+          "label": {
+            "type": "string"
+          },
+          "maxLength": {
+            "maximum": 10000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "maximum": {
+            "type": "number"
+          },
+          "minLength": {
+            "maximum": 10000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "minimum": {
+            "type": "number"
+          },
+          "parameter": {
+            "type": "string"
+          },
+          "step_id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "string",
+              "integer",
+              "number",
+              "boolean"
+            ]
+          }
+        },
+        "required": [
+          "step_id",
+          "parameter"
+        ],
+        "type": "object"
+      },
+      "ParameterSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "const": "https://json-schema.org/draft/2020-12/schema"
+          },
+          "additionalProperties": {
+            "const": false
+          },
+          "properties": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ScalarParameter"
+            },
+            "type": "object"
+          },
+          "type": {
+            "const": "object"
+          }
+        },
+        "required": [
+          "$schema",
+          "type",
+          "properties",
+          "additionalProperties"
+        ],
+        "type": "object"
+      },
+      "Pipeline": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "maxLength": 5000,
+            "type": "string"
+          },
+          "enabled": {
+            "default": true,
+            "type": "boolean"
+          },
+          "execution_mode": {
+            "default": "record",
+            "enum": [
+              "record",
+              "bundle"
+            ]
+          },
+          "id": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$",
+            "type": "string"
+          },
+          "input": {
+            "$ref": "#/components/schemas/InputContract"
+          },
+          "name": {
+            "maxLength": 160,
+            "minLength": 1,
+            "type": "string"
+          },
+          "parameter_schema": {
+            "$ref": "#/components/schemas/ParameterSchema"
+          },
+          "pipeline_identifier": {
+            "type": "string"
+          },
+          "pipeline_version": {
+            "type": "string"
+          },
+          "structure": {
+            "items": {
+              "$ref": "#/components/schemas/PipelineStep"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description",
+          "pipeline_identifier",
+          "pipeline_version",
+          "enabled",
+          "input",
+          "execution_mode",
+          "parameter_schema",
+          "structure"
+        ],
+        "type": "object"
+      },
+      "PipelineOption": {
+        "additionalProperties": false,
+        "properties": {
+          "identifier": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "versions": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "steps": {
+                  "items": {
+                    "$ref": "#/components/schemas/PipelineOptionStep"
+                  },
+                  "type": "array"
+                },
+                "version": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "version",
+                "steps"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "identifier",
+          "name",
+          "versions"
+        ],
+        "type": "object"
+      },
+      "PipelineOptionStep": {
+        "additionalProperties": false,
+        "properties": {
+          "component": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "parameters": {
+            "items": {
+              "$ref": "#/components/schemas/ComponentParameterOption"
+            },
+            "type": "array"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "component",
+          "version",
+          "parameters"
+        ],
+        "type": "object"
+      },
+      "PipelineStep": {
+        "additionalProperties": false,
+        "properties": {
+          "component": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "component",
+          "version"
+        ],
+        "type": "object"
+      },
+      "Problem": {
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "error_description": {
+            "type": "string"
+          },
+          "instance": {
+            "type": "string"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "title": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "code"
+        ],
+        "type": "object"
+      },
+      "Progress": {
+        "additionalProperties": false,
+        "properties": {
+          "completed": {
+            "maximum": 1000000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "phase": {
+            "description": "Optional execution phase derived from persisted state. queued: waiting for a worker; waiting_for_resources: worker accepted an HPC job but its owned allocation is not ready; processing: preparing or executing native components; finalizing: native execution or allocation ended and Link is settling results; completed: any terminal Link status. Run.status distinguishes success, failure and cancellation. No scheduler identifiers or cluster details are exposed.",
+            "enum": [
+              "queued",
+              "waiting_for_resources",
+              "processing",
+              "finalizing",
+              "completed"
+            ],
+            "type": "string"
+          },
+          "total": {
+            "maximum": 1000000,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "completed",
+          "total"
+        ],
+        "type": "object"
+      },
+      "Publication": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "maxLength": 5000,
+            "type": "string"
+          },
+          "enabled": {
+            "default": true,
+            "type": "boolean"
+          },
+          "execution_mode": {
+            "default": "record",
+            "enum": [
+              "record",
+              "bundle"
+            ]
+          },
+          "hpc": {
+            "$ref": "#/components/schemas/HpcPolicy"
+          },
+          "id": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$",
+            "type": "string"
+          },
+          "input": {
+            "$ref": "#/components/schemas/InputContract"
+          },
+          "name": {
+            "maxLength": 160,
+            "minLength": 1,
+            "type": "string"
+          },
+          "parameter_schema": {
+            "$ref": "#/components/schemas/ParameterSchema"
+          },
+          "parameters": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ParameterMapping"
+            },
+            "maxProperties": 64,
+            "type": "object"
+          },
+          "pipeline_identifier": {
+            "type": "string"
+          },
+          "pipeline_version": {
+            "type": "string"
+          },
+          "step_timeout_seconds": {
+            "default": 3600,
+            "maximum": 43200,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "structure": {
+            "items": {
+              "$ref": "#/components/schemas/PipelineStep"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description",
+          "pipeline_identifier",
+          "pipeline_version",
+          "enabled",
+          "input",
+          "execution_mode",
+          "parameter_schema",
+          "structure",
+          "parameters",
+          "step_timeout_seconds",
+          "hpc"
+        ],
+        "type": "object"
+      },
+      "PublicationCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "maxLength": 5000,
+            "type": "string"
+          },
+          "enabled": {
+            "default": true,
+            "type": "boolean"
+          },
+          "execution_mode": {
+            "default": "record",
+            "enum": [
+              "record",
+              "bundle"
+            ]
+          },
+          "hpc": {
+            "$ref": "#/components/schemas/HpcPolicy"
+          },
+          "id": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$",
+            "type": "string"
+          },
+          "input": {
+            "$ref": "#/components/schemas/InputContract"
+          },
+          "name": {
+            "maxLength": 160,
+            "minLength": 1,
+            "type": "string"
+          },
+          "parameters": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ParameterMapping"
+            },
+            "maxProperties": 64,
+            "type": "object"
+          },
+          "pipeline_identifier": {
+            "type": "string"
+          },
+          "pipeline_version": {
+            "type": "string"
+          },
+          "step_timeout_seconds": {
+            "default": 3600,
+            "maximum": 43200,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "pipeline_identifier",
+          "pipeline_version",
+          "input"
+        ],
+        "type": "object"
+      },
+      "PublicationPatch": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "maxLength": 5000,
+            "type": "string"
+          },
+          "enabled": {
+            "default": true,
+            "type": "boolean"
+          },
+          "name": {
+            "maxLength": 160,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "Run": {
+        "additionalProperties": false,
+        "properties": {
+          "artifacts": {
+            "items": {
+              "$ref": "#/components/schemas/Artifact"
+            },
+            "type": "array"
+          },
+          "cancel_requested": {
+            "type": "boolean"
+          },
+          "completed_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "error": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "code": {
+                    "type": "string"
+                  },
+                  "detail": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "code",
+                  "detail"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "pipeline_id": {
+            "type": "string"
+          },
+          "pipeline_name": {
+            "type": "string"
+          },
+          "pipeline_version": {
+            "type": "string"
+          },
+          "progress": {
+            "$ref": "#/components/schemas/Progress"
+          },
+          "progress_url": {
+            "format": "uri-reference",
+            "type": "string"
+          },
+          "reused": {
+            "type": "boolean"
+          },
+          "started_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "enum": [
+              "queued",
+              "running",
+              "succeeded",
+              "failed",
+              "cancelled"
+            ]
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/RunStep"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "pipeline_id",
+          "pipeline_name",
+          "pipeline_version",
+          "status",
+          "progress_url",
+          "cancel_requested",
+          "progress",
+          "steps",
+          "artifacts",
+          "error",
+          "created_at",
+          "started_at",
+          "completed_at"
+        ],
+        "type": "object"
+      },
+      "RunStep": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "running",
+              "completed",
+              "failed",
+              "skipped"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "status"
+        ],
+        "type": "object"
+      },
+      "ScalarParameter": {
+        "additionalProperties": false,
+        "properties": {
+          "default": {
+            "type": [
+              "string",
+              "number",
+              "boolean",
+              "null"
+            ]
+          },
+          "description": {
+            "type": "string"
+          },
+          "enum": {
+            "items": {
+              "type": [
+                "string",
+                "number",
+                "boolean",
+                "null"
+              ]
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "type": "array"
+          },
+          "maxLength": {
+            "maximum": 10000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "maximum": {
+            "type": "number"
+          },
+          "minLength": {
+            "maximum": 10000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "minimum": {
+            "type": "number"
+          },
+          "title": {
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "string",
+              "integer",
+              "number",
+              "boolean"
+            ]
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "type": "object"
+      },
+      "TokenMetadata": {
+        "additionalProperties": false,
+        "properties": {
+          "client_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "revoked": {
+            "type": "boolean"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "service": {
+            "type": "boolean"
+          },
+          "user_id": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "client_id",
+          "user_id",
+          "scope",
+          "service",
+          "created_at",
+          "expires_at",
+          "revoked"
+        ],
+        "type": "object"
+      },
+      "TokenResponse": {
+        "properties": {
+          "access_token": {
+            "type": "string"
+          },
+          "expires_in": {
+            "type": "integer"
+          },
+          "issuer": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "token_id": {
+            "type": "string"
+          },
+          "token_type": {
+            "const": "Bearer"
+          }
+        },
+        "required": [
+          "access_token",
+          "token_type",
+          "expires_in",
+          "scope",
+          "issuer"
+        ],
+        "type": "object"
+      },
+      "Upload": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "media_type": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "sha256": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "size": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "size",
+          "sha256",
+          "media_type"
+        ],
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "linkBearer": {
+        "bearerFormat": "opaque WebHDP-Link access token",
+        "scheme": "bearer",
+        "type": "http"
+      },
+      "webhdpSession": {
+        "bearerFormat": "WebHDP JWT",
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "description": "Pipeline execution through a central WebHDP instance. OAuth code + S256 PKCE for browsers; administrator-issued scoped bearer tokens for service backends. Only explicitly published immutable contracts are exposed.",
+    "title": "WebHDP-Link API",
+    "version": "1.0.0"
+  },
+  "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
+  "openapi": "3.1.0",
+  "paths": {
+    "/admin/clients": {
+      "get": {
+        "operationId": "get_admin_clients",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "clients": {
+                      "items": {
+                        "$ref": "#/components/schemas/Client"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "clients"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          }
+        },
+        "security": [
+          {
+            "webhdpSession": []
+          }
+        ],
+        "summary": "Administrator: list clients"
+      },
+      "post": {
+        "operationId": "post_admin_clients",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClientCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Client"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          }
+        },
+        "security": [
+          {
+            "webhdpSession": []
+          }
+        ],
+        "summary": "Administrator: create clients"
+      }
+    },
+    "/admin/clients/{client_id}/tokens": {
+      "post": {
+        "operationId": "post_admin_clients_client_id_tokens",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "client_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "expires_in": {
+                    "maximum": 2592000,
+                    "minimum": 60,
+                    "type": "integer"
+                  },
+                  "scope": {
+                    "type": "string"
+                  },
+                  "user_id": {
+                    "type": "integer"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          }
+        },
+        "security": [
+          {
+            "webhdpSession": []
+          }
+        ],
+        "summary": "Administrator: issue a scoped service token once (server use only)"
+      }
+    },
+    "/admin/clients/{id}": {
+      "patch": {
+        "operationId": "patch_admin_clients_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClientPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Client"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          }
+        },
+        "security": [
+          {
+            "webhdpSession": []
+          }
+        ],
+        "summary": "Administrator: update clients"
+      }
+    },
+    "/admin/pipeline-options": {
+      "get": {
+        "operationId": "get_admin_pipeline_options",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "pipelines": {
+                      "items": {
+                        "$ref": "#/components/schemas/PipelineOption"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "pipelines"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          }
+        },
+        "security": [
+          {
+            "webhdpSession": []
+          }
+        ],
+        "summary": "Administrator: inspect native published versions and parameter options"
+      }
+    },
+    "/admin/publications": {
+      "get": {
+        "operationId": "get_admin_publications",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "publications": {
+                      "items": {
+                        "$ref": "#/components/schemas/Publication"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "publications"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          }
+        },
+        "security": [
+          {
+            "webhdpSession": []
+          }
+        ],
+        "summary": "Administrator: list publications"
+      },
+      "post": {
+        "operationId": "post_admin_publications",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublicationCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Publication"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          }
+        },
+        "security": [
+          {
+            "webhdpSession": []
+          }
+        ],
+        "summary": "Administrator: create publications"
+      }
+    },
+    "/admin/publications/{id}": {
+      "patch": {
+        "operationId": "patch_admin_publications_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublicationPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Publication"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          }
+        },
+        "security": [
+          {
+            "webhdpSession": []
+          }
+        ],
+        "summary": "Administrator: update publications"
+      }
+    },
+    "/admin/runs": {
+      "get": {
+        "operationId": "get_admin_runs",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "runs": {
+                      "items": {
+                        "$ref": "#/components/schemas/AdminRun"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "runs"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          }
+        },
+        "security": [
+          {
+            "webhdpSession": []
+          }
+        ],
+        "summary": "Administrator: inspect the central queue"
+      }
+    },
+    "/admin/runs/{run_id}/cancel": {
+      "post": {
+        "operationId": "post_admin_runs_run_id_cancel",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminRun"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          }
+        },
+        "security": [
+          {
+            "webhdpSession": []
+          }
+        ],
+        "summary": "Administrator: cancel a run"
+      }
+    },
+    "/admin/tokens": {
+      "get": {
+        "operationId": "get_admin_tokens",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "tokens": {
+                      "items": {
+                        "$ref": "#/components/schemas/TokenMetadata"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "tokens"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          }
+        },
+        "security": [
+          {
+            "webhdpSession": []
+          }
+        ],
+        "summary": "Administrator: inspect token metadata without raw secrets"
+      }
+    },
+    "/admin/tokens/{token_id}": {
+      "delete": {
+        "operationId": "delete_admin_tokens_token_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Completed; empty response body."
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          }
+        },
+        "security": [
+          {
+            "webhdpSession": []
+          }
+        ],
+        "summary": "Administrator: revoke a token"
+      }
+    },
+    "/discovery": {
+      "get": {
+        "operationId": "get_discovery",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          }
+        },
+        "security": [],
+        "summary": "Discover the instance, authorization flow and supported features"
+      }
+    },
+    "/grants": {
+      "get": {
+        "operationId": "get_grants",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "grants": {
+                      "items": {
+                        "$ref": "#/components/schemas/Grant"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "grants"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          }
+        },
+        "security": [
+          {
+            "webhdpSession": []
+          }
+        ],
+        "summary": "List the signed-in WebHDP user\u2019s connected application grants"
+      }
+    },
+    "/grants/{token_id}": {
+      "delete": {
+        "operationId": "delete_grants_token_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Completed; empty response body."
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          }
+        },
+        "security": [
+          {
+            "webhdpSession": []
+          }
+        ],
+        "summary": "Revoke the signed-in WebHDP user\u2019s grant"
+      }
+    },
+    "/jobs": {
+      "get": {
+        "operationId": "get_jobs",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "jobs": {
+                      "items": {
+                        "$ref": "#/components/schemas/Job"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "jobs"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          }
+        },
+        "security": [
+          {
+            "webhdpSession": []
+          }
+        ],
+        "summary": "List the signed-in user\u2019s processing jobs across applications"
+      }
+    },
+    "/jobs/{run_id}": {
+      "get": {
+        "operationId": "get_jobs_run_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          }
+        },
+        "security": [
+          {
+            "webhdpSession": []
+          }
+        ],
+        "summary": "Read an owned job from a bookmark without an application token"
+      }
+    },
+    "/jobs/{run_id}/artifacts/{artifact_id}": {
+      "get": {
+        "operationId": "get_jobs_run_id_artifacts_artifact_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "artifact_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Artifact bytes; SHA-256 ETag, attachment disposition and range requests supported."
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          }
+        },
+        "security": [
+          {
+            "webhdpSession": []
+          }
+        ],
+        "summary": "Download a job artifact using the WebHDP user session"
+      }
+    },
+    "/jobs/{run_id}/cancel": {
+      "post": {
+        "operationId": "post_jobs_run_id_cancel",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          }
+        },
+        "security": [
+          {
+            "webhdpSession": []
+          }
+        ],
+        "summary": "Cancel the signed-in user\u2019s job"
+      }
+    },
+    "/oauth/authorize": {
+      "post": {
+        "operationId": "post_oauth_authorize",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthorizationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "redirect_uri": {
+                      "format": "uri",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "redirect_uri"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          }
+        },
+        "security": [
+          {
+            "webhdpSession": []
+          }
+        ],
+        "summary": "Approve or deny consent with the existing WebHDP user JWT"
+      }
+    },
+    "/oauth/request": {
+      "get": {
+        "operationId": "get_oauth_request",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "client_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "redirect_uri",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "response_type",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "code_challenge",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "code_challenge_method",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scope",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "client": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name"
+                      ],
+                      "type": "object"
+                    },
+                    "expires_in": {
+                      "type": "integer"
+                    },
+                    "pipelines": {
+                      "items": {
+                        "$ref": "#/components/schemas/Pipeline"
+                      },
+                      "type": "array"
+                    },
+                    "redirect_uri": {
+                      "type": "string"
+                    },
+                    "scope": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "client",
+                    "redirect_uri",
+                    "scope",
+                    "expires_in",
+                    "pipelines"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          }
+        },
+        "security": [],
+        "summary": "Validate an authorization request for the WebHDP consent screen"
+      }
+    },
+    "/oauth/revoke": {
+      "post": {
+        "operationId": "post_oauth_revoke",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "properties": {
+                  "token": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "token"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Token revoked, or token was already unknown/revoked. Empty response body."
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          }
+        },
+        "security": [],
+        "summary": "Revoke a bearer token"
+      }
+    },
+    "/oauth/token": {
+      "post": {
+        "operationId": "post_oauth_token",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "properties": {
+                  "client_id": {
+                    "type": "string"
+                  },
+                  "code": {
+                    "type": "string"
+                  },
+                  "code_verifier": {
+                    "type": "string"
+                  },
+                  "grant_type": {
+                    "type": "string"
+                  },
+                  "redirect_uri": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "grant_type",
+                  "code",
+                  "client_id",
+                  "redirect_uri",
+                  "code_verifier"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          }
+        },
+        "security": [],
+        "summary": "Exchange a one-use authorization code using S256 PKCE"
+      }
+    },
+    "/openapi.json": {
+      "get": {
+        "operationId": "get_openapi_json",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          }
+        },
+        "security": [],
+        "summary": "Read this OpenAPI contract"
+      }
+    },
+    "/pipelines": {
+      "get": {
+        "description": "Required bearer scope: pipelines:read",
+        "operationId": "get_pipelines",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "pipelines": {
+                      "items": {
+                        "$ref": "#/components/schemas/Pipeline"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          }
+        },
+        "security": [
+          {
+            "linkBearer": []
+          }
+        ],
+        "summary": "List explicitly granted pipeline publications"
+      }
+    },
+    "/pipelines/{pipeline_id}": {
+      "get": {
+        "description": "Required bearer scope: pipelines:read",
+        "operationId": "get_pipelines_pipeline_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pipeline_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Pipeline"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          }
+        },
+        "security": [
+          {
+            "linkBearer": []
+          }
+        ],
+        "summary": "Read a pinned pipeline, graph and scalar parameter JSON Schema"
+      }
+    },
+    "/runs": {
+      "get": {
+        "description": "Required bearer scope: runs:read",
+        "operationId": "get_runs",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "runs": {
+                      "items": {
+                        "$ref": "#/components/schemas/Run"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          }
+        },
+        "security": [
+          {
+            "linkBearer": []
+          }
+        ],
+        "summary": "List at most 100 most recent runs owned by this application and user"
+      },
+      "post": {
+        "description": "Required bearer scope: runs:write",
+        "operationId": "post_runs",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 80,
+              "minLength": 16,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "inputs": {
+                    "items": {
+                      "format": "uuid",
+                      "type": "string"
+                    },
+                    "minItems": 1,
+                    "type": "array",
+                    "uniqueItems": true
+                  },
+                  "parameters": {
+                    "type": "object"
+                  },
+                  "pipeline_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "pipeline_id",
+                  "inputs"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Run"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          }
+        },
+        "security": [
+          {
+            "linkBearer": []
+          }
+        ],
+        "summary": "Accept a durable idempotent run"
+      }
+    },
+    "/runs/{run_id}": {
+      "get": {
+        "description": "Required bearer scope: runs:read",
+        "operationId": "get_runs_run_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Run"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          }
+        },
+        "security": [
+          {
+            "linkBearer": []
+          }
+        ],
+        "summary": "Poll durable status, step progress and artifact metadata"
+      }
+    },
+    "/runs/{run_id}/artifacts/{artifact_id}": {
+      "get": {
+        "description": "Required bearer scope: artifacts:read",
+        "operationId": "get_runs_run_id_artifacts_artifact_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "artifact_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Artifact bytes; SHA-256 ETag, attachment disposition and range requests supported."
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          }
+        },
+        "security": [
+          {
+            "linkBearer": []
+          }
+        ],
+        "summary": "Download an owned artifact as an attachment"
+      }
+    },
+    "/runs/{run_id}/cancel": {
+      "post": {
+        "description": "Required bearer scope: runs:write",
+        "operationId": "post_runs_run_id_cancel",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Run"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          }
+        },
+        "security": [
+          {
+            "linkBearer": []
+          }
+        ],
+        "summary": "Cancel queued work or request cancellation between components"
+      }
+    },
+    "/uploads": {
+      "post": {
+        "description": "Required bearer scope: uploads:write",
+        "operationId": "post_uploads",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "properties": {
+                  "file": {
+                    "format": "binary",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "file"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Upload"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          }
+        },
+        "security": [
+          {
+            "linkBearer": []
+          }
+        ],
+        "summary": "Upload one bounded input file; archives are never automatically extracted"
+      }
+    },
+    "/uploads/{upload_id}": {
+      "delete": {
+        "description": "Required bearer scope: uploads:write",
+        "operationId": "delete_uploads_upload_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "upload_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Completed; empty response body."
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Problem Details; OAuth endpoints additionally return error and error_description."
+          }
+        },
+        "security": [
+          {
+            "linkBearer": []
+          }
+        ],
+        "summary": "Delete an upload not used by an active run"
+      }
+    }
+  },
+  "servers": [
+    {
+      "url": "https://webhdp.example/api/v1/link"
+    }
+  ]
+}

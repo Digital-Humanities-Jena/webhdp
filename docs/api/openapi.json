@@ -5,13 +5,18 @@
         "bearerFormat": "JWT",
         "scheme": "bearer",
         "type": "http"
+      },
+      "linkBearer": {
+        "bearerFormat": "opaque WebHDP-Link token",
+        "scheme": "bearer",
+        "type": "http"
       }
     }
   },
   "info": {
     "description": "Generated from the Flask route map. This contract is an onboarding aid and route inventory; endpoint-specific request and response examples remain documented in docs/api/webhdp_api_reference.md and docs/api/webhdp_api_examples.md.",
     "title": "WebHDP API",
-    "version": "0.1.0-alpha.2"
+    "version": "0.1.0-alpha.3"
   },
   "openapi": "3.0.3",
   "paths": {
@@ -531,7 +536,7 @@
       "post": {
         "operationId": "post_admin_hpc_reservations",
         "responses": {
-          "201": {
+          "200": {
             "description": "Successful response. WebHDP API responses generally use {success, data, message, metadata}."
           },
           "400": {
@@ -4234,9 +4239,6 @@
           "404": {
             "description": "Resource not found"
           },
-          "409": {
-            "description": "The reservation or upload session is already in use, or the reservation is unavailable."
-          },
           "500": {
             "description": "Unexpected server error"
           }
@@ -5503,6 +5505,1286 @@
         "summary": "issues refresh_issue_code_references",
         "tags": [
           "issues"
+        ]
+      }
+    },
+    "/api/v1/link/admin/clients": {
+      "get": {
+        "description": "WebHDP-Link uses raw JSON successes and RFC 9457 Problem Details. See the complete OpenAPI 3.1 contract at /api/v1/link/openapi.json.",
+        "operationId": "get_webhdp_link_admin_clients",
+        "responses": {
+          "200": {
+            "description": "See the dedicated WebHDP-Link contract for precise success status, response schema, and headers."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "webhdp_link admin_clients",
+        "tags": [
+          "link"
+        ]
+      },
+      "post": {
+        "description": "WebHDP-Link uses raw JSON successes and RFC 9457 Problem Details. See the complete OpenAPI 3.1 contract at /api/v1/link/openapi.json.",
+        "operationId": "post_webhdp_link_admin_create_client",
+        "responses": {
+          "200": {
+            "description": "See the dedicated WebHDP-Link contract for precise success status, response schema, and headers."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "webhdp_link admin_create_client",
+        "tags": [
+          "link"
+        ]
+      }
+    },
+    "/api/v1/link/admin/clients/{client_id}": {
+      "patch": {
+        "description": "WebHDP-Link uses raw JSON successes and RFC 9457 Problem Details. See the complete OpenAPI 3.1 contract at /api/v1/link/openapi.json.",
+        "operationId": "patch_webhdp_link_admin_update_client",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "client_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "See the dedicated WebHDP-Link contract for precise success status, response schema, and headers."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "webhdp_link admin_update_client",
+        "tags": [
+          "link"
+        ]
+      }
+    },
+    "/api/v1/link/admin/clients/{client_id}/tokens": {
+      "post": {
+        "description": "WebHDP-Link uses raw JSON successes and RFC 9457 Problem Details. See the complete OpenAPI 3.1 contract at /api/v1/link/openapi.json.",
+        "operationId": "post_webhdp_link_admin_create_token",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "client_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "See the dedicated WebHDP-Link contract for precise success status, response schema, and headers."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "webhdp_link admin_create_token",
+        "tags": [
+          "link"
+        ]
+      }
+    },
+    "/api/v1/link/admin/pipeline-options": {
+      "get": {
+        "description": "WebHDP-Link uses raw JSON successes and RFC 9457 Problem Details. See the complete OpenAPI 3.1 contract at /api/v1/link/openapi.json.",
+        "operationId": "get_webhdp_link_admin_pipeline_options",
+        "responses": {
+          "200": {
+            "description": "See the dedicated WebHDP-Link contract for precise success status, response schema, and headers."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "webhdp_link admin_pipeline_options",
+        "tags": [
+          "link"
+        ]
+      }
+    },
+    "/api/v1/link/admin/publications": {
+      "get": {
+        "description": "WebHDP-Link uses raw JSON successes and RFC 9457 Problem Details. See the complete OpenAPI 3.1 contract at /api/v1/link/openapi.json.",
+        "operationId": "get_webhdp_link_admin_publications",
+        "responses": {
+          "200": {
+            "description": "See the dedicated WebHDP-Link contract for precise success status, response schema, and headers."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "webhdp_link admin_publications",
+        "tags": [
+          "link"
+        ]
+      },
+      "post": {
+        "description": "WebHDP-Link uses raw JSON successes and RFC 9457 Problem Details. See the complete OpenAPI 3.1 contract at /api/v1/link/openapi.json.",
+        "operationId": "post_webhdp_link_admin_create_publication",
+        "responses": {
+          "200": {
+            "description": "See the dedicated WebHDP-Link contract for precise success status, response schema, and headers."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "webhdp_link admin_create_publication",
+        "tags": [
+          "link"
+        ]
+      }
+    },
+    "/api/v1/link/admin/publications/{publication_id}": {
+      "patch": {
+        "description": "WebHDP-Link uses raw JSON successes and RFC 9457 Problem Details. See the complete OpenAPI 3.1 contract at /api/v1/link/openapi.json.",
+        "operationId": "patch_webhdp_link_admin_update_publication",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "publication_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "See the dedicated WebHDP-Link contract for precise success status, response schema, and headers."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "webhdp_link admin_update_publication",
+        "tags": [
+          "link"
+        ]
+      }
+    },
+    "/api/v1/link/admin/runs": {
+      "get": {
+        "description": "WebHDP-Link uses raw JSON successes and RFC 9457 Problem Details. See the complete OpenAPI 3.1 contract at /api/v1/link/openapi.json.",
+        "operationId": "get_webhdp_link_admin_runs",
+        "responses": {
+          "200": {
+            "description": "See the dedicated WebHDP-Link contract for precise success status, response schema, and headers."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "webhdp_link admin_runs",
+        "tags": [
+          "link"
+        ]
+      }
+    },
+    "/api/v1/link/admin/runs/{run_id}/cancel": {
+      "post": {
+        "description": "WebHDP-Link uses raw JSON successes and RFC 9457 Problem Details. See the complete OpenAPI 3.1 contract at /api/v1/link/openapi.json.",
+        "operationId": "post_webhdp_link_admin_cancel",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "See the dedicated WebHDP-Link contract for precise success status, response schema, and headers."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "webhdp_link admin_cancel",
+        "tags": [
+          "link"
+        ]
+      }
+    },
+    "/api/v1/link/admin/tokens": {
+      "get": {
+        "description": "WebHDP-Link uses raw JSON successes and RFC 9457 Problem Details. See the complete OpenAPI 3.1 contract at /api/v1/link/openapi.json.",
+        "operationId": "get_webhdp_link_admin_tokens",
+        "responses": {
+          "200": {
+            "description": "See the dedicated WebHDP-Link contract for precise success status, response schema, and headers."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "webhdp_link admin_tokens",
+        "tags": [
+          "link"
+        ]
+      }
+    },
+    "/api/v1/link/admin/tokens/{token_id}": {
+      "delete": {
+        "description": "WebHDP-Link uses raw JSON successes and RFC 9457 Problem Details. See the complete OpenAPI 3.1 contract at /api/v1/link/openapi.json.",
+        "operationId": "delete_webhdp_link_admin_revoke_token",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "See the dedicated WebHDP-Link contract for precise success status, response schema, and headers."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "webhdp_link admin_revoke_token",
+        "tags": [
+          "link"
+        ]
+      }
+    },
+    "/api/v1/link/discovery": {
+      "get": {
+        "description": "WebHDP-Link uses raw JSON successes and RFC 9457 Problem Details. See the complete OpenAPI 3.1 contract at /api/v1/link/openapi.json.",
+        "operationId": "get_webhdp_link_discovery",
+        "responses": {
+          "200": {
+            "description": "See the dedicated WebHDP-Link contract for precise success status, response schema, and headers."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "summary": "webhdp_link discovery",
+        "tags": [
+          "link"
+        ]
+      }
+    },
+    "/api/v1/link/grants": {
+      "get": {
+        "description": "WebHDP-Link uses raw JSON successes and RFC 9457 Problem Details. See the complete OpenAPI 3.1 contract at /api/v1/link/openapi.json.",
+        "operationId": "get_webhdp_link_grants",
+        "responses": {
+          "200": {
+            "description": "See the dedicated WebHDP-Link contract for precise success status, response schema, and headers."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "webhdp_link grants",
+        "tags": [
+          "link"
+        ]
+      }
+    },
+    "/api/v1/link/grants/{token_id}": {
+      "delete": {
+        "description": "WebHDP-Link uses raw JSON successes and RFC 9457 Problem Details. See the complete OpenAPI 3.1 contract at /api/v1/link/openapi.json.",
+        "operationId": "delete_webhdp_link_revoke_grant",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "See the dedicated WebHDP-Link contract for precise success status, response schema, and headers."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "webhdp_link revoke_grant",
+        "tags": [
+          "link"
+        ]
+      }
+    },
+    "/api/v1/link/jobs": {
+      "get": {
+        "description": "WebHDP-Link uses raw JSON successes and RFC 9457 Problem Details. See the complete OpenAPI 3.1 contract at /api/v1/link/openapi.json.",
+        "operationId": "get_webhdp_link_jobs",
+        "responses": {
+          "200": {
+            "description": "See the dedicated WebHDP-Link contract for precise success status, response schema, and headers."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "webhdp_link jobs",
+        "tags": [
+          "link"
+        ]
+      }
+    },
+    "/api/v1/link/jobs/{run_id}": {
+      "get": {
+        "description": "WebHDP-Link uses raw JSON successes and RFC 9457 Problem Details. See the complete OpenAPI 3.1 contract at /api/v1/link/openapi.json.",
+        "operationId": "get_webhdp_link_job",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "See the dedicated WebHDP-Link contract for precise success status, response schema, and headers."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "webhdp_link job",
+        "tags": [
+          "link"
+        ]
+      }
+    },
+    "/api/v1/link/jobs/{run_id}/artifacts/{artifact_id}": {
+      "get": {
+        "description": "WebHDP-Link uses raw JSON successes and RFC 9457 Problem Details. See the complete OpenAPI 3.1 contract at /api/v1/link/openapi.json.",
+        "operationId": "get_webhdp_link_job_artifact",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "artifact_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "See the dedicated WebHDP-Link contract for precise success status, response schema, and headers."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "webhdp_link job_artifact",
+        "tags": [
+          "link"
+        ]
+      }
+    },
+    "/api/v1/link/jobs/{run_id}/cancel": {
+      "post": {
+        "description": "WebHDP-Link uses raw JSON successes and RFC 9457 Problem Details. See the complete OpenAPI 3.1 contract at /api/v1/link/openapi.json.",
+        "operationId": "post_webhdp_link_cancel_job",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "See the dedicated WebHDP-Link contract for precise success status, response schema, and headers."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "webhdp_link cancel_job",
+        "tags": [
+          "link"
+        ]
+      }
+    },
+    "/api/v1/link/oauth/authorize": {
+      "post": {
+        "description": "WebHDP-Link uses raw JSON successes and RFC 9457 Problem Details. See the complete OpenAPI 3.1 contract at /api/v1/link/openapi.json.",
+        "operationId": "post_webhdp_link_authorize",
+        "responses": {
+          "200": {
+            "description": "See the dedicated WebHDP-Link contract for precise success status, response schema, and headers."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "webhdp_link authorize",
+        "tags": [
+          "link"
+        ]
+      }
+    },
+    "/api/v1/link/oauth/request": {
+      "get": {
+        "description": "WebHDP-Link uses raw JSON successes and RFC 9457 Problem Details. See the complete OpenAPI 3.1 contract at /api/v1/link/openapi.json.",
+        "operationId": "get_webhdp_link_consent_request",
+        "responses": {
+          "200": {
+            "description": "See the dedicated WebHDP-Link contract for precise success status, response schema, and headers."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "summary": "webhdp_link consent_request",
+        "tags": [
+          "link"
+        ]
+      }
+    },
+    "/api/v1/link/oauth/revoke": {
+      "post": {
+        "description": "WebHDP-Link uses raw JSON successes and RFC 9457 Problem Details. See the complete OpenAPI 3.1 contract at /api/v1/link/openapi.json.",
+        "operationId": "post_webhdp_link_revoke",
+        "responses": {
+          "200": {
+            "description": "See the dedicated WebHDP-Link contract for precise success status, response schema, and headers."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "summary": "webhdp_link revoke",
+        "tags": [
+          "link"
+        ]
+      }
+    },
+    "/api/v1/link/oauth/token": {
+      "post": {
+        "description": "WebHDP-Link uses raw JSON successes and RFC 9457 Problem Details. See the complete OpenAPI 3.1 contract at /api/v1/link/openapi.json.",
+        "operationId": "post_webhdp_link_token",
+        "responses": {
+          "200": {
+            "description": "See the dedicated WebHDP-Link contract for precise success status, response schema, and headers."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "summary": "webhdp_link token",
+        "tags": [
+          "link"
+        ]
+      }
+    },
+    "/api/v1/link/openapi.json": {
+      "get": {
+        "description": "WebHDP-Link uses raw JSON successes and RFC 9457 Problem Details. See the complete OpenAPI 3.1 contract at /api/v1/link/openapi.json.",
+        "operationId": "get_webhdp_link_openapi",
+        "responses": {
+          "200": {
+            "description": "See the dedicated WebHDP-Link contract for precise success status, response schema, and headers."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "summary": "webhdp_link openapi",
+        "tags": [
+          "link"
+        ]
+      }
+    },
+    "/api/v1/link/pipelines": {
+      "get": {
+        "description": "WebHDP-Link uses raw JSON successes and RFC 9457 Problem Details. See the complete OpenAPI 3.1 contract at /api/v1/link/openapi.json.",
+        "operationId": "get_webhdp_link_pipelines",
+        "responses": {
+          "200": {
+            "description": "See the dedicated WebHDP-Link contract for precise success status, response schema, and headers."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "linkBearer": []
+          }
+        ],
+        "summary": "webhdp_link pipelines",
+        "tags": [
+          "link"
+        ]
+      }
+    },
+    "/api/v1/link/pipelines/{pipeline_id}": {
+      "get": {
+        "description": "WebHDP-Link uses raw JSON successes and RFC 9457 Problem Details. See the complete OpenAPI 3.1 contract at /api/v1/link/openapi.json.",
+        "operationId": "get_webhdp_link_pipeline",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pipeline_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "See the dedicated WebHDP-Link contract for precise success status, response schema, and headers."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "linkBearer": []
+          }
+        ],
+        "summary": "webhdp_link pipeline",
+        "tags": [
+          "link"
+        ]
+      }
+    },
+    "/api/v1/link/runs": {
+      "get": {
+        "description": "WebHDP-Link uses raw JSON successes and RFC 9457 Problem Details. See the complete OpenAPI 3.1 contract at /api/v1/link/openapi.json.",
+        "operationId": "get_webhdp_link_runs",
+        "responses": {
+          "200": {
+            "description": "See the dedicated WebHDP-Link contract for precise success status, response schema, and headers."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "linkBearer": []
+          }
+        ],
+        "summary": "webhdp_link runs",
+        "tags": [
+          "link"
+        ]
+      },
+      "post": {
+        "description": "WebHDP-Link uses raw JSON successes and RFC 9457 Problem Details. See the complete OpenAPI 3.1 contract at /api/v1/link/openapi.json.",
+        "operationId": "post_webhdp_link_create_run",
+        "responses": {
+          "200": {
+            "description": "See the dedicated WebHDP-Link contract for precise success status, response schema, and headers."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "linkBearer": []
+          }
+        ],
+        "summary": "webhdp_link create_run",
+        "tags": [
+          "link"
+        ]
+      }
+    },
+    "/api/v1/link/runs/{run_id}": {
+      "get": {
+        "description": "WebHDP-Link uses raw JSON successes and RFC 9457 Problem Details. See the complete OpenAPI 3.1 contract at /api/v1/link/openapi.json.",
+        "operationId": "get_webhdp_link_run",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "See the dedicated WebHDP-Link contract for precise success status, response schema, and headers."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "linkBearer": []
+          }
+        ],
+        "summary": "webhdp_link run",
+        "tags": [
+          "link"
+        ]
+      }
+    },
+    "/api/v1/link/runs/{run_id}/artifacts/{artifact_id}": {
+      "get": {
+        "description": "WebHDP-Link uses raw JSON successes and RFC 9457 Problem Details. See the complete OpenAPI 3.1 contract at /api/v1/link/openapi.json.",
+        "operationId": "get_webhdp_link_artifact",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "artifact_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "See the dedicated WebHDP-Link contract for precise success status, response schema, and headers."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "linkBearer": []
+          }
+        ],
+        "summary": "webhdp_link artifact",
+        "tags": [
+          "link"
+        ]
+      }
+    },
+    "/api/v1/link/runs/{run_id}/cancel": {
+      "post": {
+        "description": "WebHDP-Link uses raw JSON successes and RFC 9457 Problem Details. See the complete OpenAPI 3.1 contract at /api/v1/link/openapi.json.",
+        "operationId": "post_webhdp_link_cancel",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "See the dedicated WebHDP-Link contract for precise success status, response schema, and headers."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "linkBearer": []
+          }
+        ],
+        "summary": "webhdp_link cancel",
+        "tags": [
+          "link"
+        ]
+      }
+    },
+    "/api/v1/link/uploads": {
+      "post": {
+        "description": "WebHDP-Link uses raw JSON successes and RFC 9457 Problem Details. See the complete OpenAPI 3.1 contract at /api/v1/link/openapi.json.",
+        "operationId": "post_webhdp_link_upload",
+        "responses": {
+          "200": {
+            "description": "See the dedicated WebHDP-Link contract for precise success status, response schema, and headers."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "linkBearer": []
+          }
+        ],
+        "summary": "webhdp_link upload",
+        "tags": [
+          "link"
+        ]
+      }
+    },
+    "/api/v1/link/uploads/{upload_id}": {
+      "delete": {
+        "description": "WebHDP-Link uses raw JSON successes and RFC 9457 Problem Details. See the complete OpenAPI 3.1 contract at /api/v1/link/openapi.json.",
+        "operationId": "delete_webhdp_link_delete_upload",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "upload_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "See the dedicated WebHDP-Link contract for precise success status, response schema, and headers."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "linkBearer": []
+          }
+        ],
+        "summary": "webhdp_link delete_upload",
+        "tags": [
+          "link"
         ]
       }
     },

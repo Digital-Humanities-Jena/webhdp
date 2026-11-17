@@ -14,6 +14,7 @@ import json
 import hashlib
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -133,10 +134,18 @@ def _component_output_dir(component_key: str, request: dict[str, Any]) -> Path:
 def _find_by_name(root: Path, name: str) -> Path | None:
     if not root.exists():
         return None
-    for candidate in root.rglob(name):
-        if candidate.is_file():
-            return candidate.resolve()
+    matches = [candidate for candidate in root.rglob('*')
+               if candidate.name == name and _is_staged_path(candidate, root) and candidate.is_file()]
+    if len(matches) == 1:
+        return matches[0]
     return None
+
+
+def _is_staged_path(candidate: Path, root: Path) -> bool:
+    try:
+        return candidate.is_relative_to(root) and candidate.resolve(strict=True) == candidate
+    except (OSError, RuntimeError, ValueError):
+        return False
 
 
 def _resolve_input_path(value: Any, remote_input_dir: Path) -> Path:
@@ -144,13 +153,16 @@ def _resolve_input_path(value: Any, remote_input_dir: Path) -> Path:
     if not text:
         raise RuntimeError("Empty input path")
     candidate = Path(text)
-    if candidate.is_absolute() and candidate.exists():
-        return candidate.resolve()
-    if not candidate.is_absolute():
-        relative_candidate = (remote_input_dir / candidate).resolve()
-        if relative_candidate.exists():
-            return relative_candidate
-    by_name = _find_by_name(remote_input_dir, candidate.name)
+    if '..' in candidate.parts:
+        raise ValueError('Input paths cannot traverse outside their staging directory')
+    if candidate.is_absolute():
+        if _is_staged_path(candidate, remote_input_dir):
+            return candidate
+        raise ValueError('Absolute input paths must be inside the allocation input directory')
+    relative_candidate = remote_input_dir / candidate
+    if _is_staged_path(relative_candidate, remote_input_dir):
+        return relative_candidate
+    by_name = _find_by_name(remote_input_dir, candidate.name) if len(candidate.parts) == 1 else None
     if by_name is not None:
         return by_name
     raise FileNotFoundError(f"Could not resolve staged input file for {text!r} under {remote_input_dir}")
@@ -173,11 +185,14 @@ def _common_input_root(paths: list[Path], remote_input_dir: Path) -> Path:
 def _resolve_staged_input(value: str, request: dict[str, Any], remote_input_dir: Path) -> Path:
     for item in request.get("staged_files") or []:
         if item.get("local_path") == value and item.get("remote_path"):
-            resolved = Path(item["remote_path"]).resolve()
-            if not resolved.is_relative_to(remote_input_dir.resolve()) or not resolved.is_file():
+            resolved = Path(item["remote_path"])
+            if not _is_staged_path(resolved, remote_input_dir) or not resolved.is_file():
                 raise ValueError("Staged input must exist inside the allocation input directory")
             return resolved
-    return _resolve_input_path(value, remote_input_dir)
+    resolved = _resolve_input_path(value, remote_input_dir)
+    if not resolved.is_file():
+        raise ValueError('Staged input must be a regular file')
+    return resolved
 
 
 def _collect_render_inputs(request: dict[str, Any], remote_input_dir: Path) -> tuple[list[str], list[Path]]:
@@ -193,13 +208,24 @@ def _collect_render_inputs(request: dict[str, Any], remote_input_dir: Path) -> t
             if value not in original_values:
                 original_values.append(value)
     if not original_values and str(inputs.get("input-dir") or inputs.get("input_dir") or "").strip():
-        input_dir = _resolve_input_path(inputs.get("input-dir") or inputs.get("input_dir"), remote_input_dir)
+        source_dir = str(inputs.get("input-dir") or inputs.get("input_dir"))
+        source = Path(source_dir)
+        if '..' in source.parts:
+            raise ValueError('Render input directory cannot contain path traversal')
+        mapped = [str(item['local_path']) for item in request.get('staged_files') or []
+                  if item.get('local_path') and Path(item['local_path']).is_relative_to(source)
+                  and Path(item['local_path']).suffix.lower() in SUPPORTED_RENDER_FORMATS]
+        if mapped:
+            return mapped, [_resolve_staged_input(item, request, remote_input_dir) for item in mapped]
+        input_dir = _resolve_input_path(source_dir, remote_input_dir)
+        if not input_dir.is_dir():
+            raise ValueError('Render input directory must be a staged directory')
         originals = []
         remotes = []
         for path in input_dir.rglob("*"):
-            if path.is_file() and path.suffix.lower() in SUPPORTED_RENDER_FORMATS:
+            if path.suffix.lower() in SUPPORTED_RENDER_FORMATS and _is_staged_path(path, remote_input_dir) and path.is_file():
                 originals.append(str(path))
-                remotes.append(path.resolve())
+                remotes.append(path)
         return originals, remotes
     remote_paths = [_resolve_staged_input(value, request, remote_input_dir) for value in original_values]
     return original_values, remote_paths
@@ -424,6 +450,88 @@ def _usdz_component(request: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+def _trusted_host_component(component_key: str, request: dict[str, Any]) -> dict[str, Any]:
+    """Execute an operator-installed host runtime, never a caller command.
+
+    The gateway resolves and checksum-verifies this profile from the installed
+    registry. Host profiles deliberately do not provide container isolation;
+    they are reserved for reviewed runtimes maintained by the HPC operator.
+    """
+    profile = request.get('profile') or {}
+    entrypoint = profile.get('entrypoint')
+    if (profile.get('handler') != 'trusted_host_component' or not isinstance(entrypoint, list)
+            or not entrypoint or not all(isinstance(item, str) and item and '\0' not in item for item in entrypoint)
+            or not Path(entrypoint[0]).is_absolute()):
+        raise ValueError('An installed absolute host entrypoint is required')
+    input_root = Path(request['remote_input_dir']).resolve()
+    output_root = Path(request['remote_output_dir']).resolve()
+    output_root.mkdir(parents=True, exist_ok=True)
+    mapping = {}
+    for item in request.get('staged_files') or []:
+        local_path, remote_path = item.get('local_path'), item.get('remote_path')
+        if not local_path or not remote_path:
+            raise ValueError('Incomplete staged input mapping')
+        candidate = Path(remote_path)
+        if not candidate.is_absolute() or candidate.resolve() != candidate or not candidate.is_file() or not candidate.is_relative_to(input_root):
+            raise ValueError('Staged input must be a regular file inside the allocation input directory')
+        mapping[local_path] = remote_path
+    def translate(value):
+        if isinstance(value, dict):
+            return {key: translate(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [translate(item) for item in value]
+        if isinstance(value, str) and value.startswith('/'):
+            if value not in mapping:
+                raise ValueError('Absolute inputs require an exact staged file mapping')
+            return mapping[value]
+        return value
+    request_path = Path(os.environ['WEBHDP_COMPONENT_REQUEST']).resolve()
+    response_path = Path(os.environ['WEBHDP_COMPONENT_RESPONSE']).resolve()
+    host_request = request_path.with_name(request_path.stem + '.host.json')
+    host_request.write_text(json.dumps({**request, 'inputs': translate(request.get('inputs') or {})}))
+    response_path.unlink(missing_ok=True)
+    env = os.environ.copy()
+    env.update({'WEBHDP_COMPONENT_REQUEST': str(host_request), 'WEBHDP_COMPONENT_RESPONSE': str(response_path),
+        'WEBHDP_INPUT_DIR': str(input_root), 'WEBHDP_OUTPUT_DIR': str(output_root), 'WEBHDP_COMPONENT_KEY': component_key})
+    started = time.time()
+    # A host component may spawn COLMAP or another long-lived scientific tool.
+    # Terminate this invocation's complete process group on timeout, without
+    # releasing the scheduler allocation retained for subsequent jobs.
+    proc = subprocess.Popen(entrypoint, cwd=str(output_root), env=env,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
+    try:
+        stdout, stderr = proc.communicate(timeout=int(request.get('timeout_seconds') or 7200))
+    except BaseException:
+        try:
+            os.killpg(proc.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        try:
+            proc.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            proc.communicate()
+        raise
+    result = json.loads(response_path.read_text()) if response_path.exists() else None
+    if not isinstance(result, dict) or not isinstance(result.get('success'), bool):
+        raise ValueError('Host component did not return a valid completion response')
+    for artifact in result.get('artifacts') or []:
+        path = Path(artifact.get('remote_path') or artifact.get('path') or '')
+        if not path.is_absolute() or not path.is_file() or path.resolve() != path or not path.is_relative_to(output_root):
+            raise ValueError('Host component artifact escaped its invocation output directory')
+        artifact['remote_path'] = str(path)
+    result.setdefault('duration', time.time() - started)
+    result.setdefault('logs', {'stdout': stdout, 'stderr': stderr})
+    result['success'] = proc.returncode == 0 and result['success']
+    result['status'] = 'completed' if result['success'] else 'failed'
+    if proc.returncode:
+        result.setdefault('error', 'Installed host component failed')
+    return result
+
+
 def _generic_singularity_component(component_key: str, request: dict[str, Any]) -> dict[str, Any]:
     profile = request.get("profile") if isinstance(request.get("profile"), dict) else {}
     image = str(profile.get("image") or profile.get("sif_remote_path") or "").strip()
@@ -623,6 +731,8 @@ def main() -> int:
                 payload = _render_component(request)
             elif component_key == "any_to_usdz":
                 payload = _usdz_component(request)
+            elif (request.get("profile") or {}).get("handler") == "trusted_host_component":
+                payload = _trusted_host_component(component_key, request)
             else:
                 payload = _generic_singularity_component(component_key, request)
     except BaseException as exc:

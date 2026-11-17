@@ -2,13 +2,20 @@
 """Cloud upload service for handling file uploads to Dropbox and Google Drive."""
 
 import os
+import hashlib
 import logging
 import json
+import re
 from typing import Dict, Any, Optional, Tuple, BinaryIO
 from pathlib import Path
+from uuid import uuid4
+
+from flask import current_app
+from itsdangerous import BadData, URLSafeTimedSerializer
 
 from database.database import db
 from database.models import SystemConfig
+from exceptions import SecurityError
 from security import sanitize_upload_filename
 
 logger = logging.getLogger(__name__)
@@ -33,6 +40,33 @@ DEFAULT_STORAGE_CONFIG = {
     "allow_server_fallback": False,  # Changed to False for pure_cloud default
     "storage_mode": STORAGE_MODE_PURE_CLOUD  # Default to pure cloud
 }
+
+
+def _stream_receipts():
+    return URLSafeTimedSerializer(current_app.secret_key, salt='webhdp-stream-upload',
+                                  signer_kwargs={'digest_method': hashlib.sha256})
+
+
+def issue_stream_receipt(user_id: int, filename: str, result: dict) -> str:
+    provider = result.get('storage_type')
+    path = result.get('remote_path') if provider == STORAGE_DROPBOX else result.get('file_id')
+    if (provider not in {STORAGE_DROPBOX, STORAGE_GDRIVE} or not isinstance(path, str) or not path
+            or (provider == STORAGE_DROPBOX and not path.startswith('/hdp_uploads/'))
+            or (provider == STORAGE_GDRIVE and not re.fullmatch(r'[A-Za-z0-9_-]+', path))):
+        raise ValueError('Streaming provider did not return a managed cloud object reference')
+    return _stream_receipts().dumps({'user': user_id, 'path': path, 'provider': provider, 'name': filename})
+
+
+def read_stream_receipt(value: str, user_id: int) -> dict:
+    try:
+        if not isinstance(value, str) or not value or len(value) > 4096:
+            raise BadData('Missing or invalid receipt')
+        payload = _stream_receipts().loads(value, max_age=3600)
+        if payload.get('user') != user_id:
+            raise BadData('Receipt belongs to another account')
+        return payload
+    except BadData as exc:
+        raise SecurityError('Upload the file through WebHDP to obtain a valid cloud upload receipt.') from exc
 
 
 class CloudUploadService:
@@ -410,7 +444,7 @@ class CloudUploadService:
         logger.info(f"Selected storage: {storage_type} - {message}")
 
         if storage_type == STORAGE_DROPBOX:
-            remote_path = f"/hdp_uploads/{remote_name}"
+            remote_path = f"/hdp_uploads/{uuid4().hex}-{remote_name}"
             return cls.upload_to_dropbox(local_path, remote_path)
 
         elif storage_type == STORAGE_GDRIVE:
@@ -686,7 +720,7 @@ class CloudUploadService:
         logger.info(f"Streaming to: {storage_type} - {message}")
 
         if storage_type == STORAGE_DROPBOX:
-            remote_path = f"/hdp_uploads/{remote_name}"
+            remote_path = f"/hdp_uploads/{uuid4().hex}-{remote_name}"
             return cls.stream_upload_to_dropbox(file_stream, remote_path, file_size)
 
         elif storage_type == STORAGE_GDRIVE:

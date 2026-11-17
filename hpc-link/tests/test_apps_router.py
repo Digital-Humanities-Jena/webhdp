@@ -1,7 +1,10 @@
 import unittest
 import asyncio
 import base64
+import json
+import stat
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi import HTTPException, Request
@@ -477,6 +480,24 @@ class TestAppsRouter(unittest.TestCase):
             )
             mock_resolve.assert_called_once_with("dl.dropboxusercontent.com", 443)
 
+    def test_webhdp_sif_download_rejects_private_url_credentials(self):
+        service = HpcApplicationGatewayService()
+        with patch.object(service, "_reject_private_resolved_addresses") as resolve:
+            for url in (
+                "https://zenodo.org/files/component.sif?download=1&token=private-value",
+                "https://user:private-value@zenodo.org/files/component.sif",
+                "https://zenodo.org/files/component.sif#private-value",
+                "https://zenodo.org/files/component.sif;token=private-value",
+                "https://dl.dropboxusercontent.com/files/component.sif?download=1",
+            ):
+                with self.subTest(url=url), self.assertRaises(HTTPException) as exc:
+                    service._validate_sif_download_url(url)
+                self.assertNotIn("private-value", exc.exception.detail)
+            resolve.assert_not_called()
+            url = "https://zenodo.org/files/component.sif?download=1"
+            self.assertEqual(service._validate_sif_download_url(url), url)
+            resolve.assert_called_once_with("zenodo.org", 443)
+
     def test_webhdp_cloud_stage_rejects_too_many_files(self):
         service = HpcApplicationGatewayService()
         service._settings.webhdp_cloud_stage_max_files = 1
@@ -529,17 +550,52 @@ class TestAppsRouter(unittest.TestCase):
             expires_at=now + timedelta(minutes=30),
             owner_username="tester",
         )
-        mock_ssh_manager.run_command = AsyncMock(side_effect=[("", "curl failed", 22), ("", "", 0)])
+        sftp = MagicMock()
+        sftp.lstat = AsyncMock(return_value=SimpleNamespace(permissions=stat.S_IFDIR))
+        sftp.remove = AsyncMock()
+        mock_ssh_manager.open_sftp = AsyncMock(return_value=sftp)
+        sftp.__aenter__.return_value = sftp
+        mock_ssh_manager.run_command = AsyncMock(return_value=("", "sensitive upstream diagnostic", 22))
         request = WebHdpCloudStageRequest(
             files=[WebHdpCloudStageFile(url="https://dl.dropboxusercontent.com/a", name="a.bin")]
         )
 
-        with patch.object(service, "_reject_private_resolved_addresses"):
+        with patch.object(service, "_reject_private_resolved_addresses", return_value=['8.8.8.8']):
             with self.assertRaises(HTTPException) as context:
                 asyncio.run(service.stage_webhdp_cloud_files("webhdp-stage", request, self._admin_user("tester")))
 
         self.assertEqual(context.exception.status_code, 502)
-        self.assertIn("rm -f /work/apps/webhdp/sessions/webhdp-stage/inputs/a.bin", mock_ssh_manager.run_command.call_args_list[1].args[0])
+        self.assertTrue(sftp.remove.call_args.args[0].startswith("/work/apps/webhdp/sessions/webhdp-stage/inputs/a.bin.part-"))
+        self.assertNotIn('sensitive upstream diagnostic', context.exception.detail)
+
+    @patch('app.services.apps_gateway.ssh_manager')
+    def test_cloud_download_revalidates_pins_and_hides_redirect_urls(self, ssh):
+        service = HpcApplicationGatewayService()
+        ssh.run_command = AsyncMock(side_effect=[
+            ('302\nhttps://dl.dropboxusercontent.com/final?private=value\n', '', 0), ('200\n\n', '', 0),
+        ])
+        with patch.object(service, '_reject_private_resolved_addresses', side_effect=[['8.8.8.8'], ['8.8.4.4']]):
+            asyncio.run(service._fetch_webhdp_cloud_file('https://dl.dropboxusercontent.com/start?private=value', '/work/output', 1000))
+        for call, address in zip(ssh.run_command.call_args_list, ['8.8.8.8', '8.8.4.4'], strict=True):
+            self.assertIn('--resolve dl.dropboxusercontent.com:443:' + address, call.args[0])
+            self.assertNotIn('private=value', call.args[0])
+            self.assertIn('private=value', call.kwargs['stdin'])
+            self.assertNotIn('--location', call.args[0])
+
+        ssh.run_command = AsyncMock(return_value=('302\nhttps://127.0.0.1/private\n', '', 0))
+        with patch.object(service, '_reject_private_resolved_addresses', return_value=['8.8.8.8']):
+            with self.assertRaises(HTTPException):
+                asyncio.run(service._fetch_webhdp_cloud_file('https://dl.dropboxusercontent.com/start', '/work/output', 1000))
+        self.assertEqual(ssh.run_command.await_count, 1)
+
+    def test_staging_rejects_symlink_parent(self):
+        service = HpcApplicationGatewayService()
+        session = SimpleNamespace(remote_input_dir='/work/inputs')
+        sftp = SimpleNamespace(lstat=AsyncMock(side_effect=[SimpleNamespace(permissions=stat.S_IFDIR),
+                                                            SimpleNamespace(permissions=stat.S_IFLNK)]))
+        with self.assertRaises(HTTPException) as context:
+            asyncio.run(service._prepare_staged_input_parent(sftp, session, 'unsafe/file'))
+        self.assertEqual(context.exception.status_code, 400)
 
     @patch("app.routers.apps.hpc_application_service")
     def test_run_webhdp_component_rejects_client_executable_profile(self, mock_service):
@@ -786,6 +842,34 @@ class TestAppsRouter(unittest.TestCase):
 
         self.assertEqual(context.exception.status_code, 400)
         self.assertIn("bucket_url", context.exception.detail)
+
+    @patch('app.services.apps_gateway.ssh_manager')
+    def test_zenodo_draft_passes_credentials_only_on_stdin(self, ssh):
+        service = HpcApplicationGatewayService()
+        input_path = '/work/session/outputs/model.glb'
+        token = 'unit-test-private-value'
+        service._webhdp_sessions['demo'] = SimpleNamespace(owner_username='tester', remote_output_dir='/work/session/outputs')
+        service.get_webhdp_session_status = AsyncMock(return_value=SimpleNamespace(scheduler_state='RUNNING'))
+        service._ensure_webhdp_session_regular_file = AsyncMock(return_value=(input_path, 5))
+        ssh.open_sftp = AsyncMock(return_value=MagicMock())
+        service._run_in_webhdp_allocation = AsyncMock(return_value=('{"success":true,"deposition_id":"123"}', '', 0))
+        result = asyncio.run(service.upload_webhdp_zenodo_draft('demo', WebHdpZenodoDraftUploadRequest(
+            access_token=token, files=[WebHdpZenodoDraftFile(remote_path=input_path)],
+        ), self._admin_user('tester')))
+        call = service._run_in_webhdp_allocation.call_args
+        self.assertTrue(result.success)
+        self.assertNotIn(token, call.args[1])
+        self.assertEqual(json.loads(call.kwargs['stdin'])['access_token'], token)
+        self.assertNotIn(token, result.model_dump_json())
+        ssh.run_command.assert_not_called()
+
+    def test_invalid_gateway_requests_do_not_echo_credentials(self):
+        fake_secret = 'unit-test-private-value'
+        response = self.client.post('/api/apps/webhdp/sessions/example/zenodo/upload-draft',
+                                    json=[{'access_token': fake_secret}])
+        self.assertEqual(response.status_code, 422)
+        self.assertNotIn(fake_secret, response.text)
+        self.assertNotIn('input', response.json()['detail'][0])
 
     def test_webhdp_zenodo_upload_rejects_symlink_file(self):
         service = HpcApplicationGatewayService()

@@ -1,0 +1,95 @@
+metadata:
+  name: hmsm_midi_interpretation
+  label: HMSM MIDI Interpretation
+  description: Analyze encoded MIDI timing, articulation, dynamics, and pedal evidence using HMSM Studio. Score-relative metrics require written-score MIDI and a reviewed alignment.
+  tags: [hmsm, interpretation, symbolic-music, midi, score]
+  category: Historical Musical Media
+  version: "1.0.0"
+  status: alpha
+  component_schema: "0.1.0-alpha.1"
+
+distribution:
+  tier: external_installable
+  bundled_with_webhdp: false
+  installation_scope: [local_container]
+
+inputs:
+  - name: input_file
+    label: Performance MIDI
+    description: A Standard MIDI File to analyze.
+    type: file_path
+    required: true
+  - name: score_file
+    label: Written-score MIDI
+    description: Optional synchronous Type-0 or Type-1 MIDI encoding written score positions. Review candidate alignment before interpreting score-relative results.
+    type: file_path
+    bind_source_by_default: false
+  - name: options_file
+    label: Analysis options
+    description: Optional HMSM AnalysisOptions JSON with sequence, channel, window, and alignment settings.
+    type: file_path
+    bind_source_by_default: false
+    mutex_with: [options_json]
+
+outputs:
+  - {name: report_file, label: Interpretation report, type: file_path, extensions: [.json], required: true}
+  - {name: runtime_manifest, label: HMSM runtime provenance, type: file_path, extensions: [.json], required: true}
+
+parameter_groups:
+  - title: Analysis settings
+    parameters:
+      - name: options_json
+        label: Analysis options JSON
+        description: Inline HMSM AnalysisOptions for this step. Use this field or a staged options file.
+        type: text
+        mutex_with: [options_file]
+
+execution:
+  profiles:
+    - id: local_docker
+      adapter: container_cli
+      runtime: docker
+      image: webhdp-hmsm-studio:local
+      entrypoint: [python, /app/component_runner.py, interpret]
+      config:
+        webhdp_contract: true
+        network: none
+      resources: {gpu_count: 0, cpus: 2, memory_mb: 2048}
+
+compatibility:
+  playground:
+    enabled: true
+
+install:
+  strategies:
+    - id: local_container
+      runtime: docker
+      profile: local_docker
+      image: webhdp-hmsm-studio:local
+  test:
+    files:
+      # Seven synthetic MIDI notes exercise score-free analysis.
+      - name: synthetic-study.mid
+        content_base64: "TVRoZAAAAAYAAQACAeBNVHJrAAAAHgD/Aw9TeW50aGV0aWMgc3R1ZHkA/1EDB6EgAP8vAE1UcmsAAABJAJA8UIFmgDwAgRqQQFCBZoBAAIEakENQgWaAQwCBGpBAUIFmgEAAgRqQPFCBZoA8AIEakDdQgWaANwCBGpAwUIFmgDAAAP8vAA=="
+    inputs:
+      input_file: synthetic-study.mid
+    parameters: {}
+
+ui:
+  playground:
+    fields:
+      input_file:
+        widget: file_picker
+        accept_extensions: [.mid, .midi]
+        help_text: Supply original, derived, or transcribed performance MIDI and retain its provenance. For Type-2 MIDI, set sequence_track in the analysis options.
+      score_file:
+        widget: file_picker
+        accept_extensions: [.mid, .midi]
+      options_file:
+        widget: file_picker
+        accept_extensions: [.json]
+    result:
+      artifact_views:
+        - {id: interpretation-report, label: Analysis and runtime reports, widget: file_download, extensions: [.json]}
+      show_result_json: true
+      show_logs: true

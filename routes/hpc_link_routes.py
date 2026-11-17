@@ -7,8 +7,9 @@ from flask_jwt_extended import get_jwt_identity, jwt_required
 
 from api_utils import APIResponse
 from database.database import db
-from database.models import Session, User
-from exceptions import ValidationError
+from database.models import CloudMirrorObject, Session, User, UserRole
+from exceptions import SecurityError, ValidationError
+from services.cloud_upload_service import read_stream_receipt
 from services.hdp_component_policy import (
     component_runtime_report,
     webhdp_deployment_class,
@@ -144,10 +145,30 @@ def stage_hpc_cloud_files(allocation_id):
 @jwt_required()
 def stage_hpc_cloud_references(allocation_id):
     service = current_app.hpc_allocation_service
-    allocation = service.get_allocation(allocation_id, _current_user())
+    user = _current_user()
+    allocation = service.get_allocation(allocation_id, user)
     data = request.get_json() or {}
     files = data.get("files") if isinstance(data.get("files"), list) else []
-    result = service.stage_cloud_references(allocation, files)
+    authorized = []
+    for item in files:
+        if not isinstance(item, dict):
+            raise ValidationError('Each cloud reference must be an object')
+        if item.get('cloud_upload_receipt'):
+            reference = read_stream_receipt(item['cloud_upload_receipt'], user.id)
+            path, provider, name = reference['path'], reference['provider'], reference['name']
+        elif user.role == UserRole.ADMIN and allocation.session_id:
+            path = str(item.get('cloud_path') or item.get('cloud_path_or_id') or item.get('file_id') or item.get('remote_path') or '').strip()
+            provider = str(item.get('storage_type') or item.get('provider') or '').strip().lower()
+            mirror = CloudMirrorObject.query.filter_by(session_id=allocation.session_id, cloud_path=path,
+                                                        storage_provider=provider, status='available').first()
+            if not mirror or not path or path.startswith(('http:', 'https:')):
+                raise SecurityError('This cloud object is not recorded for the allocation upload session')
+            name = mirror.original_filename
+        else:
+            raise SecurityError('A cloud upload receipt from your account is required')
+        authorized.append({'cloud_path': path, 'storage_type': provider, 'name': name,
+                           'relative_dir': item.get('relative_dir')})
+    result = service.stage_cloud_references(allocation, authorized)
     return APIResponse.success(data={"allocation": service.serialize_allocation(allocation), "staging": result})
 
 

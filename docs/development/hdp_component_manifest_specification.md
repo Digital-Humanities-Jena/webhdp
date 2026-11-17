@@ -298,6 +298,8 @@ Common fields:
 | `description` | No | string | Help text and schema description |
 | `required` | No, defaults to `false` | boolean | Whether Playground/API input must provide a value |
 | `default` | No | type-dependent | Default value |
+| `bind_source_by_default` | No, defaults to `true` | boolean | On a `file_path` or `file_list` input, use pipeline source files for an unbound field. Set to `false` for optional sidecar files or dependency lists that require an explicit binding. |
+| `extensions` | No | array of file suffixes | On a `file_path` output, declare the file suffixes the component may produce. WebHDP checks declared suffixes during Docker contract execution and can use them to reject incompatible HMSM artifact bindings. |
 | `options` | Required for `string_dropdown` | array | Allowed dropdown choices |
 | `mutex_with` | No | array of strings | Mutually exclusive field names |
 
@@ -386,8 +388,14 @@ outputs:
     label: Validation Report
     description: JSON report with file facts, errors, and warnings.
     type: file_path
+    extensions: [.json]
     required: false
 ```
+
+For the WebHDP Docker file contract, a required `file_path` output must point to
+a real file under `/outputs`. When `extensions` is declared, WebHDP checks the
+suffix of each returned file, including optional outputs. A container success
+response fails the run or smoke test if these checks fail.
 
 Best practices:
 

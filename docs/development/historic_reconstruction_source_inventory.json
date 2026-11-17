@@ -1,0 +1,233 @@
+{
+  "schema_version": 1,
+  "source_name": "historic_reconstruction_pipeline-master",
+  "git_revision": null,
+  "package_tree_sha256": "cb8266490126887616c022f983803141e9ec393522aaab249d167e25c8943a6a",
+  "package_files": [
+    {
+      "path": "historic_reconstruction_pipeline/__init__.py",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "historic_reconstruction_pipeline/geolocalization/__init__.py",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "historic_reconstruction_pipeline/geolocalization/dense_intrinsics.py",
+      "bytes": 21681,
+      "sha256": "ba245d75dcf431aa1b90b208f8a6b3dfc4471113c4c2a8415d37edc7caf9c555"
+    },
+    {
+      "path": "historic_reconstruction_pipeline/geolocalization/download_panoramas.py",
+      "bytes": 22373,
+      "sha256": "38026ac7cd6ea3539a0454948ecd7c267d9b7a72e20f6ce0579bc7af6deaf626"
+    },
+    {
+      "path": "historic_reconstruction_pipeline/geolocalization/geoloc_pipeline.py",
+      "bytes": 80431,
+      "sha256": "c0e61c0aadbcf13587dcec4a5986c65ca320cbe352d92b26476e26730d0d0720"
+    },
+    {
+      "path": "historic_reconstruction_pipeline/geolocalization/geoloc_pipeline_manual_loma.py",
+      "bytes": 24597,
+      "sha256": "4269ec5b5acb3b3afdc42fbc0b2a4fcd271c6063e1f9ab7a1efc72ef4f37d063"
+    },
+    {
+      "path": "historic_reconstruction_pipeline/geolocalization/intrinsics/__init__.py",
+      "bytes": 300,
+      "sha256": "b54e1dcd8f35c555f71ae36200d3dbf11ec393eb94bcf1b2a4d8ea05676d9a27"
+    },
+    {
+      "path": "historic_reconstruction_pipeline/geolocalization/intrinsics/cameras.py",
+      "bytes": 10028,
+      "sha256": "b1950379f0e90c1869b3eaf932e8925271bd8aa1a631afc65b1ea52a67e88ada"
+    },
+    {
+      "path": "historic_reconstruction_pipeline/geolocalization/intrinsics/dense_tri.py",
+      "bytes": 3907,
+      "sha256": "995132ec2dd11c57879fa844de39fa73a529221b8114eebe4d59d41b888108b9"
+    },
+    {
+      "path": "historic_reconstruction_pipeline/geolocalization/intrinsics/fit.py",
+      "bytes": 25860,
+      "sha256": "9355403a946b965d656cac570c1cee4357c177933e65b88eb8167bf810bae17c"
+    },
+    {
+      "path": "historic_reconstruction_pipeline/geolocalization/intrinsics/gsv.py",
+      "bytes": 14275,
+      "sha256": "eea5249a04532c28d3d6b473e71175ca058c845edff2d3cd0fa03df28500d4ae"
+    },
+    {
+      "path": "historic_reconstruction_pipeline/geolocalization/intrinsics/match.py",
+      "bytes": 14114,
+      "sha256": "8a5b701a8eb25964e7b6acc6d9343b837b687037475045bdfd3a20b007f527b9"
+    },
+    {
+      "path": "historic_reconstruction_pipeline/geolocalization/intrinsics/refine.py",
+      "bytes": 10277,
+      "sha256": "b6ecd4d8304da0d93dc99b006a9e9318efa7c3a7901a0316d259e21dba944187"
+    },
+    {
+      "path": "historic_reconstruction_pipeline/geolocalization/intrinsics/stereo.py",
+      "bytes": 423,
+      "sha256": "2a558080e9869a00cbbb1cbe21e61abe1aea1eb0f116da2202cfe6ba9cf5b05d"
+    },
+    {
+      "path": "historic_reconstruction_pipeline/geolocalization/intrinsics/tiers.py",
+      "bytes": 2514,
+      "sha256": "a1a25c382143e9f868bff1058dd185a15c485fa147fc462ee92065342fb9cb08"
+    },
+    {
+      "path": "historic_reconstruction_pipeline/geolocalization/localize_pano_in_historic.py",
+      "bytes": 26216,
+      "sha256": "836141e9d717c547e5901c8c144b823ba101c6f98de1597d213c5e7340d75f66"
+    },
+    {
+      "path": "historic_reconstruction_pipeline/geolocalization/manual.py",
+      "bytes": 3947,
+      "sha256": "6f5f95b92238e42e782324744a748c0c8aba0b9c81415c67908cba95726e55a3"
+    },
+    {
+      "path": "historic_reconstruction_pipeline/geolocalization/pano2cubemap.py",
+      "bytes": 4260,
+      "sha256": "687219cc4b2b8314ad128391b33726109fe4af4b88a011c2c85e4a97483727f1"
+    },
+    {
+      "path": "historic_reconstruction_pipeline/geolocalization/pipeline_geolocation.py",
+      "bytes": 13503,
+      "sha256": "deb15b66afd171474b6e9ab5705dbc5283d43fc8b835e9d97f9e476d18ca9a0b"
+    },
+    {
+      "path": "historic_reconstruction_pipeline/geolocalization/registration_diagnostics.py",
+      "bytes": 12346,
+      "sha256": "779b5f12010756b1196b34224c44b5af10c3f1d2b284ac9027cfb36ecbb3a76e"
+    },
+    {
+      "path": "historic_reconstruction_pipeline/geolocalization/visual_geolocation.py",
+      "bytes": 1582,
+      "sha256": "310d08f374685152acaf33b89d6f23218f9942789b40b7fa3974beaf8ba3f05b"
+    },
+    {
+      "path": "historic_reconstruction_pipeline/matching/__init__.py",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "historic_reconstruction_pipeline/matching/doppelgangers/__init__.py",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "historic_reconstruction_pipeline/matching/doppelgangers/remove_doppelgangers_pp.py",
+      "bytes": 9106,
+      "sha256": "6f0c2c81cbd38e2f87147b3ee2b838f9b7a3e235438278cbcf0b7ee143512296"
+    },
+    {
+      "path": "historic_reconstruction_pipeline/matching/gps_prior/pairs_from_gps.py",
+      "bytes": 3019,
+      "sha256": "2fcec8620016aa7b0b3e0ba75888301a2bcac9223e7c78e8c6dcdb8b73c68846"
+    },
+    {
+      "path": "historic_reconstruction_pipeline/matching/recon_pipeline.py",
+      "bytes": 6095,
+      "sha256": "38050a66b54c3b430d5c4b0f49bcd555244663655536ebb9ee0861cde5e9dab5"
+    },
+    {
+      "path": "historic_reconstruction_pipeline/matching/refine_keypoints/__init__.py",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "historic_reconstruction_pipeline/matching/refine_keypoints/demo.yaml",
+      "bytes": 1877,
+      "sha256": "1ca5e85f8d5f618e63bc0bb50fb39eeb0e84781f8839662e5e9d21df1499b78b"
+    },
+    {
+      "path": "historic_reconstruction_pipeline/matching/refine_keypoints/refine_model_keypoints.py",
+      "bytes": 14956,
+      "sha256": "bae3c0832ac26fa8021c651f2668cc070e289e76375d4f41dd52b24e9a03051f"
+    },
+    {
+      "path": "historic_reconstruction_pipeline/meshing/__init__.py",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "historic_reconstruction_pipeline/meshing/colmapw_dataset.py",
+      "bytes": 17832,
+      "sha256": "375316a46850ae67f8f5867354e12db600914ae21824ad1d52ecbddcdb9eb547"
+    },
+    {
+      "path": "historic_reconstruction_pipeline/meshing/generate_mvs_tuples.py",
+      "bytes": 4416,
+      "sha256": "23322f0022c459752a90998e8e209b0201046b1863a645860e2a983304c688cd"
+    },
+    {
+      "path": "historic_reconstruction_pipeline/meshing/mvs_anywhere.py",
+      "bytes": 22724,
+      "sha256": "86d8302f3a3b8b8ae4e50e5d3636298e72d8aadc25064a53d7f397b61d83ebdd"
+    },
+    {
+      "path": "historic_reconstruction_pipeline/preprocess/__init__.py",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "historic_reconstruction_pipeline/preprocess/generate_segmask.py",
+      "bytes": 13273,
+      "sha256": "593f7fab4cb53dc66b83383bef1d39410c994dc33bb450c7fed7391a374586e8"
+    },
+    {
+      "path": "historic_reconstruction_pipeline/preprocess/prepare_images.py",
+      "bytes": 1835,
+      "sha256": "a6206a6a26d470f66587f8a10f6ec1deb96c11c17d8e3624eca998bcd5eaa2ca"
+    },
+    {
+      "path": "historic_reconstruction_pipeline/preprocess/stereo_detection.py",
+      "bytes": 4080,
+      "sha256": "5b0f6dd06b58cce11043caab8a24862c2d1332e41614c9214ebfb9587d95c474"
+    },
+    {
+      "path": "historic_reconstruction_pipeline/reconstruction/__init__.py",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "historic_reconstruction_pipeline/reconstruction/pipeline.py",
+      "bytes": 12145,
+      "sha256": "b627bfb4d6dea6a41edf01827ceffeedaffa9df648b054a0da3de5c34d1259f2"
+    },
+    {
+      "path": "historic_reconstruction_pipeline/reconstruction/prepare_colmap_model.py",
+      "bytes": 10289,
+      "sha256": "15cc978cf3920ac06a954d3f787decdcb29f88e8b7d4c8cd71b65a982cfdc582"
+    },
+    {
+      "path": "historic_reconstruction_pipeline/reconstruction/render_priors/__init__.py",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "historic_reconstruction_pipeline/utils/__init__.py",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "historic_reconstruction_pipeline/utils/colmap.py",
+      "bytes": 810,
+      "sha256": "34f024a093f35d581252527ba4669454cf93a00a0607163ad8fbc44d0b280a1d"
+    },
+    {
+      "path": "historic_reconstruction_pipeline/utils/cubemap_extractor.py",
+      "bytes": 19678,
+      "sha256": "c2f95a16b0bbd4d2c1c7261980d9b2eeb2c918bef226f9d08228593676485752"
+    },
+    {
+      "path": "historic_reconstruction_pipeline/utils/utils.py",
+      "bytes": 2622,
+      "sha256": "ddbb7fdc62ff498832d6cc7d62e20345976a8b29897d5a394c6840af2f611523"
+    }
+  ]
+}

@@ -162,6 +162,8 @@ const navigationItems = computed(() => {
     { label: 'Records Explorer', to: '/records/explorer' },
     { label: 'Datasets', to: '/datasets' },
     { label: 'HPC Access', to: '/hpc-resources' },
+    { label: 'Linked processing', to: '/link/jobs' },
+    { label: 'Connected Apps', to: '/account/connected-apps' },
     { label: 'Tools', to: '/tools' },
     { label: 'Docs', to: '/docs' }
   ]
@@ -180,6 +182,7 @@ const navigationItems = computed(() => {
     items.push({ label: 'Initial Setup', to: '/admin/setup' })
     items.push({ label: 'Sessions', to: '/admin/session-monitoring' })
     items.push({ label: 'HPC Admin', to: '/admin/hpc-access' })
+    items.push({ label: 'WebHDP-Link', to: '/admin/webhdp-link' })
     items.push({ label: 'Settings', to: '/settings' })
   }
   if (
@@ -191,7 +194,7 @@ const navigationItems = computed(() => {
     items.push({ label: 'Developer', to: '/developer' })
   }
   if (systemStore.coreOnly) {
-    const corePaths = new Set(["/onboarding", "/dashboard", "/uploads", "/submissions", "/records/explorer", "/hpc-resources", "/tools", "/docs", "/admin/dashboard"])
+    const corePaths = new Set(["/onboarding", "/dashboard", "/uploads", "/submissions", "/records/explorer", "/hpc-resources", "/tools", "/docs", "/admin/dashboard", "/account/connected-apps", "/admin/webhdp-link", "/link/jobs"])
     return items.filter((item) => corePaths.has(item.to))
   }
   return items
@@ -200,6 +203,7 @@ const navigationItems = computed(() => {
 const isRouteActive = (targetPath) => {
   if (!targetPath) return false
   if (targetPath === '/tools') return route.path.startsWith('/tools')
+  if (targetPath === '/link/jobs') return route.path === '/link/jobs' || route.path.startsWith('/link/jobs/')
   if (targetPath === '/settings') return route.path.startsWith('/settings')
   if (targetPath === '/docs') return route.path === '/docs' || route.path.startsWith('/docs/')
   if (targetPath === '/admin/setup') return route.path === '/admin/setup'

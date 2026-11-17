@@ -88,15 +88,8 @@ HPC_LINK_BASE_URL=
 HPC_LINK_API_KEY=
 ```
 
-Use `chmod` or `chown` only if Docker cannot write to the mounted directories.
-On Linux, the container user is usually UID `1000`:
-
-```bash
-chown -R 1000:1000 instance hdp-shared local_input local_output
-```
-
-Avoid broad permissions such as `chmod -R 777` unless this is a disposable local
-test clone.
+If a container cannot write to its bind mounts, assign access to the actual
+container identity. See [Docker directory permissions](../docker_deployment_guide.md#3-permissions--security-critical).
 
 ## 3. Start WebHDP
 

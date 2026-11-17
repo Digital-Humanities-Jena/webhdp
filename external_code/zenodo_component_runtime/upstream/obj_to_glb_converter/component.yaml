@@ -1,0 +1,205 @@
+metadata:
+  name: obj_to_glb_converter
+  label: "OBJ to GLB Converter"
+  description: >
+    Converts OBJ 3D model files to GLB format using Blender with flexible output control and batch processing capabilities.
+  tags:
+    - 3d
+    - model
+    - conversion
+    - obj
+    - glb
+    - blender
+  keywords:
+    - 3d model
+    - converter
+    - blender
+    - obj to glb
+    - batch processing
+  category: "3D Processing"
+  version: "0.1.0"
+  status: alpha
+  created: "2025-08-29"
+  updated: "2025-08-29"
+  authors:
+    - name: "Ukolov, Dominik"
+      affiliation: "Friedrich-Schiller-University Jena"
+      orcid: "0000-0002-7904-3892"
+  contact:
+    email: "dominik.ukolov@uni-jena.de"
+  license:
+    type: "GPLv3"
+    url: "https://www.gnu.org/licenses/gpl-3.0.html.en"
+  component_schema: "0.1.0-alpha.2"
+
+sources:
+  record: ""
+  doi: ""
+  concept_doi: ""
+  changelog: ""
+  git: ""
+
+structure:
+  required_files:
+    - "processor.py"
+    - "main.py"
+    - "tests/test.py"
+    - "tests/sample.obj"
+    - "tests/sample.mtl"
+    - "tests/textures/17th_c_red_english_bond_grey_to_reddish_brown_Base_Color.jpg"
+    - "tests/textures/old_brick_oiled_one_layer_Base_Color.jpg"
+    - "tests/textures/old_brick_oiled_one_layer_Roughness.jpg"
+    - "tests/textures/rough_wood_COLOR_painted.jpg"
+    - "tests/textures/rough_wood_NRM_y_up.jpg"
+    - "tests/textures/rough_wood_ROUGH.jpg"
+    - "tests/textures/TexturesCom_RooftilesCeramic0021_1_seamless_S_red_pimped.jpg"
+    - "tests/textures/voordeurenkel.jpg"
+    - "tests/reference_data/sample.glb"
+  additional_files: []
+  directories:
+    - "output"
+
+inputs:
+  - name: input-file
+    label: Input OBJ File
+    description: "Path to the OBJ file to convert (for single file mode)"
+    type: file_path
+    required: false
+    validation_rules:
+      file_extensions: [".obj"]
+      min_size_bytes: "1"
+    mutex_with: ["input-dir"]
+
+  - name: input-dir
+    label: Input Directory
+    description: "Input directory containing OBJ files (for batch mode)"
+    type: dir_path
+    required: false
+    mutex_with: ["input-file"]
+
+outputs:
+  - name: output-file
+    label: Converted GLB File
+    pattern: "{original_stem}.glb"
+    description: "Converted GLB file"
+    category: derived
+    type: "model/gltf-binary"
+
+  - name: output-report
+    label: Conversion Report
+    pattern: "{original_stem}_report.json"
+    description: "JSON report with conversion details"
+    category: metadata
+    type: "application/json"
+
+parameter_groups:
+  - title: Processing Mode
+    description: "Configure single file or batch processing."
+    parameters:
+      - name: batch-mode
+        label: "Batch Processing Mode"
+        type: boolean
+        default: false
+        description: "Process all OBJ files in input directory instead of single file"
+
+      - name: recursive-search
+        label: "Recursive Directory Search"
+        type: boolean
+        default: false
+        description: "Search subdirectories for OBJ files in batch mode"
+
+  - title: Output Settings
+    description: "Control where the output files are saved."
+    parameters:
+      - name: save-in-input-dir
+        label: "Save GLB in Input Directory"
+        type: boolean
+        default: false
+        description: "Save converted GLB files in same directory as input OBJ files"
+
+  - title: Texture Options
+    description: "Manage texture handling during conversion."
+    parameters:
+      - name: search-textures
+        label: "Search for Textures Automatically"
+        type: boolean
+        default: true
+        description: "Automatically search for texture files in the OBJ directory and subdirectories"
+
+      - name: ignore-missing-textures
+        label: "Ignore Missing Textures"
+        type: boolean
+        default: false
+        description: "Continue conversion even if some textures are missing"
+
+      - name: texture-search-extensions
+        label: "Texture File Extensions"
+        type: string
+        default: ".jpg,.jpeg,.png,.tga,.bmp,.tiff"
+        description: "Comma-separated list of texture file extensions to search for"
+
+  - title: Conversion Settings
+    description: "Fine-tune the conversion process."
+    parameters:
+      - name: include-materials
+        label: "Include Materials"
+        type: boolean
+        default: true
+        description: "Include material information in the GLB output"
+
+      - name: optimize-geometry
+        label: "Optimize Geometry"
+        type: boolean
+        default: false
+        description: "Apply basic geometry optimization during conversion"
+  
+  - title: Execution Options
+    description: Configure execution behavior and logging.
+    parameters:
+      - name: test
+        label: Run Internal Test Suite
+        type: boolean
+        default: false
+        description: >
+          If true, runs the component's built-in test suite instead of processing input files.
+      - name: verbose
+        label: Enable Verbose Logging
+        type: boolean
+        default: false
+        description: >
+          If enabled, prints detailed processing steps and results to the console.
+
+requirements:
+  python_environment:
+    python_version: ">=3.8"
+    packages: []
+  system_dependencies:
+    - name: "blender"
+      version: ">=3.0"
+      required: true
+      description: "Blender for 3D modeling and rendering, used for OBJ to GLB conversion."
+      type: "package"
+      install:
+        methods:
+          - type: "apt"
+            command: "sudo apt-get update && sudo apt-get install -y blender"
+            platforms: ["ubuntu", "debian"]
+          - type: "yum"
+            command: "sudo yum install -y blender"
+            platforms: ["centos", "rhel", "fedora"]
+          - type: "brew"
+            command: "brew install --cask blender"
+            platforms: ["macos"]
+          - type: "choco"
+            command: "choco install blender"
+            platforms: ["windows"]
+      verify:
+        command: "blender --version"
+        expected_pattern: "Blender [3-9]"
+
+  system_requirements:
+    min_memory_mb: 2048
+
+execution:
+  idempotent: true
+  timeout: 600

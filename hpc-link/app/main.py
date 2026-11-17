@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 import asyncio
 import structlog
 from fastapi import FastAPI, Depends, Request, Response
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -35,6 +36,14 @@ structlog.configure(
 logger = structlog.get_logger()
 
 # Initialize Rate Limiter
+
+
+async def invalid_request_response(_request: Request, exc: RequestValidationError) -> JSONResponse:
+    # Pydantic includes the raw input (which can be an entire credential
+    # request) in validation errors. Return only stable error metadata.
+    details = [{'loc': list(error['loc'][:1]), 'type': error['type'], 'msg': 'Invalid request value'}
+               for error in exc.errors()]
+    return JSONResponse(status_code=422, content={'detail': details})
 
 
 def _upload_body_limit_for_path(settings, method: str, path: str) -> int | None:
@@ -172,6 +181,7 @@ def create_app() -> FastAPI:
     # Rate Limiter State
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    app.add_exception_handler(RequestValidationError, invalid_request_response)
 
     # Middleware
     app.add_middleware(CorrelationIdMiddleware)

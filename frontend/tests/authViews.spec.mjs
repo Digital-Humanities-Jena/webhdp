@@ -49,6 +49,7 @@ describe('auth views', () => {
     Object.values(mocked.authStore).forEach((fn) => fn.mockReset())
     Object.values(mocked.axios).forEach((fn) => fn.mockReset())
     mocked.route.params = {}
+    mocked.route.query = {}
   })
 
   it('submits login credentials, verifies the MFA code, and redirects to the upload workflow', async () => {
@@ -84,6 +85,30 @@ describe('auth views', () => {
 
     expect(mocked.authStore.verifyLoginCode).toHaveBeenCalledWith('mfa-token', '123456')
     expect(mocked.router.push).toHaveBeenCalledWith('/workflow/upload')
+  })
+
+  it('resumes a local WebHDP-Link consent request after login', async () => {
+    mocked.route.query = { redirect: '/link/authorize?client_id=piano&state=opaque' }
+    mocked.authStore.login.mockResolvedValue({ data: { access_token: 'access-token' } })
+    const wrapper = mount(LoginView, { global: { stubs: { RouterLink: RouterLinkStub } } })
+    await wrapper.get('#email').setValue('user@example.com')
+    await wrapper.get('#password').setValue('secret')
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+    expect(mocked.router.push).toHaveBeenCalledWith('/link/authorize?client_id=piano&state=opaque')
+    wrapper.unmount()
+  })
+
+  it('rejects an external post-login redirect', async () => {
+    mocked.route.query = { redirect: 'https://untrusted.example/link/authorize?state=opaque' }
+    mocked.authStore.login.mockResolvedValue({ data: { access_token: 'access-token' } })
+    const wrapper = mount(LoginView, { global: { stubs: { RouterLink: RouterLinkStub } } })
+    await wrapper.get('#email').setValue('user@example.com')
+    await wrapper.get('#password').setValue('secret')
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+    expect(mocked.router.push).toHaveBeenCalledWith('/workflow/upload')
+    wrapper.unmount()
   })
 
   it('resends MFA codes and keeps failed verification on the code step', async () => {

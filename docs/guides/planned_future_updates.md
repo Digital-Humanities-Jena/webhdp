@@ -1,17 +1,8 @@
 # Future Roadmap And Planned Updates
 
-This document lists planned WebHDP directions after `v0.1.0-alpha.1` and
-consolidates earlier roadmap notes into one public planning page. It is not a
-release commitment. Items here should become concrete issues, milestones,
-architecture decisions, or implementation specifications before they are treated
-as scheduled work.
-
-For the current alpha boundary, see `README.md` and `RELEASE_NOTES.md`.
-
-This page is intentionally separate from current-release user documentation. It
-collects future sustainability, governance, interoperability, and workflow
-directions so the public alpha can be published without implying that these
-items are already implemented.
+This roadmap describes work beyond `v0.1.0-alpha.3`. For current capabilities,
+see the [release notes](../../RELEASE_NOTES.md) and
+[upgrade guide](upgrade_alpha3.md).
 
 ## Planning Principles
 
@@ -56,6 +47,10 @@ Implemented foundation:
 - HDP Components can be installed with local-container or HPC/SIF strategies.
 - Local Docker smoke tests use component test contracts.
 - The Playground can test single components before full pipeline runs.
+- An operator can share a single running Slurm GPU job with approved users
+  through [GPU reservations](prereserved_gpu_demo.md).
+- Registered applications can use [WebHDP-Link](webhdp_link.md) to run
+  explicitly published versions of native pipelines.
 
 Planned outcome:
 - Link permissioned HPC allocations directly with more production pipeline
@@ -64,8 +59,8 @@ Planned outcome:
   jobs, cancellation, and recovery.
 
 Open work:
-- Define allocation visibility and permission checks.
-- Provide clear queued/running/failed/completed lifecycle states.
+- Extend allocation policy to more scheduler configurations and compute profiles.
+- Improve capacity and job lifecycle monitoring across deployments.
 - Keep a tested fallback path for deployments without HPC availability.
 
 ### Record Preview And Draft Management

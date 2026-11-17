@@ -10,7 +10,7 @@ import yaml
 from flask import Flask
 
 from database.database import db
-from database.models import ComponentDefinition, ComponentVersion, User, UserRole
+from database.models import ComponentDefinition, ComponentVersion, HpcComponentInstallation, PipelineDefinition, PipelineVersion, User, UserRole
 from exceptions import ValidationError
 from services.component_index_service import ComponentIndexService
 from services.hpc_component_installer_service import REPO_ROOT, HpcComponentInstallerService
@@ -204,6 +204,23 @@ def test_validate_rejects_unsafe_remote_sif_path(flask_app):
         service.validate_install_payload({"manifest": MANIFEST, "sif_source": "../component.sif"})
 
 
+def test_validate_rejects_private_sif_urls_before_forwarding(flask_app):
+    service = HpcComponentInstallerService()
+    sources = (
+        "https://zenodo.org/files/component.sif?download=1&token=private-value",
+        "https://user:private-value@zenodo.org/files/component.sif",
+        "https://zenodo.org/files/component.sif#private-value",
+        "https://zenodo.org/files/component.sif;token=private-value",
+    )
+    for source in sources:
+        with pytest.raises(ValidationError) as exc:
+            service.validate_install_payload({"manifest": MANIFEST, "sif_source": source})
+        assert "private-value" not in str(exc.value)
+    assert not flask_app.fake_hpc_client.posts
+    for source in ("https://example.org/component.sif", "https://zenodo.org/files/component.sif?download=1"):
+        assert service.validate_install_payload({"manifest": MANIFEST, "sif_source": source})["sif"]["sif_source"] == source
+
+
 def test_validate_allows_existing_component_version_for_new_strategy(flask_app):
     definition = ComponentDefinition(
         key="example_validator",
@@ -335,12 +352,17 @@ def test_validate_rejects_local_container_image_outside_allowlist(mock_run, _moc
 @patch("services.hpc_component_installer_service.shutil.which", return_value="/usr/bin/docker")
 @patch("services.hpc_component_installer_service.subprocess.run")
 def test_install_local_container_imports_component_without_hpc_link(mock_run, _mock_which, flask_app):
-    mock_run.return_value = subprocess.CompletedProcess(
-        args=["docker", "image", "inspect"],
-        returncode=0,
-        stdout=json.dumps([{"Id": "sha256:" + "a" * 64}]),
-        stderr="",
-    )
+    image_id = "sha256:" + "a" * 64
+    retention_tag = "webhdp-component-runtime:sha256-" + "a" * 64
+
+    def docker_before_registration(command, **kwargs):
+        assert ComponentDefinition.query.filter_by(key="local_profiler").first() is None
+        return subprocess.CompletedProcess(
+            args=command, returncode=0,
+            stdout=json.dumps([{"Id": image_id}]) if command[2] == "inspect" else "", stderr="",
+        )
+
+    mock_run.side_effect = docker_before_registration
     user = User(email="admin@example.com", role=UserRole.ADMIN, is_verified=True)
     user.set_password("password123")
     db.session.add(user)
@@ -361,13 +383,64 @@ def test_install_local_container_imports_component_without_hpc_link(mock_run, _m
     assert result["installation"]["container_image"] == "example/local-profiler:1.0.0"
     assert result["component"]["source_type"] == "local_container_installed"
     assert result["component"]["profiles"][0]["adapter"] == "container_cli"
+    assert result["installation"]["manifest"]["execution"]["profiles"][0]["image"] == image_id
+    assert result["installation"]["checks"]["image_retention"] == {
+        "success": True, "image_id": image_id, "retention_tag": retention_tag,
+    }
+    assert [call.args[0] for call in mock_run.call_args_list] == [
+        ["/usr/bin/docker", "image", "inspect", "example/local-profiler:1.0.0"],
+        ["/usr/bin/docker", "image", "tag", image_id, retention_tag],
+        ["/usr/bin/docker", "image", "inspect", retention_tag],
+    ]
     assert flask_app.fake_hpc_client.posts == []
 
 
 @patch("services.hpc_component_installer_service.shutil.which", return_value="/usr/bin/docker")
 @patch("services.hpc_component_installer_service.subprocess.run")
-def test_local_container_installation_runs_manifest_smoke_test(mock_run, _mock_which, flask_app):
+@pytest.mark.parametrize("failure", ["tag_rejected", "tag_timeout", "retained_id_mismatch", "retained_tag_missing", "invalid_image_id"])
+def test_local_image_retention_failure_never_registers_component(mock_run, _mock_which, flask_app, failure):
+    image_id = "sha256:" + "a" * 64
+    inspected_id = "invalid-image-id" if failure == "invalid_image_id" else image_id
+    responses = [subprocess.CompletedProcess(args=[], returncode=0, stdout=json.dumps([{"Id": inspected_id}]), stderr="")]
+    if failure == "tag_rejected":
+        responses.append(subprocess.CompletedProcess(args=[], returncode=1, stdout="", stderr="tag denied"))
+    elif failure == "tag_timeout":
+        responses.append(subprocess.TimeoutExpired(cmd="docker image tag", timeout=30))
+    elif failure != "invalid_image_id":
+        responses.append(subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""))
+        responses.append(subprocess.CompletedProcess(
+            args=[], returncode=1 if failure == "retained_tag_missing" else 0,
+            stdout=json.dumps([{"Id": "sha256:" + "b" * 64}]), stderr="",
+        ))
+    mock_run.side_effect = responses
+    user = User(email="retention@example.com", role=UserRole.ADMIN, is_verified=True)
+    user.set_password("password123")
+    db.session.add(user)
+    db.session.commit()
+
+    with pytest.raises(ValidationError, match="preserve|verification failed|valid immutable image ID"):
+        HpcComponentInstallerService().install_component(
+            {"manifest": LOCAL_CONTAINER_MANIFEST, "install_strategy": "local_container",
+             "container_image": "example/local-profiler:1.0.0"}, user=user,
+        )
+
+    assert ComponentDefinition.query.filter_by(key="local_profiler").first() is None
+    assert ComponentVersion.query.count() == 0
+    failed = HpcComponentInstallation.query.one()
+    assert failed.status == "failed"
+    assert failed.component_version_id is None
+    assert "image_retention" not in json.loads(failed.checks_json)
+    assert mock_run.call_count == len(responses)
+    assert flask_app.fake_hpc_client.posts == []
+
+
+@patch("services.hpc_component_installer_service.shutil.which", return_value="/usr/bin/docker")
+@patch("services.hpc_component_installer_service.subprocess.run")
+@pytest.mark.parametrize("required_output", [False, True])
+def test_local_container_installation_runs_manifest_smoke_test(mock_run, _mock_which, flask_app, required_output):
     mock_run.side_effect = [
+        subprocess.CompletedProcess(args=["docker", "image", "inspect"], returncode=0, stdout=json.dumps([{"Id": "sha256:" + "a" * 64}]), stderr=""),
+        subprocess.CompletedProcess(args=["docker", "image", "tag"], returncode=0, stdout="", stderr=""),
         subprocess.CompletedProcess(args=["docker", "image", "inspect"], returncode=0, stdout=json.dumps([{"Id": "sha256:" + "a" * 64}]), stderr=""),
         subprocess.CompletedProcess(args=["docker", "image", "inspect"], returncode=0, stdout=json.dumps([{"Id": "sha256:" + "a" * 64}]), stderr=""),
         subprocess.CompletedProcess(args=["docker", "run"], returncode=0, stdout='{"success": true}', stderr=""),
@@ -377,9 +450,13 @@ def test_local_container_installation_runs_manifest_smoke_test(mock_run, _mock_w
     db.session.add(user)
     db.session.commit()
     service = HpcComponentInstallerService()
+    manifest = {
+        **LOCAL_CONTAINER_MANIFEST_WITH_TEST,
+        "outputs": [{"name": "report", "type": "file_path", "required": required_output}],
+    }
     install_result = service.install_component(
         {
-            "manifest": LOCAL_CONTAINER_MANIFEST_WITH_TEST,
+            "manifest": manifest,
             "install_strategy": "local_container",
             "container_image": "example/local-profiler:1.0.0",
         },
@@ -388,7 +465,9 @@ def test_local_container_installation_runs_manifest_smoke_test(mock_run, _mock_w
 
     result = service.test_installation(install_result["installation"]["installation_id"])
 
-    assert result["test"]["success"] is True
+    assert result["test"]["success"] is not required_output
+    if required_output:
+        assert "File output 'report' must name a file under /outputs." in result["test"]["error"]
     assert result["test"]["phase"] == "smoke_test"
     docker_run = mock_run.call_args_list[-1].args[0]
     assert docker_run[:4] == ["/usr/bin/docker", "run", "--rm", "--network"]
@@ -914,7 +993,7 @@ def test_install_retry_is_idempotent_and_missing_smoke_test_is_skipped(mock_run,
     retry = service.install_component(payload, user=user)
     assert first["installation"]["installation_id"] == retry["installation"]["installation_id"]
     assert retry["reused"] is True
-    assert mock_run.call_count == 1
+    assert mock_run.call_count == 3
     with pytest.raises(OperationConflict):
         service.install_component({**payload, "container_image": "different:tag"}, user=user)
     result = service.test_installation(first["installation"]["installation_id"])
@@ -953,3 +1032,43 @@ def test_interrupted_remote_install_reconciles_without_reposting(flask_app):
     retry = service.install_component(payload, user=user)
     assert retry['reused'] is True
     assert flask_app.fake_hpc_client.post.call_count == 2
+
+
+@pytest.mark.parametrize("component,recipe", [
+    ("image_metadata_extractor", "zenodo_image_metadata_extractor"),
+    ("historic_prepare", "historic_prepare_images"),
+])
+def test_install_profile_merge_seeds_recipes_immediately_and_preserves_pins(flask_app, component, recipe):
+    from copy import deepcopy
+    from services.registry_lock import OperationConflict
+
+    flask_app.config.update(WEBHDP_DEPLOYMENT_MODE="local", WEBHDP_ALLOW_LOCAL_HDP_COMPONENTS=True)
+    native = flask_app.native_pipeline_service
+    source = REPO_ROOT / "external_code" / component
+    raw = yaml.safe_load((source / "component.yaml").read_text())
+    imported = native.import_component_from_manifest(raw)
+    assert PipelineDefinition.query.filter_by(identifier=recipe).first() is None
+    installed = deepcopy(imported["manifest"])
+    for profile in installed["execution"]["profiles"]:
+        if profile.get("runtime") == "docker":
+            profile["image"] = "sha256:" + "a" * 64
+    arguments = {"component_key": component, "version": raw["metadata"]["version"],
+                 "source_path": str(source), "source_type": "local_container_installed"}
+    installer = HpcComponentInstallerService()
+    installer._register_installed_component(installed, **arguments)
+    assert PipelineDefinition.query.filter_by(identifier=recipe).first() is not None
+    saved = native.get_pipeline(recipe)
+    edited = native.create_pipeline_version_from_config(recipe, {**saved["config"], "name": "Operator recipe"})
+    count = PipelineVersion.query.count()
+    installer._register_installed_component(installed, **arguments)
+    current = native.get_pipeline(recipe)
+    assert current["active_version"] == edited["active_version"]
+    assert current["config"]["name"] == "Operator recipe"
+    assert PipelineVersion.query.count() == count
+    changed = deepcopy(installed)
+    for profile in changed["execution"]["profiles"]:
+        if profile.get("runtime") == "docker":
+            profile["image"] = "sha256:" + "b" * 64
+    with pytest.raises(OperationConflict, match="saved pipeline"):
+        installer._register_installed_component(changed, **arguments)
+    assert native.get_pipeline(recipe)["active_version"] == edited["active_version"]

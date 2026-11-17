@@ -1,0 +1,142 @@
+metadata:
+  name: mtl_metadata_extractor
+  label: MTL Metadata Extractor
+  description: Extract material properties and texture references from OBJ/MTL using
+    the published Zenodo processor. Bundle referenced material and texture files in
+    a ZIP.
+  tags:
+  - metadata
+  - zenodo-community
+  category: Metadata Extraction
+  version: 1.0.1
+  status: alpha
+  component_schema: 0.1.0-alpha.1
+  license:
+    type: GPL-3.0-or-later
+distribution:
+  tier: external_installable
+  bundled_with_webhdp: false
+  installation_scope:
+  - local_container
+  - hpc_sif
+inputs:
+- name: input_file
+  label: Model or material file
+  type: file_path
+  required: true
+outputs:
+- name: metadata_report
+  label: Metadata report
+  type: file_path
+  extensions:
+  - .json
+  required: true
+parameter_groups:
+- title: Extraction settings
+  parameters:
+  - name: validate_texture_files
+    label: Check texture files
+    description: Resolve and check referenced textures within the staged input bundle.
+    type: boolean
+    default: true
+  - name: include_material_analysis
+    label: Analyze materials
+    description: Summarize material properties and texture availability.
+    type: boolean
+    default: true
+  - name: search_texture_directories
+    label: Search texture folders
+    description: Search common texture folders within the staged input bundle.
+    type: boolean
+    default: true
+  - name: parse_advanced_properties
+    label: Parse advanced properties
+    description: Attempt to parse additional material properties.
+    type: boolean
+    default: true
+execution:
+  timeout: 300
+  profiles:
+  - id: local_docker
+    adapter: container_cli
+    runtime: docker
+    image: webhdp-zenodo-components:local
+    entrypoint:
+    - python
+    - /app/component_runner.py
+    - mtl_metadata_extractor
+    config:
+      webhdp_contract: true
+      network: none
+    resources:
+      gpu_count: 0
+      cpus: 2
+      memory_mb: 4096
+  - id: hpc_singularity
+    adapter: hpc_link
+    handler: generic_singularity_component
+    runtime: singularity
+    image: ''
+    entrypoint:
+    - python
+    - /app/component_runner.py
+    - mtl_metadata_extractor
+    resources:
+      gpu_count: 0
+      cpus: 2
+      memory_mb: 4096
+compatibility:
+  playground:
+    enabled: true
+install:
+  strategies:
+  - id: local_container
+    runtime: docker
+    profile: local_docker
+    image: webhdp-zenodo-components:local
+  - id: hpc_sif
+    runtime: singularity
+    profile: hpc_singularity
+  test: &id001
+    description: Measured metadata fixture using the published processor; assertions
+      are verified by the runtime regression suite.
+    files:
+    - name: material-model.zip
+      content_base64: UEsDBBQAAAAAAEeoZl05qrGASgAAAEoAAAAJAAAAbW9kZWwub2JqbXRsbGliIG1hdGVyaWFscy9maXh0dXJlLm10bAp2IDAgMCAwCnYgMSAwIDAKdiAwIDEgMAp1c2VtdGwgc3RvbmUKZiAxIDIgMwpQSwMEFAAAAAAAR6hmXbkX4ydtAAAAbQAAABUAAABtYXRlcmlhbHMvZml4dHVyZS5tdGxuZXdtdGwgc3RvbmUKS2QgMC44IDAuNyAwLjYKTnMgMjAKbWFwX0tkIC1zIDEgMSAxIC4uL3RleHR1cmVzL2RpZmZ1c2UgdGV4dHVyZS5wbmcKbmV3bXRsIG1ldGFsClBtIDAuOQpQciAwLjIKUEsDBBQAAAAAAEeoZl3xkc8zSwAAAEsAAAAcAAAAdGV4dHVyZXMvZGlmZnVzZSB0ZXh0dXJlLnBuZ4lQTkcNChoKAAAADUlIRFIAAAAEAAAABAgCAAAAJpMJKQAAABJJREFUeJxj/L+UAQ6YEEx8HABUCwGshNd/TgAAAABJRU5ErkJgglBLAQIUAxQAAAAAAEeoZl05qrGASgAAAEoAAAAJAAAAAAAAAAAAAACAAQAAAABtb2RlbC5vYmpQSwECFAMUAAAAAABHqGZduRfjJ20AAABtAAAAFQAAAAAAAAAAAAAAgAFxAAAAbWF0ZXJpYWxzL2ZpeHR1cmUubXRsUEsBAhQDFAAAAAAAR6hmXfGRzzNLAAAASwAAABwAAAAAAAAAAAAAAIABEQEAAHRleHR1cmVzL2RpZmZ1c2UgdGV4dHVyZS5wbmdQSwUGAAAAAAMAAwDEAAAAlgEAAAAA
+    inputs:
+      input_file: material-model.zip
+    parameters: {}
+hpc:
+  install:
+    runtime: singularity
+    sif_required: true
+  test: *id001
+ui:
+  playground:
+    fields:
+      input_file:
+        widget: file_picker
+        accept_extensions:
+        - .obj
+        - .mtl
+        - .zip
+      validate_texture_files:
+        widget: checkbox
+      include_material_analysis:
+        widget: checkbox
+      search_texture_directories:
+        widget: checkbox
+      parse_advanced_properties:
+        widget: checkbox
+    result:
+      artifact_views:
+      - id: metadata-json
+        label: Metadata report
+        widget: file_download
+        extensions:
+        - .json
+      show_result_json: true
+      show_logs: true
+sources:
+  record: https://zenodo.org/records/16993305
+  doi: 10.5281/zenodo.16993305

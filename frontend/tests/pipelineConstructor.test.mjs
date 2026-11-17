@@ -124,6 +124,14 @@ test('buildDefaultBindingForField prefers a unique compatible prior output', () 
   })
 })
 
+test('an explicit-binding file input stays unbound even with a compatible prior output', () => {
+  const field = { name: 'options_file', type: 'file_path', bind_source_by_default: false }
+  const earlierSteps = [{ id: 'convert', outputs: [{ name: 'output_path', type: 'file_path' }] }]
+
+  expect(buildDefaultBindingForField(field, [])).toMatchObject({ enabled: false, target: 'options_file' })
+  expect(buildDefaultBindingForField(field, earlierSteps)).toMatchObject({ enabled: false, target: 'options_file' })
+})
+
 test('getCompatibleSourceOutputOptions filters outputs by input compatibility', () => {
   const outputs = [
     { name: 'rendered_model', type: 'file_path', label: 'Rendered Model' },

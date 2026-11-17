@@ -1,0 +1,138 @@
+metadata:
+  name: historic_georeference
+  label: Historic Control-Point Georeferencing
+  description: Fit a measured similarity transform from paired 3D control points,
+    check residuals and transform the sparse cameras and points.
+  tags:
+  - historic-reconstruction
+  - photogrammetry
+  - colmap
+  category: Historic Reconstruction
+  version: 1.0.1
+  status: alpha
+  component_schema: 0.1.0-alpha.1
+distribution:
+  tier: external_installable
+  bundled_with_webhdp: false
+  installation_scope:
+  - local_container
+  - hpc_sif
+inputs:
+- name: input_file
+  label: Reconstruction ZIP
+  type: file_path
+  required: true
+- name: control_points_file
+  label: Paired 3D control points (JSON)
+  type: file_path
+  required: false
+  bind_source_by_default: false
+  description: Supply paired source and target 3D points here or include control_points.json
+    in the reconstruction ZIP.
+outputs:
+- name: reconstruction
+  label: Reconstruction
+  type: file_path
+  extensions:
+  - .zip
+  required: true
+- name: point_cloud
+  label: Point cloud
+  type: file_path
+  extensions:
+  - .ply
+  required: true
+- name: transform
+  label: Transform
+  type: file_path
+  extensions:
+  - .json
+  required: true
+- name: report
+  label: Report
+  type: file_path
+  extensions:
+  - .json
+  required: true
+parameter_groups:
+- title: Processing settings
+  parameters:
+  - name: max_error
+    label: Maximum control-point error (target units)
+    type: number
+    default: 1
+    minimum: 1.0e-09
+    maximum: 1000000
+  - name: crs
+    label: Target coordinate-system label
+    type: string
+    default: local
+execution:
+  timeout: 7200
+  profiles:
+  - id: local_docker
+    adapter: container_cli
+    runtime: docker
+    image: webhdp-historic-reconstruction:local
+    entrypoint:
+    - python
+    - /app/component_runner.py
+    - georeference
+    config:
+      webhdp_contract: true
+      network: none
+    resources:
+      gpu_count: 0
+      cpus: 4
+      memory_mb: 8192
+  - id: hpc_singularity
+    adapter: hpc_link
+    handler: generic_singularity_component
+    runtime: singularity
+    image: ''
+    entrypoint:
+    - python
+    - /app/component_runner.py
+    - georeference
+    resources:
+      gpu_count: 0
+      cpus: 2
+      memory_mb: 8192
+compatibility:
+  playground:
+    enabled: true
+install:
+  strategies:
+  - id: local_container
+    runtime: docker
+    profile: local_docker
+    image: webhdp-historic-reconstruction:local
+  - id: hpc_sif
+    runtime: singularity
+    profile: hpc_singularity
+hpc:
+  install:
+    runtime: singularity
+    sif_required: true
+ui:
+  playground:
+    fields:
+      input_file:
+        widget: file_picker
+        accept_extensions:
+        - .zip
+      control_points_file:
+        widget: file_picker
+        accept_extensions:
+        - .json
+    result:
+      artifact_views:
+      - id: results
+        label: Scientific artifacts and reports
+        widget: file_download
+        extensions:
+        - .json
+        - .ply
+        - .zip
+      show_result_json: true
+      show_logs: true

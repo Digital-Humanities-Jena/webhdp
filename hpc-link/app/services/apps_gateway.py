@@ -5,6 +5,7 @@ import asyncio
 import base64
 import binascii
 import ipaddress
+import hashlib
 import json
 import os
 import re
@@ -908,47 +909,64 @@ echo "{session.port}" > {session.remote_session_dir}/port.txt
         return False
 
     @staticmethod
-    def _reject_private_resolved_addresses(host: str, port: int) -> None:
+    def _reject_private_resolved_addresses(host: str, port: int) -> list[str]:
         try:
             address_info = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
         except socket.gaierror as exc:
             raise HTTPException(status_code=400, detail=f"Could not resolve staging URL host '{host}'") from exc
 
+        addresses = []
         for item in address_info:
             ip_text = item[4][0]
             try:
                 ip = ipaddress.ip_address(ip_text)
             except ValueError:
                 raise HTTPException(status_code=400, detail=f"Staging URL host resolved to an invalid address: {ip_text}")
-            if (
-                ip.is_private
-                or ip.is_loopback
-                or ip.is_link_local
-                or ip.is_multicast
-                or ip.is_reserved
-                or ip.is_unspecified
-            ):
+            if not ip.is_global or ip.is_multicast or ip.is_reserved or '%' in ip_text:
                 raise HTTPException(status_code=400, detail="Staging URL resolves to a non-public network address")
+            addresses.append(f'[{ip}]' if ip.version == 6 else str(ip))
+        if not addresses:
+            raise HTTPException(status_code=400, detail="Staging URL has no public network address")
+        return list(dict.fromkeys(addresses))
 
     def _validate_stage_url(self, url: str) -> str:
-        parsed = urlparse(str(url or "").strip())
-        if parsed.scheme != "https" or not parsed.hostname:
-            raise HTTPException(status_code=400, detail="Cloud staging URLs must use HTTPS and include a hostname")
+        return self._validated_stage_target(url)[0]
+
+    def _validated_stage_target(self, url: str) -> tuple[str, str, list[str]]:
+        value = str(url or '').strip()
+        try:
+            parsed = urlparse(value)
+            port = parsed.port
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid cloud staging URL") from exc
+        if (parsed.scheme != 'https' or not parsed.hostname or port not in (None, 443)
+                or parsed.username is not None or parsed.password is not None or parsed.fragment
+                or any(ord(c) <= 32 or ord(c) == 127 for c in value) or '\\' in value):
+            raise HTTPException(status_code=400, detail="Cloud staging URLs must use HTTPS on port 443 with no user information or fragment")
         host = parsed.hostname.lower()
+        if not re.fullmatch(r'[a-z0-9.-]+', host):
+            raise HTTPException(status_code=400, detail="Invalid cloud staging hostname")
         if not self._host_matches_allowlist(host, self._allowed_stage_hosts()):
             raise HTTPException(status_code=400, detail=f"Cloud staging URL host is not allowed: {host}")
-        self._reject_private_resolved_addresses(host, parsed.port or 443)
-        return str(url).strip()
+        return value, host, self._reject_private_resolved_addresses(host, 443)
 
     @staticmethod
     def _max_bytes_arg(value: int) -> int:
         return max(1, int(value))
 
     def _validate_sif_download_url(self, url: str) -> str:
-        safe_url = self._validate_stage_url(url)
-        if not safe_url.lower().split("?", 1)[0].endswith(".sif"):
+        value = str(url or '').strip()
+        try:
+            parsed = urlparse(value)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid SIF source") from exc
+        if parsed.params or ";" in parsed.path or "#" in value:
+            raise HTTPException(status_code=400, detail="Use a public HTTPS SIF URL without credentials or an absolute HPC path")
+        if parsed.query and not (parsed.hostname in {"zenodo.org", "sandbox.zenodo.org"} and parsed.query == "download=1"):
+            raise HTTPException(status_code=400, detail="SIF URLs cannot contain query parameters. Stage private SIFs on HPC and use the absolute path")
+        if not parsed.path.lower().endswith(".sif"):
             raise HTTPException(status_code=400, detail="Only HTTPS .sif URLs are supported")
-        return safe_url
+        return self._validate_stage_url(value)
 
     def _render_pi3_hold_batch_script(self, session: _Pi3Session) -> str:
         cuda_module_block = ""
@@ -2180,19 +2198,29 @@ while true; do sleep 120; done
         if session.reservation_id is not None:
             return await self._get_adopted_session_status(session, actor)
         scheduler_state, scheduler_reason = await self._scheduler_state_for_job(session.job_id)
-        remaining_seconds = self._remaining_seconds(session.expires_at)
         if scheduler_state == "RUNNING":
             session.status = "running"
         elif scheduler_state in ("PENDING", "CONFIGURING", "COMPLETING"):
             session.status = "queued"
-        elif scheduler_state in TERMINAL_STATES or remaining_seconds == 0:
+        elif scheduler_state in TERMINAL_STATES:
             session.status = "finished"
         else:
             session.status = "unknown"
         node_stdout, _, _ = await ssh_manager.run_command(
-            f"cat {shlex.quote(session.remote_session_dir + '/node.txt')} 2>/dev/null || true",
+            f"cat {shlex.quote(session.remote_session_dir + '/node.txt')} "
+            f"{shlex.quote(session.remote_session_dir + '/started_at.txt')} 2>/dev/null || true",
             timeout=10,
         )
+        node_lines = node_stdout.strip().splitlines()
+        if len(node_lines) > 1:
+            try:
+                started_at = self._parse_datetime(node_lines[1])
+                # Walltime begins when the hold job actually starts, not when
+                # it joins the scheduler queue. Only Slurm decides termination.
+                session.expires_at = started_at + timedelta(minutes=session.duration_minutes)
+            except ValueError:
+                pass
+        remaining_seconds = self._remaining_seconds(session.expires_at)
         async with self._lock:
             self._webhdp_sessions[session.session_id] = session
             self._save_webhdp_sessions_to_registry()
@@ -2205,7 +2233,7 @@ while true; do sleep 120; done
             status=session.status,
             scheduler_state=scheduler_state,
             scheduler_reason=scheduler_reason,
-            node_name=node_stdout.strip() or None,
+            node_name=node_lines[0] if node_lines else None,
             created_at=session.created_at,
             expires_at=session.expires_at,
             remaining_seconds=remaining_seconds,
@@ -2309,35 +2337,56 @@ while true; do sleep 120; done
         staged: list[dict[str, object]] = []
         for file_item in request.files:
             filename = self._sanitize_filename(file_item.name, "name")
-            stage_url = self._validate_stage_url(file_item.url)
-            relative_dir = str(file_item.relative_dir or "").strip().strip("/")
-            if ".." in PurePosixPath(relative_dir).parts:
-                raise HTTPException(status_code=400, detail="relative_dir must not contain traversal")
-            target_dir = f"{session.remote_input_dir}/{relative_dir}" if relative_dir else session.remote_input_dir
-            target_path = f"{target_dir}/{filename}"
-            command = (
-                "bash -lc "
-                + shlex.quote(
-                    f"mkdir -p {shlex.quote(target_dir)} && "
-                    f"curl -fL --proto '=https' --proto-redir '=https' --retry 3 --connect-timeout 20 "
-                    f"--max-filesize {max_file_bytes} "
-                    f"-o {shlex.quote(target_path)} {shlex.quote(stage_url)} && "
-                    f"stat -c%s {shlex.quote(target_path)}"
-                )
-            )
-            stdout, stderr, exit_code = await ssh_manager.run_command(command, timeout=7200)
-            if exit_code != 0:
-                await ssh_manager.run_command(f"rm -f {shlex.quote(target_path)}", timeout=20)
-                raise HTTPException(status_code=502, detail=f"Cloud staging failed for {filename}: {stderr or stdout}")
-            try:
-                size_bytes = int(stdout.strip().splitlines()[-1])
-            except (IndexError, ValueError):
-                size_bytes = 0
-            if size_bytes > max_file_bytes:
-                await ssh_manager.run_command(f"rm -f {shlex.quote(target_path)}", timeout=20)
-                raise HTTPException(status_code=413, detail=f"Staged file too large (max {max_file_bytes} bytes)")
+            relative = (PurePosixPath(str(file_item.relative_dir or '').strip().strip('/')) / filename).as_posix()
+            target_path = self._staged_input_target(session, relative)
+            temporary = target_path + '.part-' + uuid.uuid4().hex
+            async with await ssh_manager.open_sftp() as sftp:
+                await self._prepare_staged_input_parent(sftp, session, relative)
+                try:
+                    async with sftp.open(temporary, 'xb', attrs=asyncssh.SFTPAttrs(permissions=0o600)):
+                        pass
+                    await self._fetch_webhdp_cloud_file(file_item.url, temporary, max_file_bytes)
+                    attrs = await sftp.lstat(temporary)
+                    if not stat_module.S_ISREG(attrs.permissions or 0):
+                        raise HTTPException(status_code=502, detail='Cloud staging did not produce a regular file')
+                    size_bytes = attrs.size or 0
+                    if size_bytes > max_file_bytes:
+                        raise HTTPException(status_code=413, detail=f'Staged file too large (max {max_file_bytes} bytes)')
+                    await sftp.posix_rename(temporary, target_path)
+                finally:
+                    try:
+                        await sftp.remove(temporary)
+                    except asyncssh.SFTPNoSuchFile:
+                        pass
             staged.append({"name": filename, "remote_path": target_path, "size_bytes": size_bytes})
         return WebHdpCloudStageResponse(session_id=session_id, staged_files=staged)
+
+    async def _fetch_webhdp_cloud_file(self, url: str, temporary: str, max_file_bytes: int) -> None:
+        # Revalidate and pin every redirect. The login node's DNS (and proxy
+        # environment) must not replace the address checked by the gateway.
+        for _ in range(6):
+            value, host, addresses = await asyncio.to_thread(self._validated_stage_target, url)
+            config = 'url = "' + value.replace('"', '\\"') + '"\n'
+            pin = shlex.quote(f"{host}:443:{','.join(addresses)}")
+            command = (
+                "curl -q --config - --silent --globoff --noproxy '*' --proto '=https' "
+                f"--resolve {pin} --connect-timeout 20 --max-time 1200 "
+                f"--max-filesize {max_file_bytes} --output {shlex.quote(temporary)} "
+                "--write-out '%{http_code}\\n%{redirect_url}\\n'"
+            )
+            stdout, _, code = await ssh_manager.run_command(command, timeout=1210, stdin=config)
+            if code == 63:
+                raise HTTPException(status_code=413, detail=f'Staged file too large (max {max_file_bytes} bytes)')
+            status, _, redirect = stdout.partition('\n')
+            if code or not status.isdecimal():
+                raise HTTPException(status_code=502, detail='Cloud staging download failed')
+            if 200 <= int(status) < 300:
+                return
+            if 300 <= int(status) < 400 and redirect.strip():
+                url = redirect.strip()
+                continue
+            raise HTTPException(status_code=502, detail='Cloud staging host did not return a file')
+        raise HTTPException(status_code=502, detail='Cloud staging exceeded the redirect limit')
 
     async def stage_webhdp_uploaded_files(
         self,
@@ -2351,58 +2400,56 @@ while true; do sleep 120; done
             raise HTTPException(status_code=404, detail="WebHDP session not found")
         self._ensure_owner_access(session.owner_username, actor)
 
+        max_files = max(1, int(self._settings.webhdp_cloud_stage_max_files))
+        max_file_bytes = self._max_bytes_arg(self._settings.webhdp_cloud_stage_max_file_bytes)
+        if len(request.files) > max_files:
+            raise HTTPException(status_code=413, detail=f'Too many files to stage (max {max_files})')
         staged: list[dict[str, object]] = []
-        async with await ssh_manager.open_sftp() as sftp:
-            for file_item in request.files:
-                filename = self._sanitize_filename(file_item.name, "name")
-                relative_dir = str(file_item.relative_dir or "").strip().strip("/")
-                if ".." in PurePosixPath(relative_dir).parts:
-                    raise HTTPException(status_code=400, detail="relative_dir must not contain traversal")
-                try:
-                    data = base64.b64decode(file_item.content_base64, validate=True)
-                except (binascii.Error, ValueError) as exc:
-                    raise HTTPException(status_code=400, detail=f"Invalid base64 payload for {filename}") from exc
+        for file_item in request.files:
+            filename = self._sanitize_filename(file_item.name, "name")
+            if len(file_item.content_base64) > 4 * ((max_file_bytes + 2) // 3):
+                raise HTTPException(status_code=413, detail='Staged file exceeds the file limit')
+            try:
+                data = base64.b64decode(file_item.content_base64, validate=True)
+            except (binascii.Error, ValueError) as exc:
+                raise HTTPException(status_code=400, detail=f"Invalid base64 payload for {filename}") from exc
 
-                target_dir = f"{session.remote_input_dir}/{relative_dir}" if relative_dir else session.remote_input_dir
-                target_path = f"{target_dir}/{filename}"
-                await sftp.makedirs(target_dir, exist_ok=True)
-                async with sftp.open(target_path, "wb") as handle:
-                    await handle.write(data)
-                staged.append({"name": filename, "remote_path": target_path, "size_bytes": len(data)})
+            async def chunks():
+                yield data
+
+            relative = (PurePosixPath(str(file_item.relative_dir or '').strip().strip('/')) / filename).as_posix()
+            staged.append(await self.stream_webhdp_file(session_id, relative, chunks(), actor, expected_size=len(data)))
 
         return WebHdpCloudStageResponse(session_id=session_id, staged_files=staged)
 
     async def stream_webhdp_file(self, session_id, path, chunks, actor, *, expected_size=None):
         """Atomically stage one owned input, preserving relative directories."""
-        from app.security import validate_path
         async with self._lock:
             session = self._webhdp_sessions.get(session_id)
         if session is None:
             raise HTTPException(status_code=404, detail="WebHDP session not found")
         self._ensure_owner_access(session.owner_username, actor)
-        if not path or PurePosixPath(path).is_absolute() or ".." in PurePosixPath(path).parts:
-            raise HTTPException(status_code=400, detail="A safe relative input path is required")
-        root = session.remote_input_dir
-        target = validate_path(f"{root}/{path}", base_path=root)
+        target = self._staged_input_target(session, path)
         temporary = target + ".part-" + uuid.uuid4().hex
         size = 0
-        async with await ssh_manager.open_sftp() as sftp:
-            parent = root
-            for part in PurePosixPath(path).parts[:-1]:
-                parent += "/" + part
-                try:
-                    attrs = await sftp.lstat(parent)
-                except asyncssh.SFTPNoSuchFile:
-                    await sftp.mkdir(parent)
-                    attrs = await sftp.lstat(parent)
-                if not stat_module.S_ISDIR(attrs.permissions or 0):
-                    raise HTTPException(status_code=400, detail="Input parent must be a directory, not a link")
+        max_file_bytes = self._max_bytes_arg(self._settings.webhdp_cloud_stage_max_file_bytes)
+        if expected_size is not None:
             try:
-                async with sftp.open(temporary, "wb") as handle:
+                expected_size = int(expected_size)
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(status_code=400, detail='Invalid file length') from exc
+            if not 0 <= expected_size <= max_file_bytes:
+                raise HTTPException(status_code=413, detail='Staged file exceeds the file limit')
+        async with await ssh_manager.open_sftp() as sftp:
+            await self._prepare_staged_input_parent(sftp, session, path)
+            try:
+                async with sftp.open(temporary, "xb", attrs=asyncssh.SFTPAttrs(permissions=0o600)) as handle:
                     async for chunk in chunks:
-                        await handle.write(chunk)
                         size += len(chunk)
-                if expected_size is not None and size != int(expected_size):
+                        if size > max_file_bytes:
+                            raise HTTPException(status_code=413, detail='Staged file exceeds the file limit')
+                        await handle.write(chunk)
+                if expected_size is not None and size != expected_size:
                     raise HTTPException(status_code=400, detail="Incomplete file upload")
                 await sftp.posix_rename(temporary, target)
             except BaseException:
@@ -2412,6 +2459,34 @@ while true; do sleep 120; done
                     pass
                 raise
         return {"name": PurePosixPath(path).name, "remote_path": target, "size_bytes": size}
+
+    @staticmethod
+    def _staged_input_target(session: _WebHdpSession, path: str) -> str:
+        from app.security import validate_path
+        relative = PurePosixPath(path)
+        if not relative.parts or relative.is_absolute() or '..' in relative.parts or '\\' in path:
+            raise HTTPException(status_code=400, detail='A safe relative input path is required')
+        root = session.remote_input_dir
+        return validate_path(f'{root}/{relative}', base_path=root)
+
+    @staticmethod
+    async def _prepare_staged_input_parent(sftp, session: _WebHdpSession, path: str) -> None:
+        parent = session.remote_input_dir
+        attrs = await sftp.lstat(parent)
+        if not stat_module.S_ISDIR(attrs.permissions or 0):
+            raise HTTPException(status_code=400, detail='Input root must be a directory, not a link')
+        for part in PurePosixPath(path).parts[:-1]:
+            parent += '/' + part
+            try:
+                attrs = await sftp.lstat(parent)
+            except asyncssh.SFTPNoSuchFile:
+                try:
+                    await sftp.mkdir(parent, attrs=asyncssh.SFTPAttrs(permissions=0o700))
+                except asyncssh.SFTPFileAlreadyExists:
+                    pass
+                attrs = await sftp.lstat(parent)
+            if not stat_module.S_ISDIR(attrs.permissions or 0):
+                raise HTTPException(status_code=400, detail='Input parent must be a directory, not a link')
 
     async def preflight_webhdp_components(
         self,
@@ -2466,14 +2541,16 @@ while true; do sleep 120; done
             f"python3 {shlex.quote(self._settings.webhdp_component_runner)}"
         )
 
-    async def _run_in_webhdp_allocation(self, session: _WebHdpSession, inner_cmd: str, *, timeout: int | float = 7200):
+    async def _run_in_webhdp_allocation(self, session: _WebHdpSession, inner_cmd: str, *, timeout: int | float = 7200,
+                                       stdin: str | None = None):
         if session.reservation_id is not None:
-            return await self._run_in_adopted_allocation(session, inner_cmd, timeout)
+            return await self._run_in_adopted_allocation(session, inner_cmd, timeout, stdin=stdin)
         command = (
             f"srun --jobid={shlex.quote(session.job_id)} --overlap --ntasks=1 --nodes=1 "
             f"bash -lc {shlex.quote(inner_cmd)}"
         )
-        return await ssh_manager.run_command(command, timeout=timeout)
+        options = {'stdin': stdin} if stdin is not None else {}
+        return await ssh_manager.run_command(command, timeout=timeout, **options)
 
     @staticmethod
     def _adopted_step_name(session: _WebHdpSession) -> str:
@@ -2501,7 +2578,8 @@ while true; do sleep 120; done
         marker = self._adopted_step_name(session)
         return any(line.strip().split("|", maxsplit=1)[-1] == marker for line in stdout.splitlines())
 
-    async def _run_in_adopted_allocation(self, session: _WebHdpSession, inner_cmd: str, timeout: int | float):
+    async def _run_in_adopted_allocation(self, session: _WebHdpSession, inner_cmd: str, timeout: int | float,
+                                         *, stdin: str | None = None):
         async with self._lock:
             if self._webhdp_sessions.get(session.session_id) is not session:
                 raise HTTPException(status_code=404, detail="WebHDP session was detached")
@@ -2517,7 +2595,8 @@ while true; do sleep 120; done
         detached_marker = shlex.quote(session.remote_session_dir + "/.claim-detached")
         guarded = self._adopted_guard_command(session, f"test ! -e {detached_marker} || exit 76; exec {command}")
         try:
-            result = await ssh_manager.run_command(guarded, timeout=timeout)
+            options = {'stdin': stdin} if stdin is not None else {}
+            result = await ssh_manager.run_command(guarded, timeout=timeout, **options)
             if result[2] == 75:
                 raise HTTPException(status_code=409, detail="This WebHDP reservation already has an active job step")
             if result[2] == 76:
@@ -2586,7 +2665,6 @@ while true; do sleep 120; done
             raise HTTPException(status_code=500, detail=f"Component registry is invalid for {key}:{safe_version}") from exc
 
         manifest_path = str(registry.get("manifest_path") or f"{install_dir}/component.yaml")
-        sif_path = self._ensure_remote_sif_path(str(registry.get("sif_remote_path") or f"{install_dir}/component.sif"))
         manifest_stdout, manifest_stderr, manifest_exit = await ssh_manager.run_command(
             f"cat {shlex.quote(manifest_path)}",
             timeout=30,
@@ -2600,16 +2678,27 @@ while true; do sleep 120; done
 
         profile = {}
         for candidate in (manifest.get("execution") or {}).get("profiles") or []:
-            if isinstance(candidate, dict) and candidate.get("handler") == "generic_singularity_component":
+            if isinstance(candidate, dict) and candidate.get("handler") in {"generic_singularity_component", "trusted_host_component"}:
                 profile = dict(candidate)
                 break
         if not profile:
-            raise HTTPException(status_code=400, detail=f"Component '{key}:{safe_version}' has no runnable Singularity profile")
+            raise HTTPException(status_code=400, detail=f"Component '{key}:{safe_version}' has no runnable installed profile")
         if not isinstance(profile.get("entrypoint"), list) or not profile["entrypoint"]:
             raise HTTPException(status_code=400, detail=f"Component '{key}:{safe_version}' has no entrypoint")
-        profile["image"] = sif_path
-        profile["sif_remote_path"] = sif_path
-        profile["sif_sha256"] = registry.get("sif_sha256")
+        sif_path = None
+        if profile.get('handler') == 'trusted_host_component':
+            # Host execution is reserved for operator-installed registry entries.
+            # The public install API remains SIF-only; caller profiles are ignored.
+            expected = registry.get('manifest_sha256')
+            if not expected or hashlib.sha256(manifest_stdout.encode()).hexdigest() != expected:
+                raise HTTPException(status_code=409, detail='Trusted host manifest checksum could not be verified')
+            if not str(profile['entrypoint'][0]).startswith('/'):
+                raise HTTPException(status_code=400, detail='Trusted host entrypoint must be absolute')
+        else:
+            sif_path = self._ensure_remote_sif_path(str(registry.get('sif_remote_path') or f'{install_dir}/component.sif'))
+            profile['image'] = sif_path
+            profile['sif_remote_path'] = sif_path
+            profile['sif_sha256'] = registry.get('sif_sha256')
         return {
             "component_key": key,
             "component_version": safe_version,
@@ -2624,6 +2713,11 @@ while true; do sleep 120; done
         if code != 0:
             raise HTTPException(status_code=404, detail="Installation is not yet confirmed")
         registry = json.loads(stdout)
+        if registry.get('manifest_sha256') and not registry.get('sif_remote_path'):
+            runtime = await self._load_webhdp_component_profile(component_key, version)
+            if runtime['profile'].get('handler') != 'trusted_host_component':
+                raise HTTPException(status_code=409, detail='Installed host runtime could not be verified')
+            return {**registry, 'remote_install_dir': install_dir, 'runtime': 'trusted_host_component', 'status': 'installed'}
         sif_path = self._ensure_remote_sif_path(registry["sif_remote_path"])
         stdout, stderr, code = await ssh_manager.run_command(f"sha256sum {shlex.quote(sif_path)} | awk '{{print $1}}'", timeout=300)
         if code != 0 or stdout.strip() != registry.get("sif_sha256"):
@@ -2637,6 +2731,9 @@ while true; do sleep 120; done
     ) -> dict[str, Any]:
         component_key = self._safe_component_segment(request.component_key, "component_key")
         version = self._safe_component_segment(request.version, "version")
+        if any(profile.get('handler') == 'trusted_host_component'
+               for profile in (request.manifest.get('execution') or {}).get('profiles', []) if isinstance(profile, dict)):
+            raise HTTPException(status_code=400, detail='Host runtime profiles require operator installation; this API accepts container components only')
         checks: dict[str, Any] = {
             "component_key": {"success": True, "value": component_key},
             "version": {"success": True, "value": version},
@@ -2939,7 +3036,9 @@ while true; do sleep 120; done
         stdout, stderr, exit_code = await self._run_in_webhdp_allocation(
             session,
             inner_cmd,
-            timeout=request.timeout_seconds or 7200,
+            # Leave the component runner time to stop its process group and
+            # write the failure response before the SSH transport expires.
+            timeout=(request.timeout_seconds or 7200) + 30,
         )
         result: dict[str, Any] = {
             "success": exit_code == 0,
@@ -2979,16 +3078,16 @@ while true; do sleep 120; done
     @staticmethod
     def _ensure_webhdp_session_path(session: _WebHdpSession, remote_path: str) -> str:
         path = str(remote_path or "").strip()
-        root = session.remote_session_dir.rstrip("/") + "/"
+        root = session.remote_output_dir.rstrip("/") + "/"
         if not path.startswith(root):
-            raise HTTPException(status_code=400, detail="Zenodo upload paths must stay inside the WebHDP session workspace")
+            raise HTTPException(status_code=400, detail="Zenodo upload paths must stay inside the WebHDP output workspace")
         if "\x00" in path or ".." in PurePosixPath(path).parts:
             raise HTTPException(status_code=400, detail="Zenodo upload path is invalid")
         return path
 
     async def _ensure_webhdp_session_regular_file(self, sftp, session: _WebHdpSession, remote_path: str) -> tuple[str, int]:
         path = self._ensure_webhdp_session_path(session, remote_path)
-        root = session.remote_session_dir.rstrip("/") + "/"
+        root = session.remote_output_dir.rstrip("/") + "/"
         try:
             attrs = await sftp.lstat(path)
         except Exception as exc:
@@ -2999,9 +3098,7 @@ while true; do sleep 120; done
         if not stat_module.S_ISREG(permissions):
             raise HTTPException(status_code=400, detail="Zenodo upload path must be a regular file")
         real_path = await sftp.realpath(path)
-        if not isinstance(real_path, str):
-            real_path = path
-        if real_path != session.remote_session_dir and not real_path.startswith(root):
+        if not isinstance(real_path, str) or not real_path.startswith(root) or real_path != path:
             raise HTTPException(status_code=400, detail="Zenodo upload file realpath escapes the WebHDP session workspace")
         return real_path, attrs.size or 0
 
@@ -3018,68 +3115,63 @@ except Exception as exc:
     raise RuntimeError(f"Python requests package is required for Zenodo upload: {exc}") from exc
 
 
-def _json_response(response):
-    try:
-        return response.json()
-    except Exception:
-        return {"text": response.text[:2000]}
-
-
 def main():
-    request_path = os.environ["WEBHDP_ZENODO_UPLOAD_REQUEST"]
-    response_path = os.environ["WEBHDP_ZENODO_UPLOAD_RESPONSE"]
-    payload = json.load(open(request_path, "r", encoding="utf-8"))
+    payload = json.load(sys.stdin)
     token = payload["access_token"]
     api_base = payload["api_base"].rstrip("/")
     environment = payload.get("environment") or "sandbox"
     session = requests.Session()
-    params = {"access_token": token}
+    session.trust_env = False
+    session.headers["Authorization"] = f"Bearer {token}"
     deposition = {}
-    bucket_url = payload.get("bucket_url")
     deposition_id = payload.get("deposition_id")
 
-    if bucket_url:
-        deposition_id = str(deposition_id or "")
-    elif deposition_id:
+    if deposition_id:
         response = session.get(
             f"{api_base}/api/deposit/depositions/{deposition_id}",
-            params=params,
+            allow_redirects=False,
             timeout=60,
         )
-        response.raise_for_status()
+        if not 200 <= response.status_code < 300:
+            raise RuntimeError("Zenodo rejected the draft lookup")
         deposition = response.json()
         bucket_url = (deposition.get("links") or {}).get("bucket")
         deposition_id = str(deposition.get("id") or deposition_id)
     else:
         response = session.post(
             f"{api_base}/api/deposit/depositions",
-            params=params,
+            allow_redirects=False,
             json={"metadata": payload.get("metadata") or {}},
             timeout=60,
         )
-        response.raise_for_status()
+        if not 200 <= response.status_code < 300:
+            raise RuntimeError("Zenodo rejected the draft creation")
         deposition = response.json()
         deposition_id = str(deposition.get("id") or "")
         bucket_url = (deposition.get("links") or {}).get("bucket")
 
-    if not bucket_url:
-        raise RuntimeError("Zenodo draft response did not include a bucket URL")
+    bucket = urllib.parse.urlsplit(bucket_url or "")
+    expected_host = urllib.parse.urlsplit(api_base).netloc
+    if (bucket.scheme != "https" or bucket.netloc != expected_host or bucket.query or bucket.fragment
+            or not bucket.path.startswith("/api/files/")):
+        raise RuntimeError("Zenodo did not return an approved draft bucket URL")
 
     uploaded = []
     for item in payload.get("files") or []:
         remote_path = item["remote_path"]
         filename = item["name"]
         size_bytes = os.path.getsize(remote_path)
-        upload_url = bucket_url.rstrip("/") + "/" + urllib.parse.quote(filename)
+        upload_url = bucket_url.rstrip("/") + "/" + urllib.parse.quote(filename, safe="")
         with open(remote_path, "rb") as file_handle:
-            response = session.put(upload_url, params=params, data=file_handle, timeout=7200)
-        response.raise_for_status()
+            response = session.put(upload_url, allow_redirects=False, data=file_handle, timeout=7200)
+        if not 200 <= response.status_code < 300:
+            raise RuntimeError("Zenodo rejected an artifact upload")
         uploaded.append(
             {
                 "name": filename,
                 "remote_path": remote_path,
                 "size_bytes": size_bytes,
-                "response": _json_response(response),
+                "response": {"status": response.status_code},
             }
         )
 
@@ -3091,25 +3183,16 @@ def main():
         "uploaded_files": uploaded,
         "publish_requested": False,
     }
-    json.dump(result, open(response_path, "w", encoding="utf-8"), sort_keys=True)
+    print(json.dumps(result, sort_keys=True))
     return 0
 
 
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
-    except Exception as exc:
-        response_path = os.environ.get("WEBHDP_ZENODO_UPLOAD_RESPONSE")
-        result = {
-            "success": False,
-            "environment": "sandbox",
-            "uploaded_files": [],
-            "publish_requested": False,
-            "error": str(exc),
-        }
-        if response_path:
-            json.dump(result, open(response_path, "w", encoding="utf-8"), sort_keys=True)
-        raise
+    except Exception:
+        print(json.dumps({"success": False, "error": "Zenodo draft upload could not be completed"}))
+        raise SystemExit(1)
 '''
 
     async def upload_webhdp_zenodo_draft(
@@ -3129,6 +3212,8 @@ if __name__ == "__main__":
             raise HTTPException(status_code=400, detail="Production upload requires allow_production=true")
         if request.bucket_url:
             raise HTTPException(status_code=400, detail="bucket_url is resolved by Zenodo and cannot be supplied by clients")
+        if request.deposition_id is not None and not re.fullmatch(r'[1-9][0-9]{0,18}', str(request.deposition_id)):
+            raise HTTPException(status_code=400, detail='Invalid Zenodo deposition ID')
         status = await self.get_webhdp_session_status(session_id, actor)
         if status.scheduler_state != "RUNNING":
             raise HTTPException(status_code=409, detail=f"WebHDP session is not ready yet (state={status.scheduler_state})")
@@ -3159,50 +3244,27 @@ if __name__ == "__main__":
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"Could not validate Zenodo upload files: {exc}") from exc
 
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")
-        request_path = f"{session.remote_session_dir}/zenodo-upload-{stamp}.json"
-        response_path = f"{session.remote_session_dir}/zenodo-upload-response-{stamp}.json"
-        script_path = f"{session.remote_session_dir}/zenodo-upload-{stamp}.py"
         upload_payload = {
             "environment": request.environment,
             "api_base": self._zenodo_api_base(request.environment),
             "access_token": request.access_token,
             "deposition_id": str(request.deposition_id) if request.deposition_id is not None else None,
-            "bucket_url": None,
             "metadata": request.metadata,
             "files": files,
         }
 
-        try:
-            async with await ssh_manager.open_sftp() as sftp:
-                async with sftp.open(request_path, "w") as handle:
-                    await handle.write(json.dumps(upload_payload, sort_keys=True))
-                async with sftp.open(script_path, "w") as handle:
-                    await handle.write(self._render_zenodo_upload_script())
-        except Exception as exc:
-            raise HTTPException(status_code=500, detail=f"Failed to stage Zenodo upload request: {exc}") from exc
-
-        await ssh_manager.run_command(
-            f"chmod 600 {shlex.quote(request_path)} {shlex.quote(script_path)}",
-            timeout=20,
+        # srun forwards stdin to the single task. The bearer token never needs
+        # to enter the remote filesystem, process argv, environment, or logs.
+        inner_cmd = f'python3 -c {shlex.quote(self._render_zenodo_upload_script())}'
+        stdout, _, exit_code = await self._run_in_webhdp_allocation(
+            session, inner_cmd, timeout=7200, stdin=json.dumps(upload_payload, sort_keys=True),
         )
-        inner_cmd = (
-            "set -euo pipefail; "
-            f"trap 'rm -f {shlex.quote(request_path)} {shlex.quote(script_path)}' EXIT; "
-            f"export WEBHDP_ZENODO_UPLOAD_REQUEST={shlex.quote(request_path)}; "
-            f"export WEBHDP_ZENODO_UPLOAD_RESPONSE={shlex.quote(response_path)}; "
-            f"python3 {shlex.quote(script_path)}"
-        )
-        stdout, stderr, exit_code = await self._run_in_webhdp_allocation(session, inner_cmd, timeout=7200)
-        await ssh_manager.run_command(
-            f"rm -f {shlex.quote(request_path)} {shlex.quote(script_path)}",
-            timeout=20,
-        )
-        response_stdout, _, _ = await ssh_manager.run_command(f"cat {shlex.quote(response_path)} 2>/dev/null || true", timeout=30)
         parsed: dict[str, Any] | None = None
-        if response_stdout.strip():
+        if stdout.strip():
             try:
-                parsed = json.loads(response_stdout)
+                response = json.loads(stdout)
+                if isinstance(response, dict):
+                    parsed = response
             except json.JSONDecodeError:
                 parsed = None
         if parsed is None:
@@ -3211,11 +3273,11 @@ if __name__ == "__main__":
                 "environment": request.environment,
                 "uploaded_files": [],
                 "publish_requested": False,
-                "error": self._tail_text(stderr or stdout, 1600) or "Zenodo upload did not produce a response",
+                "error": "Zenodo upload did not produce a response",
             }
         if exit_code != 0:
             parsed["success"] = False
-            parsed.setdefault("error", self._tail_text(stderr or stdout, 1600) or "Zenodo upload failed")
+            parsed.setdefault("error", "Zenodo upload failed")
         parsed["session_id"] = session_id
         parsed.setdefault("environment", request.environment)
         parsed.setdefault("uploaded_files", [])

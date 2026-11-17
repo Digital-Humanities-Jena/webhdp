@@ -1,0 +1,114 @@
+metadata:
+  name: validate_file_integrity
+  label: File Integrity Validator
+  description: Validate file readability and supported format structure without changing
+    source permissions or quarantine flags.
+  version: 1.0.1
+  status: alpha
+  component_schema: 0.1.0-alpha.1
+  category: Zenodo HDP Components
+  tags:
+  - zenodo-community
+  - metadata
+  - validation
+  license:
+    type: GPL-3.0-or-later
+sources:
+  record: https://zenodo.org/records/16993089
+  doi: 10.5281/zenodo.16993089
+distribution:
+  tier: external_installable
+  bundled_with_webhdp: false
+  installation_scope:
+  - local_container
+  - hpc_sif
+inputs:
+- name: input_file
+  label: File to validate
+  type: file_path
+  required: true
+outputs:
+- name: validation_report
+  label: Validation report
+  type: file_path
+  required: true
+  extensions:
+  - .json
+parameter_groups:
+- title: Processing settings
+  parameters:
+  - name: include_hash
+    label: Include SHA-256
+    type: boolean
+    default: true
+execution:
+  timeout: 600
+  profiles:
+  - id: local_docker
+    adapter: container_cli
+    runtime: docker
+    image: webhdp-zenodo-components:local
+    entrypoint:
+    - python
+    - /app/component_runner.py
+    - validate_file_integrity
+    config:
+      webhdp_contract: true
+      network: none
+    resources:
+      gpu_count: 0
+      cpus: 2
+      memory_mb: 4096
+  - id: hpc_singularity
+    adapter: hpc_link
+    handler: generic_singularity_component
+    runtime: singularity
+    image: ''
+    entrypoint:
+    - python
+    - /app/component_runner.py
+    - validate_file_integrity
+    resources:
+      gpu_count: 0
+      cpus: 2
+      memory_mb: 4096
+compatibility:
+  playground:
+    enabled: true
+install:
+  strategies:
+  - id: local_container
+    runtime: docker
+    profile: local_docker
+    image: webhdp-zenodo-components:local
+  - id: hpc_sif
+    runtime: singularity
+    profile: hpc_singularity
+  test: &id001
+    files:
+    - name: sample.json
+      content_base64: eyJmaXh0dXJlIjoidmFsaWQgSlNPTiIsIm51bWJlciI6MTd9Cg==
+    inputs:
+      input_file: sample.json
+    parameters: {}
+hpc:
+  install:
+    runtime: singularity
+    sif_required: true
+  test: *id001
+ui:
+  playground:
+    fields:
+      input_file:
+        widget: file_picker
+        accept_extensions: []
+    result:
+      artifact_views:
+      - id: results
+        label: Reports and exported data
+        widget: file_download
+        extensions:
+        - .json
+        - .csv
+      show_result_json: true
+      show_logs: true

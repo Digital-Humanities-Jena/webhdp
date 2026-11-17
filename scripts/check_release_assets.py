@@ -15,6 +15,16 @@ VIDEO_DIR = Path("docs/assets/screen_recordings/raw")
 SUBTITLE_DIR = Path("docs/assets/screen_recordings/subtitles")
 MANIFEST_PATH = Path("docs/assets/screen_recordings/manifest.json")
 MAX_VIDEO_BYTES = 5 * 1024 * 1024
+HMSM_GUIDE = Path("docs/guides/hmsm_components.md")
+HMSM_SCREENSHOTS = {
+    Path("docs/assets/hmsm") / name
+    for name in (
+        "01-local-component-catalog.png",
+        "02-playground-scan-result.png",
+        "03-chained-pipeline-preflight.png",
+        "04-chained-pipeline-result.png",
+    )
+}
 
 
 def load_manifest() -> tuple[set[Path], set[Path], set[Path], list[str]]:
@@ -216,11 +226,21 @@ def main() -> int:
         if not text.startswith("WEBVTT"):
             errors.append(f"{subtitle} is not a WebVTT subtitle file.")
 
+    hmsm_guide = (ROOT / HMSM_GUIDE).read_text(encoding="utf-8")
+    for screenshot in sorted(HMSM_SCREENSHOTS):
+        if screenshot not in release_files:
+            errors.append(f"Missing HMSM guide screenshot: {screenshot}")
+        elif (ROOT / screenshot).stat().st_size > 1024 * 1024:
+            errors.append(f"HMSM guide screenshot exceeds 1 MiB: {screenshot}")
+        if f"../{screenshot.relative_to('docs').as_posix()}" not in hmsm_guide:
+            errors.append(f"HMSM guide does not reference {screenshot}")
+
     docs_assets = {path for path in release_files if path.parts[:2] == ("docs", "assets")}
     allowed_docs_assets = (
         expected_webms
         | expected_videos
         | expected_subtitles
+        | HMSM_SCREENSHOTS
         | {Path("docs/assets/screen_recordings/README.md"), MANIFEST_PATH}
     )
     unexpected_docs_assets = sorted(docs_assets - allowed_docs_assets)
@@ -237,7 +257,8 @@ def main() -> int:
         "Release asset check passed: "
         f"{len(expected_webms)} WebM fallback(s), "
         f"{len(expected_videos)} curated documentation video(s), "
-        f"{len(expected_subtitles)} subtitle file(s)."
+        f"{len(expected_subtitles)} subtitle file(s), "
+        f"{len(HMSM_SCREENSHOTS)} HMSM screenshot(s)."
     )
     return 0
 

@@ -295,6 +295,43 @@ def test_missing_metadata_is_a_local_zenodo_blocker(workspace):
     assert any('creators' in item['message'] for item in report['blockers']), report
 
 
+def test_source_only_pipeline_can_run_again_without_metadata_or_duplicate_records(workspace):
+    import yaml
+    from services.dataset_integrity_service import read_session_records
+    from services.hdpc_local_service import add_local_source_files
+
+    app, native, session, user, source, metadata, payload, _ = workspace
+    app.config.update(WEBHDP_DEPLOYMENT_MODE='local', WEBHDP_ALLOW_LOCAL_HDP_COMPONENTS=True)
+    db.session.delete(metadata)
+    db.session.commit()
+    scan = source.with_name('scan.png')
+    scan.write_bytes(b'synthetic scan fixture')
+    add_local_source_files(session.hdpc_path, absolute_file_paths=[str(scan)])
+    manifest = yaml.safe_load((ROOT / 'external_code/hmsm_scan_digitizer/component.yaml').read_text())
+    manifest['execution']['profiles'][0]['image'] = 'sha256:' + 'a' * 64
+    native.import_component_from_manifest(manifest)
+    adapter = Mock()
+    adapter.execute.return_value = {'success': True, 'outputs': {}}
+    native._adapter_registry['container_cli'] = adapter
+    identifier = 'hmsm_scan_digitization'
+    paths = [str(scan)]
+
+    assert check(workspace, identifier, local_file_paths=paths)['ready']
+    for other_pipeline in ('metadata_only', 'guarded_lod'):
+        report = check(workspace, other_pipeline)
+        assert not report['ready'] and any('No metadata found' in item['message'] for item in report['blockers'])
+
+    for _ in range(2):
+        queued = native.create_pending_run(identifier, session_id=session.id, initiated_by_user_id=user.id,
+                                           request_payload={**payload, 'local_file_paths': paths})
+        result = execute_submission_pipeline(identifier=identifier, local_file_paths=paths,
+            db_session_id=session.id, precreated_run_public_id=queued['run_id'])
+        assert result['result']['success'], result
+
+    assert adapter.execute.call_count == 2
+    assert len(read_session_records(session)) == 1
+
+
 def test_batch_shared_creators_are_checked_before_unknown_defaults(workspace):
     _, _, session, _, _, metadata, _, _ = workspace
     from database.models import BatchFileMetadata
@@ -500,3 +537,34 @@ def test_readiness_api_token_accepts_canonical_execution_and_retry(workspace):
     assert retry.status_code == 202 and retry.json['data']['run_id'] == accepted.json['data']['run_id']
     assert PipelineRun.query.count() == 1
     enqueue.assert_called_once()
+
+
+def test_component_readiness_blocks_a_missing_installed_image(workspace):
+    import yaml
+    app, native, session, user, source, metadata, payload, headers = workspace
+    manifest = yaml.safe_load((ROOT / 'external_code/glb_metadata_extractor/component.yaml').read_text())
+    for profile in manifest['execution']['profiles']:
+        if profile['id'] == 'local_docker':
+            profile['image'] = 'sha256:' + 'd' * 64
+    native.import_component_from_manifest(manifest)
+    with patch('services.submission_readiness.subprocess.run', return_value=SimpleNamespace(returncode=1)) as inspect:
+        report = check(workspace, 'zenodo_glb_metadata_extractor')
+    assert not report['ready']
+    assert any('Docker image' in issue['message'] and 'unavailable' in issue['message'] for issue in report['blockers'])
+    assert inspect.call_args.args[0] == ['docker', 'image', 'inspect', 'sha256:' + 'd' * 64]
+    with patch('services.submission_readiness.subprocess.run', return_value=SimpleNamespace(returncode=0)):
+        assert check(workspace, 'zenodo_glb_metadata_extractor')['ready']
+
+
+def test_image_readiness_caches_only_within_one_check_and_does_not_start_containers():
+    from services.submission_readiness import require_local_docker_image
+    cache = {}
+    profile = {'image': 'sha256:' + 'e' * 64}
+    with patch('services.submission_readiness.subprocess.run', return_value=SimpleNamespace(returncode=0)) as inspect:
+        require_local_docker_image(profile, cache)
+        require_local_docker_image(profile, cache)
+        assert inspect.call_count == 1
+        assert inspect.call_args.args[0][:3] == ['docker', 'image', 'inspect']
+    with patch('services.submission_readiness.subprocess.run', side_effect=OSError('Docker unavailable')):
+        with pytest.raises(ValueError, match='could not be verified'):
+            require_local_docker_image(profile, {})

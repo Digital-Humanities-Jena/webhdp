@@ -5,25 +5,18 @@ HPC-Link gateway starts Slurm job steps inside a pre-reserved GPU allocation.
 Only named, verified WebHDP users with HPC access can claim that allocation.
 The audience can watch the presenter’s browser without a WebHDP or HPC account.
 
-## What the current site can do
+## How the public demo reaches the GPU
 
-The public site identified itself as **WebHDP Alpha (Test)** on 17 November
-2026. The existing operator configuration documents a private VPN-backed gateway
-and an ordinary job request workflow. That workflow submits a new Slurm job via
-HPC-Link. The earlier release has no supported way to register an already
-running job, grant selected WebHDP users access, or attach it to a workflow
-without making WebHDP responsible for cancellation. A working public page also
-does not establish that the current gateway can reach or use a particular job.
-[WebHDP Alpha (Test)](https://hdp.3drepo.eu/)
-
-With the reservation feature, the browser still talks to WebHDP over the public
-origin. WebHDP calls a private, authenticated HPC-Link endpoint. HPC-Link
+The browser talks to WebHDP over its public origin. WebHDP calls a private,
+authenticated HPC-Link endpoint. HPC-Link
 connects by SSH to a Draco login host, verifies the scheduler allocation belongs
 to its configured SSH account, and starts a step on the allocated node. The
 browser does not need a route to the compute node. The GPU job belongs to its
 Slurm owner and keeps the scheduler’s original deadline. The operator registers
 the exact job to share, so WebHDP does not list other jobs visible to the SSH
 account.
+The demo needs matching deployed versions. An earlier WebHDP or HPC-Link
+release that only supports new job requests cannot register a running job.
 [University of Jena HPC access](https://www.uni-jena.de/en/22210/scientific-computing-and-data-science)
 
 ## Prepare the release and the gateway
@@ -46,12 +39,10 @@ account.
    Preserve the existing VPN and check that a gateway restart reloads the active
    reservation and its claim before relying on it during the demo.
 3. Use a restricted gateway service principal for WebHDP. Keep the gateway
-   administrator account for the separate registration step. The earlier
-   deployment profile authorized ordinary requests on `vis` and `vascunet` up to
-   six hours. Check the active production principal, Slurm owner, partition and
-   delegation policy separately before treating an eight-hour `gpu` hold as
-   available to the deployed application. A reservation does not raise the
-   service principal’s new-job limits.
+   administrator account for the separate registration step. Confirm the active
+   principal, Slurm owner, partition and delegation policy before relying on
+   an eight-hour hold. Choose the walltime with the HPC operator; claiming a
+   reservation never extends it or raises new-job limits.
 4. Confirm that the release profile exposes the workflow and tools the presenter
    will use. Install the precise component versions in advance. For a
    Singularity component, verify its SIF SHA-256 in the registry, check input
@@ -88,7 +79,7 @@ srun --jobid="$DEMO_JOB_ID" --overlap --nodes=1 --ntasks=1 nvidia-smi -L
    `GET /api/apps/webhdp/reservations/{reservation_id}`. Use private operator
    tooling for gateway credentials and avoid placing them on the presentation
    screen.
-2. In WebHDP, open **HPC Admin → Reserved GPUs**. Register the gateway identifier
+2. In WebHDP, open **HPC Access → Reserved GPUs** as an administrator. Register the gateway identifier
    with a recognizable label and the existing email addresses of the presenter
    and any named backup operator. The equivalent endpoint is
    `POST /api/v1/admin/hpc-reservations`, with `gateway_reservation_id`, `label`
@@ -123,15 +114,13 @@ Geolocation, learned MVS and dense reconstruction are better shown from
 completed runs if their asset transfers or compute time exceed the live slot.
 Keep publication disabled for the demo unless it has separate authorization.
 
-The isolated reservation rehearsal used a pinned Mask2Former segmentation SIF
-and a ZIP with five historic photographs. A verified non-admin claimed job
-`9319538` in the browser and ran the workflow. The run produced five binary
-masks and two downloadable artifacts. Its report download matched the API
-checksum. A second approved account later ran the same component in a fresh
-workspace on the same A100. The gateway reported both releases as detached,
-and Slurm still showed the original job running. The isolated instance exercised
-the reservation, authentication, GPU and artifact routes. Run the same smoke
-test through the real deployment proxy and worker before presenting.
+An isolated rehearsal used a pinned Mask2Former segmentation SIF and a ZIP with
+five historic photographs. A verified non-admin claimed the GPU, ran the
+component, received five binary masks in two downloadable artifacts, and
+verified the report checksum. After detachment, a second approved account ran
+the same component in a fresh workspace on the same A100. Both detachments
+left the Slurm job running. Repeat this smoke test through your production
+proxy and worker before presenting.
 
 ## Rehearsal and follow-up tests
 

@@ -1,11 +1,10 @@
 from flask import Blueprint, request, current_app
 from flask_jwt_extended import get_jwt_identity, jwt_required
 from api_utils import APIResponse
-from services.cloud_upload_service import CloudUploadService, STORAGE_MODE_PURE_CLOUD
+from services.cloud_upload_service import CloudUploadService, issue_stream_receipt, read_stream_receipt
 from database.database import db
 from database.models import User
 import logging
-import os
 from security import sanitize_upload_filename
 
 upload_bp = Blueprint("upload", __name__)
@@ -45,12 +44,6 @@ def stream_upload():
 
         logger.info(f"Starting stream upload for: {filename} (Size: {file_size})")
 
-        # Get storage mode
-        mode = CloudUploadService.get_storage_mode()
-
-        # We only support direct streaming for pure_cloud mode currently
-        # For other modes, we could implement fallback, but for now enforcing consistency
-
         result = CloudUploadService.stream_upload_file(
             request.stream,
             filename,
@@ -58,20 +51,15 @@ def stream_upload():
         )
 
         if result.get("success"):
+            user_id = int(get_jwt_identity())
+            result['cloud_upload_receipt'] = issue_stream_receipt(user_id, filename, result)
             allocation_id = str(request.headers.get("X-HPC-Allocation-ID") or "").strip()
             if allocation_id and hasattr(current_app, "hpc_allocation_service"):
                 try:
-                    user = db.session.get(User, int(get_jwt_identity()))
+                    user = db.session.get(User, user_id)
                     if user is None:
                         return APIResponse.not_found("User not found")
-                    cloud_path = result.get("remote_path") or result.get("file_id")
-                    if not cloud_path:
-                        return APIResponse.error(
-                            "HPC_STAGING_FAILED",
-                            "Cloud upload succeeded, but no cloud object reference was returned for HPC staging.",
-                            502,
-                            details=result,
-                        )
+                    cloud_path = read_stream_receipt(result['cloud_upload_receipt'], user_id)['path']
                     allocation = current_app.hpc_allocation_service.get_allocation(allocation_id, user)
                     result["hpc_staging"] = current_app.hpc_allocation_service.stage_cloud_references(
                         allocation,

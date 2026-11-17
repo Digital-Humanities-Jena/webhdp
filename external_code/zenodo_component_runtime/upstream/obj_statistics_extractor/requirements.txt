@@ -1,0 +1,2 @@
+# No external dependencies required for basic OBJ parsing
+# All functionality uses Python standard library

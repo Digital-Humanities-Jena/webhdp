@@ -145,7 +145,6 @@
                 </button>
               </div>
             </div>
-
             <ReservedGpuAccess
               v-if="form.sessionId"
               class="mt-3"
@@ -272,6 +271,16 @@
                     </span>
                   </div>
                 </div>
+
+                <section v-if="summaryEntries.length" aria-label="Run summary" class="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+                  <h4 class="text-sm font-semibold text-slate-900">Run summary</h4>
+                  <dl class="mt-3 space-y-2 text-xs">
+                    <div v-for="[key, value] in summaryEntries" :key="key" class="flex flex-wrap justify-between gap-x-3 gap-y-1">
+                      <dt class="text-slate-500">{{ key.replaceAll('_', ' ') }}</dt>
+                      <dd class="break-all font-medium text-slate-900">{{ value }}</dd>
+                    </div>
+                  </dl>
+                </section>
 
                 <PlaygroundArtifactPanel
                   v-if="result.result"
@@ -407,6 +416,8 @@ const visibleParameterGroups = computed(() => (
     .filter((group) => group.fields.length > 0)
 ))
 const prettyResult = computed(() => JSON.stringify(result.value?.result ?? {}, null, 2))
+const summaryEntries = computed(() => Object.entries(result.value?.result?.summary || result.value?.result?.response?.summary || {})
+  .filter(([, value]) => value !== null && ['string', 'number', 'boolean'].includes(typeof value)))
 const runLogs = computed(() => formatPlaygroundLogs(result.value))
 
 function emptyValueForField(field) {

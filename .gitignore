@@ -38,6 +38,7 @@ instance/*
 *.7z
 *.glb
 *.obj
+!external_code/webhdp_link_examples/fixtures/tetrahedron.obj
 *.fbx
 *.xlsx
 *.pdf
@@ -103,7 +104,7 @@ submission_*_processing_result.json
 gdrive-token.json
 client_secret.json
 hdp-3drepo-credentials.txt
-credentials/*.json
+credentials/*
 !credentials/.gitkeep
 
 server_app/_version.py
@@ -145,6 +146,21 @@ codeout.txt
 # =======================================
 *.env
 **/.env
+.env.*
+.deployment/
+.ssh/
+secrets/
+private-secrets/
+hpc-auth/
+*.pem
+*.key
+*.ppk
+*.p12
+*.pfx
+id_rsa
+id_dsa
+id_ecdsa
+id_ed25519
 
 **/env/
 **/.venv/

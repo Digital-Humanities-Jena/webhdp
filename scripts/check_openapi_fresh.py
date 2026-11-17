@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail when docs/api/openapi.json is stale."""
+"""Fail when either WebHDP OpenAPI contract is missing or stale."""
 
 from __future__ import annotations
 
@@ -12,25 +12,19 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from scripts.generate_openapi import OUTPUT_PATH, _build_spec
+from scripts.generate_openapi import contracts
 
 
 def main() -> int:
-    expected = json.dumps(_build_spec(), indent=2, sort_keys=True) + "\n"
-    if not OUTPUT_PATH.exists():
-        print(f"{OUTPUT_PATH.relative_to(ROOT)} is missing. Run `make api-contract`.", file=sys.stderr)
-        return 1
-
-    current = OUTPUT_PATH.read_text(encoding="utf-8")
-    if current != expected:
-        print(
-            f"{OUTPUT_PATH.relative_to(ROOT)} is stale. Run `make api-contract` and commit the result.",
-            file=sys.stderr,
-        )
-        return 1
-
-    print(f"{OUTPUT_PATH.relative_to(ROOT)} is up to date.")
-    return 0
+    success = True
+    for path, spec in contracts().items():
+        expected = json.dumps(spec, indent=2, sort_keys=True) + "\n"
+        if not path.exists() or path.read_text(encoding="utf-8") != expected:
+            print(f"{path.relative_to(ROOT)} needs regeneration. Run `make api-contract`.", file=sys.stderr)
+            success = False
+        else:
+            print(f"{path.relative_to(ROOT)} is up to date.")
+    return 0 if success else 1
 
 
 if __name__ == "__main__":

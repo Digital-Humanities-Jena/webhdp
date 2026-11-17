@@ -8,6 +8,10 @@ For an exhaustive inventory of UI, API, background job, native pipeline, and ope
 
 | Goal | Start Here | Complete When |
 |---|---|---|
+| Run installed science or metadata components | [Historic reconstruction](historic_reconstruction.md), [Zenodo community components](zenodo_community_components.md), [HMSM Studio components](hmsm_components.md) | The selected inputs, pinned runtime and outputs match the intended workflow. |
+| Present a workflow on a pre-reserved GPU | [Pre-reserved GPU demo](prereserved_gpu_demo.md) | A permitted account claims a job, runs on the GPU, downloads artifacts and detaches without stopping Slurm. |
+| Connect an external application | [WebHDP-Link](webhdp_link.md) | A registered client can submit to a pinned publication and verify its outputs. |
+| Upgrade the current server | [Upgrade to v0.1.0-alpha.3](upgrade_alpha3.md) | The migrated deployment and intended runtimes pass staging checks. |
 | Prepare and review a single record, batch, or model derivative | [Common Workflow Recipes](common-workflow-recipes.md) | Descriptive metadata, source mappings, pipeline outcome, and generated results are reviewed. |
 | Publish a new dataset | [End-to-End User Guide](end_to_end_user_guide.md) | The submission reaches `completed`, Zenodo links are present, and provenance/records match the intended source files. |
 | Review and repair MSF-driven batch metadata | [End-to-End User Guide](end_to_end_user_guide.md#step-2-msf-qa-batch-only) | Record-resolution actions are saved, blocking MSF issues are repaired or accepted, and the workflow can advance to file review. |

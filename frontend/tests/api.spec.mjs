@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocked = vi.hoisted(() => ({
   axiosCreate: vi.fn(),
@@ -47,6 +47,8 @@ describe('api service interceptors', () => {
   let attachInterceptors
   let createApiClient
   let apiV1
+
+  afterEach(() => vi.unstubAllGlobals())
 
   beforeEach(() => {
     vi.resetModules()
@@ -170,6 +172,21 @@ describe('api service interceptors', () => {
     expect(clearToken).not.toHaveBeenCalled()
     expect(redirectToLogin).not.toHaveBeenCalled()
     expect(showError).toHaveBeenCalledWith('Invalid credentials')
+  })
+
+  it.each([
+    ['/link/jobs/run-123', '?tab=results', '/login?redirect=%2Flink%2Fjobs%2Frun-123%3Ftab%3Dresults'],
+    ['/link/authorize', '?client_id=photo&state=opaque', '/login?redirect=%2Flink%2Fauthorize%3Fclient_id%3Dphoto%26state%3Dopaque'],
+    ['//outside.example/link/jobs', '', '/login'],
+    ['/login', '?redirect=%2Flink%2Fjobs', '/login'],
+  ])('preserves only the safe signed-in destination on default 401 redirect (%s)', async (pathname, search, expected) => {
+    const location = { pathname, search, href: '' }
+    vi.stubGlobal('window', { location })
+    const { attachInterceptors } = await import('../src/services/api.js')
+    const { client, handlers } = createClientHarness()
+    attachInterceptors(client, { showError: vi.fn(), clearToken: vi.fn() })
+    await expect(handlers.response.onRejected({ config: {}, response: { status: 401, data: { message: 'Expired' } } })).rejects.toEqual({ message: 'Expired' })
+    expect(location.href).toBe(expected)
   })
 
   it('suppresses global error toasts when requested', async () => {

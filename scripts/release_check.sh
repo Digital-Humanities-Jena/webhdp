@@ -75,7 +75,7 @@ echo "==> HPC-Link backend tests"
 (
   cd hpc-link
   CORS_ORIGINS='["http://localhost:5173","http://127.0.0.1:5173"]' \
-    uv run --with pytest --with-requirements requirements.txt python -m pytest
+    uv run --with pytest --with pytest-asyncio --with-requirements requirements.lock python -m pytest
 )
 
 echo "==> HPC-Link frontend lint/build/audit"
@@ -92,6 +92,14 @@ compose_config_quiet -f docker-compose.yml -f docker-compose.edm-validator.yml
 
 echo "==> Docker Compose HPC overlay validation"
 compose_config_quiet -f docker-compose.yml -f docker-compose.hpc.yml
+
+echo "==> Docker Compose WebHDP-Link overlay validation"
+WEBHDP_LINK_PUBLIC_BASE_URL=https://api.example.invalid \
+FRONTEND_URL=https://webhdp.example.invalid \
+WEBHDP_LINK_HPC_WAIT_SECONDS=2400 \
+HPC_LINK_PARTITION_ATTEMPT_TIMEOUT_SECONDS=1200 \
+WEBHDP_LINK_STOP_GRACE_SECONDS=7200 \
+compose_config_quiet -f docker-compose.prod.yml -f docker-compose.webhdp-link.yml
 
 if enabled "${CHECK_RELEASE_IMAGES:-false}" || [[ "${FLASK_ENV:-}" = "production" ]]; then
   echo "==> Production image tag validation"

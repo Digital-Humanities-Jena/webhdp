@@ -1,0 +1,158 @@
+metadata:
+  name: image_metadata_extractor
+  label: Image Metadata Extractor
+  description: >
+    Extracts comprehensive metadata from image files including EXIF data, dimensions, file size, 
+    and megapixels. Includes privacy features to remove personal information.
+  tags:
+    - image
+    - metadata
+    - exif
+    - privacy
+    - analysis
+  keywords:
+    - image metadata
+    - exif data
+    - jpeg
+    - png
+    - privacy filter
+  category: Image Processing
+  version: "0.1.1"
+  status: alpha
+  created: "2025-08-23"
+  updated: "2025-08-25"
+  authors:
+    - name: "Ukolov, Dominik"
+      affiliation: "Friedrich-Schiller-University Jena"
+      orcid: "0000-0002-7904-3892"
+  contact:
+    email: "dominik.ukolov@uni-jena.de"
+  license:
+    type: GPLv3
+    url: "https://www.gnu.org/licenses/gpl-3.0.html.en"
+  component_schema: "0.1.0-alpha.2"
+
+sources:
+  record: "https://zenodo.org/records/16933645"
+  doi: "10.5281/zenodo.16933645"
+  concept_doi: "10.5281/zenodo.16933644"
+  git: ""
+
+structure:
+  required_files:
+    - processor.py
+    - main.py
+    - tests/test.py
+    - tests/sample.jpg
+    - tests/reference_data/sample_metadata.json
+    - CHANGELOG.md
+  additional_files: []
+  directories:
+    - tests/output_reports
+
+inputs:
+  - name: input-file
+    label: Input Image File
+    description: >
+      Path to the input image file to be analyzed.
+    type: file_path
+    default: ""
+    required: true
+    validation_rules:
+      file_extensions: [".jpg", ".jpeg", ".png", ".tiff", ".tif", ".bmp", ".gif", ".webp"]
+    mutex_with: ["input-dir"]
+
+  - name: input-dir
+    label: Input Directory
+    description: >
+      Path to a directory containing image files for batch metadata extraction.
+    type: dir_path
+    default: ""
+    required: true
+    validation_rules:
+      file_extensions: [".jpg", ".jpeg", ".png", ".tiff", ".tif", ".bmp", ".gif", ".webp"]
+    mutex_with: ["input-file"]
+
+outputs:
+  - name: output-file
+    label: Image Metadata Report
+    pattern: "{original_stem}_metadata.json"
+    description: >
+      JSON report containing the extracted metadata, including EXIF data.
+    category: metadata
+    type: "application/json"
+
+parameter_groups:
+  - title: Privacy Options
+    description: Control the removal of potentially sensitive information from the metadata.
+    parameters:
+      - name: remove-address
+        label: Remove Address Information
+        type: boolean
+        default: true
+        description: >
+          If true, removes street addresses and location information from EXIF metadata.
+      - name: remove-mail
+        label: Remove Email Addresses
+        type: boolean
+        default: true
+        description: >
+          If true, removes email addresses from EXIF metadata.
+          
+  - title: Content Options
+    description: Configure the level of detail in the extracted metadata.
+    parameters:
+      - name: include-technical-details
+        label: Include Technical Details
+        type: boolean
+        default: true
+        description: >
+          If true, includes camera settings, focal length, ISO, and other technical EXIF data.
+      - name: readable-maker-notes-only
+        label: Filter Readable MakerNotes Only
+        type: boolean
+        default: true
+        description: >
+          If true, only includes MakerNote data that contains readable text, filtering out binary data.
+
+  - title: Execution Options
+    description: Configure execution behavior and logging.
+    parameters:
+      - name: test
+        label: Run Internal Test Suite
+        type: boolean
+        default: false
+        description: >
+          If true, runs the component's built-in test suite instead of processing input files.
+      - name: config
+        label: Configuration File
+        type: file_path
+        description: >
+          Optional path to a JSON configuration file with advanced settings.
+        validation_rules:
+          file_extensions: [".json"]
+      - name: verbose
+        label: Enable Verbose Logging
+        type: boolean
+        default: false
+        description: >
+          If enabled, prints detailed processing steps and results to the console.
+
+requirements:
+  python_environment:
+    python_version: ">=3.8"
+    packages:
+      - name: "Pillow"
+        version: ">=10.0.0"
+      - name: "ftfy"
+        version: ">=6.0.0"
+      - name: "PyYAML"
+        version: ">=6.0.2"
+  system_dependencies: []
+  system_requirements:
+    min_memory_mb: 256
+
+execution:
+  idempotent: true
+  timeout: 60
+  on_error: continue_with_warning

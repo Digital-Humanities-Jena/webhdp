@@ -31,10 +31,28 @@ SINGLE_FILE_ALLOWED_EXTENSIONS = {
     ".webp",
     ".tif",
     ".tiff",
+    ".mid",
+    ".midi",
     ".xml",
     ".txt",
-    # An individual scene archive is a component input, not a batch extraction request.
+    # Component source artifacts stay intact; ZIP batch extraction is a separate flow.
     ".zip",
+    ".json",
+    ".hdpc",
+    ".sqlite",
+    ".pdf",
+    ".wav",
+    ".wave",
+    ".mp3",
+    ".flac",
+    ".ogg",
+    ".oga",
+    ".opus",
+    ".m4a",
+    ".aac",
+    ".aif",
+    ".aiff",
+    ".aifc",
 }
 
 

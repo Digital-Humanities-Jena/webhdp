@@ -5,6 +5,7 @@ import hashlib
 import importlib.util
 import json
 import math
+import subprocess
 from functools import lru_cache
 from pathlib import Path
 
@@ -15,13 +16,15 @@ from database.database import db
 from database.models import PipelineDefinition, PipelineRun, PipelineRunStatus, PlaygroundRun
 from exceptions import FileProcessingError, ValidationError
 from services.registry_lock import OperationConflict
+from services.historic_reconstruction_templates import HISTORIC_COMPONENT_KEYS
+from services.zenodo_component_templates import ZENODO_COMPONENT_KEYS
 from services.lod_reliability import capture_session_lod
 from services.dataset_integrity_service import (
     analyze_session_record_resolution, read_session_records, ensure_fresh_record_creation_allowed, ensure_record_operation_allowed, RecordInventorySnapshot,
 )
 from services.submission_pipeline_service import (
     prepare_submission_sources, record_submission_metadata, _validate_execution_items_against_resolution_state,
-    _resolve_version_target_record,
+    _resolve_version_target_record, pipeline_requires_record_metadata, reusable_local_processing_records,
 )
 
 
@@ -65,6 +68,23 @@ class ReadinessFieldError(ValueError):
         self.category, self.field = category, field
 
 
+def require_local_docker_image(profile, checked_images):
+    """Check each pinned image once per readiness request without starting it."""
+    image = str(profile.get('image') or '')
+    if not image or image.startswith('-'):
+        raise ValueError('The selected component has no valid installed Docker image.')
+    if image not in checked_images:
+        try:
+            result = subprocess.run(['docker', 'image', 'inspect', image], capture_output=True,
+                                    text=True, timeout=10, check=False)
+            checked_images[image] = None if result.returncode == 0 else (
+                f'The installed Docker image {image} is unavailable. Install an available component version before processing.')
+        except (OSError, subprocess.TimeoutExpired):
+            checked_images[image] = 'Docker image availability could not be verified. Check Docker and retry readiness.'
+    if checked_images[image]:
+        raise ValueError(checked_images[image])
+
+
 class SubmissionReadiness:
     def __init__(self, native):
         self.native = native
@@ -82,6 +102,7 @@ class SubmissionReadiness:
         self.native._assert_user_can_access_session(session, user_id, edit=True)
         blockers, deferred, checked_files, checked_records, effective_metadata = [], [], {}, [], []
         source_labels = {}
+        checked_images = {}
 
         def issue(message, area, *, source=None, step=None):
             entry = {'message': message, 'route': ROUTES[area]}
@@ -117,6 +138,7 @@ class SubmissionReadiness:
         if payload.get('expected_version') and payload['expected_version'] != version.version:
             issue('The pipeline version changed. Choose the pipeline again and review its steps.', 'pipeline')
         steps = [step for step in config.get('steps', []) if step.get('enabled', True)]
+        require_metadata = pipeline_requires_record_metadata(steps)
         if not steps:
             issue('The pipeline has no enabled steps. Choose another pipeline.', 'pipeline')
 
@@ -132,7 +154,8 @@ class SubmissionReadiness:
             issue('A source or record is selected more than once. Select each source once.', 'files')
         try:
             lod_snapshot = lod_snapshot or capture_session_lod(session.id, bootstrap_templates=False, allow_missing_templates=True)
-            sources = prepare_submission_sources(session, paths, items, record_ids, lod_snapshot=lod_snapshot)
+            sources = prepare_submission_sources(session, paths, items, record_ids, lod_snapshot=lod_snapshot,
+                                                 require_metadata=require_metadata)
             source_labels.update(sources['absolute_to_relative_path'])
         except Exception as exc:
             issue('Could not read the saved metadata, spreadsheet, templates, or project: ' + str(exc), 'mapping')
@@ -150,6 +173,7 @@ class SubmissionReadiness:
                 except Exception as exc:
                     issue(str(exc), 'files', source=item['source_file_path'])
         records = {int(row['local_record_id']): row for row in read_session_records(session)} if record_ids and not items else {}
+        reusable_records = reusable_local_processing_records(session, payload.get('is_sandbox', True)) if paths and not items and not record_ids and not require_metadata else {}
         selected = items or ([{'record_id': rid, 'source_file_path': records.get(rid, {}).get('source_file_path')} for rid in record_ids] if record_ids else [{'source_file_path': path} for path in paths])
         skipped = 0
         uses_zenodo = any((step.get('component_ref') or step['id']) in {'zenodo_draft', 'zenodo_upload'} for step in steps)
@@ -199,7 +223,12 @@ class SubmissionReadiness:
                     checked_records.append(row)
                 else:
                     metadata = source['lod_base_metadata']
-                    if selection.get('action') != 'force_create_fresh' and selection.get('action') != 'create_version':
+                    reusable = reusable_records.get(str(effective))
+                    if reusable:
+                        ensure_record_operation_allowed(session, local_record_id=int(reusable['local_record_id']),
+                                                        allow_allowed_versioning=True, inventory=inventory)
+                        checked_records.append(reusable)
+                    elif selection.get('action') != 'force_create_fresh' and selection.get('action') != 'create_version':
                         ensure_fresh_record_creation_allowed(session, source_file_path=str(effective), is_sandbox=bool(payload.get('is_sandbox', True)), inventory=inventory)
                     if selection.get('action') == 'create_version':
                         target = db.session.get(type(session), selection.get('target_session_id'))
@@ -298,7 +327,12 @@ class SubmissionReadiness:
                     if profile.adapter == 'hpc_link' or key in {'fast_renderer', 'any_to_usdz'}:
                         deferred.append({'message': 'Compute connectivity, allocation and component installation are unverified until runtime preparation.', 'step': step.get('name') or step['id']})
                     elif profile.adapter == 'container_cli':
-                        deferred.append({'message': 'Container installation and runtime availability are checked when processing starts.', 'step': step.get('name') or step['id']})
+                        selected_profile = self.native._profile_payload(profile)
+                        if key in HISTORIC_COMPONENT_KEYS | ZENODO_COMPONENT_KEYS and selected_profile.get('runtime') == 'docker':
+                            require_local_docker_image(selected_profile, checked_images)
+                            deferred.append({'message': 'The local Docker image is available. First-use unpacking and processing are checked at runtime.', 'step': step.get('name') or step['id']})
+                        else:
+                            deferred.append({'message': 'Container installation and runtime availability are checked when processing starts.', 'step': step.get('name') or step['id']})
                     if key == 'input_file_classification':
                         context['step_outputs'][step['id']] = {'classification_json': self.native._classify_input_file(str(effective))}
                         available_outputs.add((step['id'], 'classification_json'))

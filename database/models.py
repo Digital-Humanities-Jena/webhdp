@@ -1931,3 +1931,8 @@ class PlaygroundRun(db.Model):
     error_message = db.Column(db.Text)
     started_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     completed_at = db.Column(db.DateTime)
+
+# Imported after native models so metadata includes Link foreign-key targets.
+from database.webhdp_link_models import (  # noqa: E402,F401
+    LinkClient, LinkPublication, LinkCode, LinkToken, LinkUpload, LinkRun, LinkArtifact,
+)

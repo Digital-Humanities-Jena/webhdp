@@ -54,6 +54,8 @@ def validate_production_environment():
             "Production configuration is missing required non-placeholder values: "
             + ", ".join(missing)
         )
+    if len(_env_value("SECRET_KEY").encode("utf-8")) < 32:
+        raise ValueError("SECRET_KEY must contain at least 32 bytes for production JWT signing")
 
 
 def _env_int(name, default):

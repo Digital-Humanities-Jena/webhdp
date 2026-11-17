@@ -1,0 +1,8 @@
+HDP Zenodo component runtime
+
+Published upstream source: Copyright (C) 2025 Dominik Ukolov.
+License: GPL-3.0-or-later, as declared by the linked Zenodo records.
+The original processor, manifest and requirements bytes are retained under upstream/;
+their MD5 and record/version provenance appear in upstream-records.json.
+The WebHDP adapters and fixes are supplied as source alongside those records.
+No published Zenodo record is modified by this integration.

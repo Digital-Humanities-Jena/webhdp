@@ -8,7 +8,8 @@ from services.metadata_service import MetadataService
 from services.project_service import ProjectService
 from services.msf_service import MSFService
 from services.user_service import UserService
-from database.models import UserRole
+from database.database import db
+from database.models import Session, UserRole
 
 
 class _DummyProjectService:
@@ -28,8 +29,8 @@ class _DummyHpcAllocationService:
     def user_can_allocate(self, user, purpose="workflow"):
         return True
 
-    def get_active_for_session(self, session_id):
-        return object() if int(session_id) == 42 else None
+    def get_active_for_session(self, session_id, *, user_id):
+        return object() if session_id == 42 and user_id == 1 else None
 
 
 def _make_app(tmp_path):
@@ -90,9 +91,11 @@ def test_tools_context_passes_hpc_runtime_state_into_component_report(tmp_path, 
     app.hpc_allocation_service = _DummyHpcAllocationService()
 
     class _DummyUser:
+        id = 1
         role = UserRole.ADMIN
         capabilities = []
 
+    monkeypatch.setattr(db.session, "get", lambda model, key: Session(id=key, user_id=1))
     monkeypatch.setattr(UserService, "get_by_id", lambda self, _user_id: _DummyUser())
     monkeypatch.setattr(CloudUploadService, "get_storage_mode", lambda: STORAGE_MODE_LOCAL)
 

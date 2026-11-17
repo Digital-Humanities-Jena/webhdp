@@ -40,6 +40,27 @@ The `external_code/` directory contains WebHDP component manifests and selected 
 
 For alpha, `fast-renderer` and `any-to-usdz` are first-class optional services because the supported `render` publication path can use them directly. Other HDP Components are installable/evaluation components unless separately released and validated.
 
+### HMSM Studio
+
+The optional mechanical-music components use HMSM Studio, distributed under GPL-3.0-or-later. The local image builder takes an explicit HMSM Studio worktree and packages its processing code, exact dependency requirements, and physical model definitions. The image retains the upstream `LICENSE`, `docs/ATTRIBUTION.md`, and the licence notice for the HMSM-Tools measurements. Component runs emit the build's source commit, worktree changes, and SHA-256 inventory as `hmsm-source.json`. [HMSM Studio source](https://github.com/modavis-project/hmsm-studio)
+
+## Published Zenodo HDP Components
+
+The optional shared runtime in `external_code/zenodo_component_runtime` retains
+unmodified published processor, manifest and requirements files for seven
+components from the [HDP Components community](https://zenodo.org/communities/hdp-components/records):
+OBJ to GLB Converter, HDPC to CSV Exporter, OBJ Statistics Extractor, MTL
+Metadata Extractor, GLB Metadata Extractor, File Integrity Validator and Image
+Metadata Extractor. Copyright (C) 2025 Dominik Ukolov. The corresponding Zenodo
+records declare GPL-3.0-or-later. Source records, versions and published file
+checksums are retained in `external_code/zenodo_component_runtime/upstream-records.json`;
+the runtime includes the GPL license text and `NOTICE`. WebHDP adapters and
+fixes are included as separate source files under the same terms. The
+separately installed image includes Blender and Python libraries, each under
+its own applicable license. Fast Renderer remains a separately installed
+GPL renderer integration. See the [community component guide](docs/guides/zenodo_community_components.md)
+for the exact eight-record inventory and source links.
+
 ## Fixtures
 
 Root fixtures and `test_data/workflow_fixtures/` media-like files are synthetic generated/minimized WebHDP fixtures. They are intended for scanner, setup, and onboarding tests, not as cultural-heritage sample data.
@@ -55,3 +76,18 @@ The optional HPC component integrates [3DOM-FBK/mesh-optimizer](https://github.c
 ## 3DGeoRef
 
 The optional georeferencing component uses the orthographic renderer from [3DOM-FBK/3DGeoRef](https://github.com/3DOM-FBK/3DGeoRef), pinned at revision `e50e4562b43c0b105d77e417d01fedb5139529a6`, under the BSD-2-Clause license. See `external_code/georeferencer/UPSTREAM_LICENSE`. The separately installed runtime includes Blender, PyTorch, Kornia and the outdoor LoFTR checkpoint under their respective licenses. Runtime images and model weights are not bundled in this source repository.
+
+## Historic reconstruction integration
+
+The portable runtime in
+`external_code/historic_reconstruction_runtime` uses COLMAP/pycolmap, NumPy and
+Pillow under their respective upstream licences. Container builds install these
+dependencies; their source is not copied into this repository.
+
+The six optional research adapters invoke a separately installed
+`historic_reconstruction_pipeline` source snapshot and its model dependencies.
+The supplied archive did not include a repository licence. Its source, example
+datasets and weights are therefore not vendored or redistributed here. Operators
+must retain the licences and usage conditions of their separately provisioned
+source and weights. The integration evaluation records the archive's identity
+and the distinction between the portable baseline and original research code.

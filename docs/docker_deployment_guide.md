@@ -4,7 +4,7 @@ This document explains the multi-architecture Docker setup and the tiered Docker
 
 ## 0. Deployment Prerequisites
 
-Before running any deployment commands, ensure the following files are available on the server and configured correctly.
+Before running any deployment commands, ensure the following files are available on the server and configured correctly. For an existing installation, follow the [alpha.3 upgrade checklist](guides/upgrade_alpha3.md) for backup, migration and staging.
 
 ### Files to Transfer
 Transfer the **entire project directory** to your server. The Docker build process requires the full source code context.
@@ -20,7 +20,7 @@ Create a real `.env` file in the project root before running Docker Compose. `.e
 
 **Critical Adaptations for Production:**
 1.  **`FLASK_ENV`**: Set to `production`.
-2.  **`SECRET_KEY`**: Generate a strong, random string (e.g., `openssl rand -hex 32`).
+2.  **`SECRET_KEY`**: Production HS256 JWT signing requires at least 32 bytes. Generate a fresh random value (for example, `openssl rand -hex 32`) for a new deployment; keep the existing strong value across upgrades unless rotating it intentionally.
 3.  **`CREDENTIAL_ENCRYPTION_KEY`**: Generate a separate strong secret for encrypted Zenodo/HPC credentials.
 4.  **`SETUP_BOOTSTRAP_TOKEN`** or **`DEFAULT_ADMIN_EMAIL` / `DEFAULT_ADMIN_PASSWORD`**: Provide one first-run admin bootstrap path.
 5.  **`FRONTEND_URL`**: Set to your public domain (e.g., `https://hdp.yourdomain.com`).
@@ -193,25 +193,21 @@ If the validator is managed outside WebHDP, keep using `LOCAL_EDM_VALIDATOR_URL`
 
 ## 3. Permissions & Security (Critical)
 
-Since the Docker containers run as a non-root user (`hdpuser`, usually UID 1000) for security, they cannot write to directories owned by your host user (`root` or your personal user) by default when using **bind-mounts**.
+The backend runs as the non-root user `hdpuser`. Check the UID and GID of the
+actual release image with `docker run --rm --entrypoint id IMAGE` and account for
+any host UID mapping. Use that identity to provision dedicated bind mounts for
+`instance/` (database and Link data), `WEBHDP_SESSIONS_PATH` (uploads and
+results), and any mapped log directory. On a host without UID remapping, an
+operator can create a new private directory with
+`install -d -m 0700 -o UID -g GID DIRECTORY`. If approved processes use different
+identities, give only their shared group or ACL the required access. Check
+access as the actual backend and worker users before startup.
 
-You **must** ensure the following directories on the host are writable by the container user.
-
-### Required Directories
-1.  **`instance/`**: Stores the SQLite database (`hdp_web.db`).
-2.  **`hdp-shared/`** (or your `WEBHDP_SESSIONS_PATH`): Stores user session data.
-3.  **Logs Volume**: If mapped to a host folder, it needs write access.
-
-### Fix Command
-Run this command on the host machine before starting the containers:
-
-```bash
-# Grant write access to the group/others for persistence folders
-chmod -R 777 instance
-chmod -R 777 hdp-shared  # Or your specific sessions path
-```
-
-*Note: In a strict production environment, use `chown -R 1000:1000 <directory>` to align UIDs instead of using 777.*
+For data that already exists, stop writers and review ownership and mode for
+the mounted tree, including SQLite journals, lock files and backups. Do not
+recursively open write access to other users. Restrict `.env` and host secret
+files to the required operator or service identity and keep them outside the
+frontend root and build context.
 
 ---
 
@@ -222,15 +218,19 @@ SQLite is the default database for the first low-user deployment. The applicatio
 Use the operational backup tooling before every update. It creates an online SQLite backup copy, archives the configured persistent paths, writes manifest/checksum metadata, and can upload an encrypted archive to Dropbox:
 
 ```bash
-export BACKUP_ENCRYPTION_KEY=<strong-backup-secret>
+read -r -s -p 'Backup encryption secret: ' BACKUP_ENCRYPTION_KEY
+export BACKUP_ENCRYPTION_KEY
 ./scripts/backup.py --type pre-update --provider dropbox
+unset BACKUP_ENCRYPTION_KEY
 ```
 
 Local-only backups are also supported:
 
 ```bash
-export BACKUP_ENCRYPTION_KEY=<strong-backup-secret>
+read -r -s -p 'Backup encryption secret: ' BACKUP_ENCRYPTION_KEY
+export BACKUP_ENCRYPTION_KEY
 ./scripts/backup.py --type manual --provider local
+unset BACKUP_ENCRYPTION_KEY
 ./scripts/list_backups.py
 ```
 

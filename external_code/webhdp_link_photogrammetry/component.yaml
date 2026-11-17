@@ -1,0 +1,39 @@
+metadata:
+  name: link_reprojector_photogrammetry
+  label: Reprojector COLMAP photogrammetry
+  description: Reconstruct overlapping photographs through genuine COLMAP sparse and dense stages, fixed quality gates and checksummed scientific outputs.
+  version: 1.0.0
+  component_schema: 0.1.0-alpha.1
+  status: alpha
+  tags: [webhdp-link, photogrammetry, reprojector, colmap]
+distribution:
+  tier: operator_managed
+  bundled_with_webhdp: false
+inputs:
+  - name: input_files
+    label: Overlapping photographs
+    type: file_list
+    required: true
+outputs:
+  - {name: mesh, label: Reconstructed mesh, type: file_path, extensions: [.ply], required: true}
+  - {name: model, label: GLB model, type: file_path, extensions: [.glb], required: true}
+  - {name: point_cloud, label: Fused dense cloud, type: file_path, extensions: [.ply], required: true}
+  - {name: report, label: Reconstruction evidence, type: file_path, extensions: [.json], required: true}
+  - {name: preview, label: Measured point preview, type: file_path, extensions: [.png], required: true}
+  - {name: package, label: Scientific package, type: file_path, extensions: [.zip], required: true}
+parameter_groups:
+  - title: Scientific parameters
+    parameters:
+      - {name: max_image_size, label: Reconstruction image size, type: integer, default: 960, minimum: 640, maximum: 2400}
+      - {name: mesher, label: Surface reconstruction, type: string, default: poisson, enum: [poisson, delaunay]}
+execution:
+  timeout_seconds: 7200
+  profiles:
+    - id: hpc
+      adapter: hpc_link
+      handler: trusted_host_component
+      runtime: host
+      entrypoint: []
+      resources: {gpu_count: 1, cpus: 4, memory_mb: 16384}
+compatibility:
+  playground: {enabled: true}

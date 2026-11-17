@@ -50,8 +50,8 @@
               <button type="button" :class="sourceClass('local')" @click="setCatalogSource('local')">Local catalog</button>
               <button type="button" :class="sourceClass('remote')" @click="setCatalogSource('remote')">Remote indexes</button>
             </div>
-            <div class="grid gap-3 lg:grid-cols-[minmax(0,1fr),12rem,12rem]">
-              <input aria-label="Search components" v-model.trim="catalogSearch" type="search" class="rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" placeholder="Search components" />
+            <div class="grid gap-3 sm:grid-cols-2">
+              <input aria-label="Search components" v-model.trim="catalogSearch" type="search" class="min-w-0 rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 sm:col-span-2" placeholder="Search components" />
               <select aria-label="Component category" v-model="catalogCategory" class="rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
                 <option value="">All categories</option>
                 <option v-for="category in catalogCategories" :key="category" :value="category">{{ category }}</option>

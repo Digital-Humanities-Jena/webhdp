@@ -1,0 +1,13 @@
+# Supply an operator-reviewed Linux image digest that already contains CUDA
+# COLMAP (CLI) and CUDA pycolmap >=3.13. Never install the CPU pycolmap wheel here.
+ARG GPU_BASE_IMAGE
+FROM ${GPU_BASE_IMAGE}
+ARG GPU_BASE_IMAGE
+WORKDIR /app
+ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+RUN python -c 'import re; import sys; assert re.fullmatch(r".+@sha256:[0-9a-f]{64}", sys.argv[1]), "GPU_BASE_IMAGE must be pinned by SHA-256 digest"' "$GPU_BASE_IMAGE"
+RUN python -m pip install --no-cache-dir --only-binary=:all: numpy==2.4.1 Pillow==13.0.0
+COPY component_runner.py upstream.py /app/
+RUN python -c 'import pycolmap as p; import shutil; assert p.has_cuda, "CUDA-enabled pycolmap required"; assert hasattr(p, "FeatureExtractionOptions"); assert shutil.which("colmap"), "COLMAP CLI required"' \
+    && colmap -h
+CMD ["python", "/app/component_runner.py", "--help"]

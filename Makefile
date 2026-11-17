@@ -19,8 +19,8 @@ help:
 	@echo "  make devcontainer-check Build the Devcontainer image with configured features"
 	@echo "  make docs-check         Validate developer docs and docs catalog"
 	@echo "  make release-assets-check Validate curated release media/assets"
-	@echo "  make api-contract       Regenerate docs/api/openapi.json from Flask routes"
-	@echo "  make api-contract-check Fail if docs/api/openapi.json is stale"
+	@echo "  make api-contract       Regenerate WebHDP and WebHDP-Link API specs"
+	@echo "  make api-contract-check Fail if either API spec is stale"
 	@echo "  make golden-workflow    Run the local fixture-backed onboarding workflow"
 	@echo "  make verify-onboarding  Run onboarding-oriented validation checks"
 
@@ -46,7 +46,7 @@ frontend-dev:
 	cd frontend && npm run dev
 
 hpc-link-test:
-	cd hpc-link && uv run --with pytest --with-requirements requirements.txt python -m pytest
+	cd hpc-link && uv run --with pytest --with pytest-asyncio --with-requirements requirements.lock python -m pytest
 
 hpc-link-frontend:
 	cd hpc-link/frontend && npm run lint && npm run build && npm audit --omit=dev --audit-level=moderate

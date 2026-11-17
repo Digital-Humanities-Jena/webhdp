@@ -1,0 +1,115 @@
+metadata:
+  name: historic_dense
+  label: Historic Dense Reconstruction
+  description: Undistort a sparse reconstruction, estimate depth with COLMAP PatchMatch,
+    fuse points and reconstruct a surface on CUDA.
+  tags:
+  - historic-reconstruction
+  - photogrammetry
+  - colmap
+  category: Historic Reconstruction
+  version: 1.0.1
+  status: alpha
+  component_schema: 0.1.0-alpha.1
+distribution:
+  tier: external_installable
+  bundled_with_webhdp: false
+  installation_scope:
+  - hpc_sif
+inputs:
+- name: input_file
+  label: Reconstruction ZIP
+  type: file_path
+  required: true
+outputs:
+- name: reconstruction
+  label: Reconstruction
+  type: file_path
+  extensions:
+  - .zip
+  required: true
+- name: point_cloud
+  label: Point cloud
+  type: file_path
+  extensions:
+  - .ply
+  required: true
+- name: mesh
+  label: Mesh
+  type: file_path
+  extensions:
+  - .ply
+  required: true
+- name: report
+  label: Report
+  type: file_path
+  extensions:
+  - .json
+  required: true
+parameter_groups:
+- title: Processing settings
+  parameters:
+  - name: max_image_size
+    label: Maximum dense image dimension
+    type: integer
+    default: 1600
+    minimum: 256
+    maximum: 8192
+  - name: geometric_consistency
+    label: Use geometric consistency
+    type: boolean
+    default: true
+  - name: poisson_trim
+    label: Poisson surface density trimming threshold
+    description: Remove low-density surface regions. Lower values retain more geometry;
+      high values can remove the entire mesh for small photo sets.
+    type: number
+    default: 5.0
+    minimum: 0
+    maximum: 20
+execution:
+  timeout: 7200
+  profiles:
+  - id: hpc_singularity
+    adapter: hpc_link
+    handler: generic_singularity_component
+    runtime: singularity
+    image: ''
+    entrypoint:
+    - python
+    - /app/component_runner.py
+    - dense
+    resources:
+      gpu_count: 1
+      cpus: 8
+      memory_mb: 32768
+compatibility:
+  playground:
+    enabled: true
+install:
+  strategies:
+  - id: hpc_sif
+    runtime: singularity
+    profile: hpc_singularity
+hpc:
+  install:
+    runtime: singularity
+    sif_required: true
+ui:
+  playground:
+    fields:
+      input_file:
+        widget: file_picker
+        accept_extensions:
+        - .zip
+    result:
+      artifact_views:
+      - id: results
+        label: Scientific artifacts and reports
+        widget: file_download
+        extensions:
+        - .json
+        - .ply
+        - .zip
+      show_result_json: true
+      show_logs: true

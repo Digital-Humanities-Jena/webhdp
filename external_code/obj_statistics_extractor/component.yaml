@@ -1,0 +1,163 @@
+metadata:
+  name: obj_statistics_extractor
+  label: OBJ Statistics Extractor
+  description: Measure OBJ vertices, faces, materials, bounds, polygon surface areas
+    and volume only for closed consistently oriented surfaces.
+  tags:
+  - zenodo-community
+  - 3d
+  - obj
+  - analysis
+  category: Zenodo HDP Components
+  version: 1.0.1
+  status: alpha
+  component_schema: 0.1.0-alpha.1
+  license:
+    type: GPL-3.0-or-later
+sources:
+  record: https://zenodo.org/records/16993382
+  doi: 10.5281/zenodo.16993382
+distribution:
+  tier: external_installable
+  bundled_with_webhdp: false
+  installation_scope:
+  - local_container
+  - hpc_sif
+inputs:
+- name: input_file
+  label: OBJ or scene ZIP
+  type: file_path
+  required: true
+- name: dependency_files
+  label: Optional material and texture files
+  type: file_list
+  required: false
+  bind_source_by_default: false
+outputs:
+- name: report
+  label: OBJ statistics
+  type: file_path
+  extensions:
+  - .json
+  required: true
+parameter_groups:
+- title: Analysis settings
+  parameters:
+  - name: calculate_detailed_geometry
+    label: Calculate area and closed-surface volume
+    type: boolean
+    default: true
+  - name: include_material_analysis
+    label: Inspect material dependencies
+    type: boolean
+    default: true
+  - name: compute_mesh_quality
+    label: Measure mesh quality
+    type: boolean
+    default: false
+execution:
+  timeout: 300
+  profiles:
+  - id: local_docker
+    adapter: container_cli
+    runtime: docker
+    image: webhdp-zenodo-components:local
+    entrypoint:
+    - python
+    - /app/component_runner.py
+    - obj_statistics_extractor
+    config:
+      webhdp_contract: true
+      network: none
+    resources:
+      gpu_count: 0
+      cpus: 2
+      memory_mb: 2048
+  - id: hpc_singularity
+    adapter: hpc_link
+    handler: generic_singularity_component
+    runtime: singularity
+    image: ''
+    entrypoint:
+    - python
+    - /app/component_runner.py
+    - obj_statistics_extractor
+    resources:
+      gpu_count: 0
+      cpus: 2
+      memory_mb: 4096
+compatibility:
+  playground:
+    enabled: true
+install:
+  strategies:
+  - id: local_container
+    runtime: docker
+    profile: local_docker
+    image: webhdp-zenodo-components:local
+  - id: hpc_sif
+    runtime: singularity
+    profile: hpc_singularity
+  test: &id001
+    files:
+    - name: tetrahedron.obj
+      content: '# Unit tetrahedron
+
+        o Tetrahedron
+
+        v 0 0 0
+
+        v 1 0 0
+
+        v 0 1 0
+
+        v 0 0 1
+
+        f 1 3 2
+
+        f 1 2 4
+
+        f 1 4 3
+
+        f 2 3 4
+
+        '
+    inputs:
+      input_file: tetrahedron.obj
+    parameters: {}
+ui:
+  playground:
+    fields:
+      input_file:
+        widget: file_picker
+        accept_extensions:
+        - .obj
+        - .zip
+        help_text: Use a ZIP containing exactly one OBJ, with relative MTL/texture
+          paths retained. Each scene is one pipeline record.
+      dependency_files:
+        widget: file_picker
+        accept_extensions:
+        - .mtl
+        - .png
+        - .jpg
+        - .jpeg
+        - .tif
+        - .tiff
+        - .bmp
+        - .tga
+        - .webp
+    result:
+      artifact_views:
+      - id: results
+        label: Measured OBJ statistics
+        widget: file_download
+        extensions:
+        - .json
+      show_result_json: true
+      show_logs: true
+hpc:
+  install:
+    runtime: singularity
+    sif_required: true
+  test: *id001

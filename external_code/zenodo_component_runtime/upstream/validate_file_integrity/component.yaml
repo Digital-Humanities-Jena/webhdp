@@ -1,0 +1,141 @@
+metadata:
+  name: validate_file_integrity
+  label: File Integrity Validator
+  description: >
+    Performs basic validation checks on the file (e.g., readability, format-specific checks like image verification).
+  tags:
+    - file-validation
+  keywords:
+    - validation
+    - integrity
+  category: Validation Tools
+  version: "0.1.0"
+  status: alpha
+  created: "2025-08-21"
+  updated: "2025-08-21"
+  authors:
+    - name: Ukolov, Dominik
+      affiliation: Friedrich-Schiller-University Jena
+      orcid: "0000-0002-7904-3892"
+  contact:
+    email: "dominik.ukolov@uni-jena.de"
+  license:
+    type: GPLv3
+    url: "https://www.gnu.org/licenses/gpl-3.0.html.en"
+  component_schema: "0.1.0-alpha.2"
+
+
+sources:
+  record: ""
+  doi: ""
+  concept_doi: ""
+  git: ""
+
+
+structure:
+  required_files:
+    - processor.py
+    - main.py
+    - tests/test.py
+    - tests/test_image.jpg
+    - tests/test_data.json
+    - tests/test_model.glb
+    - tests/reference_data/jpg_validation_report.json
+    - tests/reference_data/json_validation_report.json
+    - tests/reference_data/glb_validation_report.json
+    - CHANGELOG.md
+
+  additional_files: []
+
+  directories:
+    - tests/validation_reports
+
+
+inputs:
+  - name: input_file
+    label: Input File Path
+    description: >
+      Path to the input file that will be validated for integrity and format compliance.
+    type: file_path
+    default: ""
+    required: true
+    validation_rules:
+      file_extensions: []
+    mutex_with: ["input_dir"]
+
+  - name: input_dir
+    label: Input Directory Path
+    description: >
+      Path to the directory containing input files that will be validated for integrity and format compliance.
+    type: dir_path
+    default: ""
+    required: true
+    validation_rules:
+      file_extensions: []
+    mutex_with: ["input_file"]
+    
+
+outputs:
+  - name: output_file
+    label: Validation Report
+    pattern: "{original_stem}_validation_report.json"
+    description: >
+      Report of File Integrity Validation, which contains validation errors, if any.
+    category: validation
+    type: "application/json"
+
+
+parameter_groups:
+  - title: Execution Mode
+    description: Choose the component's operational mode.
+    parameters:
+      - name: test
+        label: Run Internal Test Suite
+        type: boolean
+        default: false
+        description: >
+          If true, runs the component's built-in test suite instead of processing input files.
+          This will ignore other inputs and parameters.
+
+  - title: Advanced Options
+    description: Configure advanced execution and logging behavior.
+    parameters:
+      - name: config
+        label: Configuration File
+        type: file_path
+        description: >
+          Optional path to a JSON configuration file with advanced settings.
+        validation_rules:
+          file_extensions: [".json"]
+      
+      - name: verbose
+        label: Enable Verbose Logging
+        type: boolean
+        default: false
+        description: If enabled, prints detailed processing steps to the console.
+
+
+requirements:
+  python_environment:
+    python_version: ">=3.9"
+
+    packages:
+      - name: "python-magic"
+        version: ">=0.4.27"
+      - name: "Pillow"
+        version: ">=10.0.0"
+      - name: "PyPDF2"
+        version: ">=3.0.0"
+      - name: "mutagen"
+        version: ">=1.47.0"
+
+  system_dependencies: []
+
+  system_requirements: []
+
+
+execution:
+  idempotent: true
+  timeout: 300
+  on_error: continue_with_warning
+  on_timeout: retry

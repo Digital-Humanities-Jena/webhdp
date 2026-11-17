@@ -1,0 +1,137 @@
+metadata:
+  name: historic_sparse
+  label: Historic Sparse Reconstruction
+  description: Reconstruct cameras and sparse geometry with genuine COLMAP SIFT matching
+    and incremental mapping. This portable baseline does not use the upstream learned
+    matchers.
+  tags:
+  - historic-reconstruction
+  - photogrammetry
+  - colmap
+  category: Historic Reconstruction
+  version: 1.0.1
+  status: alpha
+  component_schema: 0.1.0-alpha.1
+distribution:
+  tier: external_installable
+  bundled_with_webhdp: false
+  installation_scope:
+  - local_container
+  - hpc_sif
+inputs:
+- name: input_file
+  label: Prepared image dataset ZIP
+  type: file_path
+  required: true
+outputs:
+- name: reconstruction
+  label: Reconstruction
+  type: file_path
+  extensions:
+  - .zip
+  required: true
+- name: point_cloud
+  label: Point cloud
+  type: file_path
+  extensions:
+  - .ply
+  required: true
+- name: report
+  label: Report
+  type: file_path
+  extensions:
+  - .json
+  required: true
+parameter_groups:
+- title: Processing settings
+  parameters:
+  - name: use_gpu
+    label: Use CUDA for feature extraction and matching
+    type: boolean
+    default: false
+  - name: max_num_features
+    label: Maximum features per photograph
+    type: integer
+    default: 8192
+    minimum: 128
+    maximum: 65536
+  - name: min_model_size
+    label: Minimum registered photographs
+    type: integer
+    default: 3
+    minimum: 2
+    maximum: 10000
+  - name: camera_model
+    label: Camera model
+    type: string
+    default: SIMPLE_RADIAL
+    enum:
+    - SIMPLE_RADIAL
+    - PINHOLE
+    - SIMPLE_PINHOLE
+    - OPENCV
+execution:
+  timeout: 7200
+  profiles:
+  - id: local_docker
+    adapter: container_cli
+    runtime: docker
+    image: webhdp-historic-reconstruction:local
+    entrypoint:
+    - python
+    - /app/component_runner.py
+    - sparse
+    config:
+      webhdp_contract: true
+      network: none
+    resources:
+      gpu_count: 0
+      cpus: 4
+      memory_mb: 8192
+  - id: hpc_singularity
+    adapter: hpc_link
+    handler: generic_singularity_component
+    runtime: singularity
+    image: ''
+    entrypoint:
+    - python
+    - /app/component_runner.py
+    - sparse
+    resources:
+      gpu_count: 1
+      cpus: 8
+      memory_mb: 32768
+compatibility:
+  playground:
+    enabled: true
+install:
+  strategies:
+  - id: local_container
+    runtime: docker
+    profile: local_docker
+    image: webhdp-historic-reconstruction:local
+  - id: hpc_sif
+    runtime: singularity
+    profile: hpc_singularity
+hpc:
+  install:
+    runtime: singularity
+    sif_required: true
+ui:
+  playground:
+    fields:
+      input_file:
+        widget: file_picker
+        accept_extensions:
+        - .zip
+    result:
+      artifact_views:
+      - id: results
+        label: Scientific artifacts and reports
+        widget: file_download
+        extensions:
+        - .json
+        - .ply
+        - .zip
+      show_result_json: true
+      show_logs: true

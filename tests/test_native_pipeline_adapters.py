@@ -1,6 +1,10 @@
+import json
 import subprocess
+import sys
+from pathlib import Path
 from unittest.mock import patch
 from flask import Flask
+import pytest
 
 from services.native_pipeline_adapters import (
     AdapterExecutionRequest,
@@ -9,6 +13,7 @@ from services.native_pipeline_adapters import (
     HpcLinkExecutionAdapter,
     LegacyHdpPythonAdapter,
     LocalCliAdapter,
+    component_execution_timeout,
 )
 
 
@@ -137,6 +142,212 @@ def test_container_cli_adapter_can_execute_webhdp_contract(mock_run, tmp_path):
     assert command[:4] == ["docker", "run", "--rm", "--network"]
     assert "WEBHDP_COMPONENT_REQUEST=/tmp/webhdp/request.json" in command
     assert "WEBHDP_COMPONENT_KEY=model_profiler" in command
+
+
+def test_contract_stages_separate_obj_dependencies_and_reuses_file_identity(tmp_path):
+    source = tmp_path / "source"
+    source.mkdir()
+    obj = source / "model.obj"
+    obj.write_text("mtllib material.mtl\nv 0 0 0\n")
+    mtl = source / "material.mtl"
+    mtl.write_text("newmtl stone\nmap_Kd texture.png\n")
+    texture = source / "texture.png"
+    texture.write_bytes(b"measured image bytes")
+    destination = tmp_path / "inputs"
+    destination.mkdir()
+    request = AdapterExecutionRequest(step_id="convert", profile={}, workdir=str(tmp_path),
+                                     inputs={"input_file": str(obj), "dependency_files": [str(mtl), str(texture), str(obj)]})
+    staged = ContainerCliAdapter._stage_contract_inputs(request, destination)
+    assert staged == {"input_file": "model.obj", "dependency_files": ["material.mtl", "texture.png", "model.obj"]}
+    assert (destination / staged["dependency_files"][0]).read_bytes() == mtl.read_bytes()
+    assert (destination / staged["dependency_files"][1]).read_bytes() == texture.read_bytes()
+    assert len(list(destination.iterdir())) == 3
+
+
+def test_private_adapters_do_not_stage_scalar_host_paths_or_linked_descendants(tmp_path):
+    root = tmp_path / 'run'
+    root.mkdir()
+    own = root / 'scene.obj'
+    own.write_text('owned')
+    private = tmp_path / 'other-tenant.txt'
+    private.write_text('private')
+    mount = root / 'staged'
+    mount.mkdir()
+    request = AdapterExecutionRequest(step_id='safe', profile={}, workdir=str(root),
+        inputs={'asset': str(own), 'label': str(private)}, metadata={
+            'private_execution_root': str(root), 'component_manifest': {'inputs': [
+                {'name': 'asset', 'type': 'file_path'}, {'name': 'label', 'type': 'string'},
+            ]},
+        })
+    staged = ContainerCliAdapter._stage_contract_inputs(request, mount)
+    assert staged == {'asset': 'scene.obj', 'label': str(private)}
+    assert sorted(path.name for path in mount.iterdir()) == ['scene.obj']
+    assert HpcLinkExecutionAdapter._local_paths_for_request(request) == [str(own)]
+    directory = root / 'data'
+    directory.mkdir()
+    (directory / 'alias.txt').symlink_to(private)
+    request.inputs['asset'] = str(directory)
+    with pytest.raises(ValueError, match='link or nonregular'):
+        ContainerCliAdapter._stage_contract_inputs(request, mount)
+
+
+def test_private_cli_inherits_no_worker_secrets(monkeypatch, tmp_path):
+    monkeypatch.setenv('WEBHDP_TEST_WORKER_SECRET', 'worker-only')
+    request = AdapterExecutionRequest(step_id='probe', profile={'entrypoint': [sys.executable, '-c',
+        "import os; assert 'WEBHDP_TEST_WORKER_SECRET' not in os.environ; assert os.environ['INVOCATION_CONFIG'] == 'allowed'"]},
+        workdir=str(tmp_path), inputs={}, environment={'INVOCATION_CONFIG': 'allowed'},
+        metadata={'private_execution_root': str(tmp_path)})
+    assert LocalCliAdapter().execute(request)['success'] is True
+
+
+def test_contract_file_lists_do_not_overwrite_colliding_basenames(tmp_path):
+    left, right = tmp_path / "left", tmp_path / "right"
+    left.mkdir(); right.mkdir()
+    a, b = left / "photo.jpg", right / "PHOTO.jpg"
+    a.write_bytes(b"first"); b.write_bytes(b"second")
+    destination = tmp_path / "inputs"
+    destination.mkdir()
+    request = AdapterExecutionRequest(step_id="prepare", profile={}, workdir=str(tmp_path),
+                                     inputs={"input_files": [str(a), str(b), str(a)]})
+    names = ContainerCliAdapter._stage_contract_inputs(request, destination)["input_files"]
+    assert names[0] == names[2]
+    assert names[0].casefold() != names[1].casefold()
+    assert [(destination / name).read_bytes() for name in names] == [b"first", b"second", b"first"]
+
+
+@pytest.mark.parametrize("requested,expected", [(None, 300), (900, 300), (45, 45)])
+def test_contract_enforces_profile_resources_and_tighter_timeout(tmp_path, monkeypatch, requested, expected):
+    observed = {}
+
+    def run(command, **kwargs):
+        observed.update(command=command, timeout=kwargs["timeout"])
+        (tmp_path / "response" / "response.json").write_text('{"success":true,"outputs":{}}')
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    result = ContainerCliAdapter().execute(AdapterExecutionRequest(
+        step_id="bounded", workdir=str(tmp_path),
+        profile={"runtime": "docker", "image": "fixture", "config": {"webhdp_contract": True},
+                 "resources": {"cpus": 1.5, "memory_mb": 512}},
+        metadata={"component_manifest": {"execution": {"timeout": 300}}, "timeout_seconds": requested},
+    ))
+    assert result["success"]
+    command = observed["command"]
+    assert command[command.index("--cpus") + 1] == "1.5"
+    assert command[command.index("--memory") + 1] == str(512 * 1024 * 1024)
+    assert observed["timeout"] == expected
+
+
+@pytest.mark.parametrize("value", [0, -1, True, "4", float("inf"), float("nan")])
+@pytest.mark.parametrize("resource", ["cpus", "memory_mb"])
+def test_contract_refuses_invalid_resource_limits_before_launch(tmp_path, monkeypatch, resource, value):
+    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: pytest.fail("Invalid resource launched Docker"))
+    result = ContainerCliAdapter().execute(AdapterExecutionRequest(
+        step_id="invalid", workdir=str(tmp_path), profile={"runtime": "docker", "image": "fixture",
+            "config": {"webhdp_contract": True}, "resources": {resource: value}},
+    ))
+    assert not result["success"] and "positive finite" in result["error"]
+
+
+def test_execution_timeout_preserves_unbounded_profiles_and_rejects_invalid_limits():
+    assert component_execution_timeout({}) is None
+    assert component_execution_timeout({}, 45) == 45
+    for value in (0, -1, True, "300", float("nan"), float("inf")):
+        with pytest.raises(ValueError, match="positive finite"):
+            component_execution_timeout({"execution": {"timeout": value}})
+
+
+def test_timed_out_docker_client_removes_only_its_container(tmp_path, monkeypatch):
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        if command[1] == "run":
+            raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    result = ContainerCliAdapter().execute(AdapterExecutionRequest(
+        step_id="timeout", workdir=str(tmp_path),
+        profile={"runtime": "docker", "image": "fixture", "config": {"webhdp_contract": True}},
+        metadata={"component_manifest": {"execution": {"timeout": 5}}},
+    ))
+    assert not result["success"]
+    name = calls[0][calls[0].index("--name") + 1]
+    assert name.startswith("webhdp-contract-")
+    assert calls[1] == ["docker", "rm", "--force", name]
+    assert result["cleanup_status"] == "removed"
+    assert result["container_name"] == name
+
+
+def test_missing_container_after_timeout_is_not_proof_of_cancelled_creation(tmp_path, monkeypatch):
+    def run(command, **kwargs):
+        if command[1] == "run":
+            raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+        return subprocess.CompletedProcess(command, 1, "", "Error response from daemon: No such container")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    result = ContainerCliAdapter().execute(AdapterExecutionRequest(
+        step_id="late-create", workdir=str(tmp_path),
+        profile={"runtime": "docker", "image": "fixture", "config": {"webhdp_contract": True}},
+        metadata={"component_manifest": {"execution": {"timeout": 5}}},
+    ))
+    assert not result["success"] and result["cleanup_status"] == "unconfirmed"
+    assert result["container_name"].startswith("webhdp-contract-")
+    assert "may still create it asynchronously" in result["warnings"][0]
+
+
+@pytest.mark.parametrize(
+    ("reported_path", "expected_error"),
+    [
+        ("/outputs/result.mid", None),
+        (None, "must name a file under /outputs"),
+        ("/outputs/missing.mid", "is missing"),
+        ("/outputs/linked.mid", "is missing or outside"),
+        ("/outputs/../result.mid", "is missing or outside"),
+        ("/outputs/report.json", "must have one of these extensions"),
+    ],
+)
+def test_webhdp_contract_checks_declared_file_before_passing_it_to_a_step(
+    monkeypatch, tmp_path, reported_path, expected_error
+):
+    def fake_run(command, **kwargs):
+        workdir = Path(kwargs["cwd"])
+        payload = json.loads((workdir / "request" / "request.json").read_text())
+        assert payload["component_key"] == "hmsm_scan_digitizer"
+        assert "WEBHDP_COMPONENT_KEY=hmsm_scan_digitizer" in command
+        outputs = workdir / "outputs"
+        (outputs / "result.mid").write_bytes(b"MThd")
+        (outputs / "report.json").write_text("{}")
+        (outputs / "linked.mid").symlink_to(outputs / "result.mid")
+        response_path = workdir / "response" / "response.json"
+        assert not response_path.exists()
+        response_path.write_text(json.dumps({
+            "success": True,
+            "outputs": {"midi_file": reported_path} if reported_path else {},
+        }))
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    stale = tmp_path / "response" / "response.json"
+    stale.parent.mkdir()
+    stale.write_text('{"success": true}')
+    result = ContainerCliAdapter().execute(AdapterExecutionRequest(
+        step_id="digitize_scan",
+        profile={"runtime": "docker", "image": "webhdp-hmsm-studio:local", "config": {"webhdp_contract": True}},
+        workdir=str(tmp_path),
+        metadata={"component_manifest": {
+            "metadata": {"name": "hmsm_scan_digitizer"},
+            "outputs": [{"name": "midi_file", "type": "file_path", "required": True, "extensions": [".mid"]}],
+        }},
+    ))
+    if expected_error is None:
+        assert result["success"] is True
+        assert result["outputs"]["midi_file"] == str((tmp_path / "outputs" / "result.mid").resolve())
+    else:
+        assert result["success"] is False
+        assert expected_error in result["error"]
+        assert result["outputs"] == {}
 
 
 @patch("subprocess.run")

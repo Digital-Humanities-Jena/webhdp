@@ -27,7 +27,6 @@ The canonical product contract is documented in `README.md` and `docs/architectu
 2. Copy `.env.example` to `.env` and fill only local development values.
 3. Install backend dependencies:
    - `uv sync --group dev`
-   - or `python -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt`
 4. Install frontend dependencies:
    - `cd frontend && npm ci`
 5. If you work on HPC Link:

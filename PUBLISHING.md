@@ -1,87 +1,75 @@
-# Publishing WebHDP on GitHub and Codeberg
+# Publishing WebHDP
 
-This directory has been prepared as a source repository for both GitHub and Codeberg.
+[WebHDP on GitHub](https://github.com/Digital-Humanities-Jena/webhdp) is the
+canonical public repository. Publishing a commit and tag does not deploy
+WebHDP. Use the [deployment guide](docs/docker_deployment_guide.md) and the
+[alpha.3 upgrade checklist](docs/guides/upgrade_alpha3.md) for that separate
+operation.
 
-## Before Publishing
+## Review the release tree
 
-1. Confirm the project license.
-   - The repository is licensed under the European Union Public Licence v. 1.2 or later (`EUPL-1.2`).
-   - Third-party dependencies, bundled documentation excerpts, and external tools retain their own licenses.
-2. Review `.env.example` and keep real secrets only in local `.env` or deployment secret stores.
-3. Confirm large binary datasets, reports, raw production exports, scratch tests, and local run outputs are excluded. Curated in-app documentation videos are allowed only when `make release-assets-check` passes; larger recordings should move to release artifacts / Git LFS storage.
-4. Confirm no credential-looking files are staged or present in the release tree. The local file
-   `hdp-3drepo-credentials.txt` is explicitly ignored and must not be published.
-5. Confirm release metadata is current:
-   - `RELEASE_NOTES.md`
-   - `THIRD_PARTY_NOTICES.md`
-   - `CITATION.cff`
-   - `docs/README.md`, `docs/guides/docker_quickstart.md`, and `docs/guides/planned_future_updates.md`
-   - `version.json`, `pyproject.toml`, frontend package versions, and Docker image tags
-6. Confirm the public release boundary:
-   - Core publication pipelines are `render` and `metadata_only`. The separately installed `mesh_optimization` and `model_georeferencing` pipelines have validated HPC workflows; see their component validation reports for supported inputs and limitations.
-   - Other optional components and deployment profiles require their own acceptance checks before being enabled.
-   - Do not deploy, sync, or run release preparation on HPC as part of repository publishing.
-7. Run:
-   - `make compose-check`
-   - `make release-assets-check`
-   - `uv sync --group dev && uv run pytest`
-   - `uv run python scripts/check_openapi_fresh.py`
-   - `cd frontend && npm ci && npm run test:unit && npm run build && npm run test:e2e && npm audit --omit=dev --audit-level=moderate`
-   - `make hpc-link-test`
-   - `cd hpc-link/frontend && npm ci && npm run lint && npm run build && npm audit --omit=dev --audit-level=moderate`
-   - `make devcontainer-check`
-   - `RUN_E2E=true RUN_DEVCONTAINER=true VERIFY_LOCAL_EDM_VALIDATOR=true CHECK_RELEASE_IMAGES=true ./scripts/release_check.sh`
+1. Review the changes since the remote branch, including already committed but
+   unpublished changes. Stage the intended files explicitly and inspect the
+   staged diff, binary assets and commit messages. Scan all objects introduced
+   by the push for secrets, including files removed in later commits.
+2. Keep real credentials, host configuration, model weights, private
+   datasets, test databases and scheduler/Zenodo receipts out of the public
+   history. Check screenshots and recordings for embedded account identifiers,
+   secrets and research data. Publish only cleared fixtures and media.
+3. Check the European Union Public Licence v. 1.2 or later and the applicable
+   [third-party notices](THIRD_PARTY_NOTICES.md). Review the redistribution
+   terms for each bundled runtime, model, schema, asset and excerpt.
+4. Match the release notes, citation, Python and frontend versions, lockfiles,
+   runtime version and Compose defaults with the intended tag. Regenerate
+   the API references after route or schema changes. Update the
+   [documentation index](docs/README.md) for changed operator/user workflows.
 
-Do not use `git add .` for the first public commit. Stage only the curated release tree and verify `git status --short --ignored` before committing.
+## Verify
 
-Do not use `npm audit fix --force` to clear audit findings unless the resulting dependency changes pass
-documentation/rendering regression tests.
+From the repository root:
 
-## Suggested Git Remotes
-
-```bash
-git remote add github git@github.com:Digital-Humanities-Jena/webhdp.git
-git remote add codeberg git@codeberg.org:<owner>/<repo>.git
-git push github main
-git push codeberg main
-git tag -a v0.1.0-alpha.2 -m "WebHDP v0.1.0-alpha.2"
-git push github v0.1.0-alpha.2
-git push codeberg v0.1.0-alpha.2
+```sh
+uv sync --group dev
+uv run pytest
+uv run python scripts/check_openapi_fresh.py
+make compose-check release-assets-check hpc-link-test devcontainer-check
 ```
 
-After pushing, confirm GitHub Actions and Codeberg/Woodpecker checks pass on the published commit.
+Then run frontend and gateway checks:
 
-The canonical public GitHub URL for release metadata is:
-
-`https://github.com/Digital-Humanities-Jena/webhdp`
-
-## Platform Notes
-
-- GitHub CI workflow is in `.github/workflows/ci.yml`.
-- Codeberg can use the included `.woodpecker.yml` when Woodpecker CI is enabled for the repository.
-- If Git LFS is later used for sample models or videos, initialize LFS before adding those files:
-
-```bash
-git lfs install
-git lfs track "*.glb" "*.fbx" "*.obj" "*.mp4" "*.mov" "*.zip"
+```sh
+(cd frontend && npm ci && npm run test:unit && npm run build && npm run test:e2e && npm audit --omit=dev --audit-level=moderate)
+(cd hpc-link/frontend && npm ci && npm run lint && npm run build && npm audit --omit=dev --audit-level=moderate)
 ```
 
-## Deployment Notes
+`scripts/release_check.sh` provides the combined check. The extended checks
+require Docker, Playwright browsers, and a correctly configured isolated
+runtime:
 
-For production deployment, set at least:
-
-- `SECRET_KEY`
-- `CREDENTIAL_ENCRYPTION_KEY`
-- `SETUP_BOOTSTRAP_TOKEN` or `DEFAULT_ADMIN_EMAIL` / `DEFAULT_ADMIN_PASSWORD`
-- `OEMBED_FRAME_ANCESTORS` with explicit trusted origins if public embeds are enabled
-- Zenodo, mail, storage, and HPC settings relevant to the deployment
-
-SQLite is the default database for the first low-user deployment. Move to Postgres if you see repeated
-`database is locked` errors, need multiple backend/worker replicas, need high write concurrency, require HA, or must
-place the database on network storage.
-
-Then deploy with:
-
-```bash
-docker compose up -d --build
+```sh
+RUN_E2E=true RUN_DEVCONTAINER=true VERIFY_LOCAL_EDM_VALIDATOR=true \
+  CHECK_RELEASE_IMAGES=true ./scripts/release_check.sh
 ```
+
+Record whether optional runtimes passed real execution or only unit, manifest
+or preflight checks. A GPU application needs a separate test of the pinned SIF,
+HPC-Link runner, input staging and artifact downloads on its target cluster.
+WebHDP-Link needs its worker and proxy checked end to end. Neither check should
+use production credentials or publish test data. Review dependency audit
+findings before making compatibility changes or publishing an affected build.
+
+## Publish the verified commit
+
+Check access and the target branch's protection rules. Create an annotated tag
+on the verified commit after the checks pass. For the canonical GitHub remote
+named `origin`, when direct pushes to `main` are allowed:
+
+```sh
+git tag -a v0.1.0-alpha.3 -m 'WebHDP v0.1.0-alpha.3'
+git push --atomic origin HEAD:refs/heads/main refs/tags/v0.1.0-alpha.3
+```
+
+Use the repository's protected branch workflow if direct push is disallowed.
+Tag the verified merged commit there. Confirm the remote branch and tag point
+to the intended commit and read the CI results. Publish to any mirrors only
+under that mirror's release policy.

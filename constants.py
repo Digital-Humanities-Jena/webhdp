@@ -604,6 +604,84 @@ OPTIONAL_3D_PIPELINE_DEFINITIONS = {
     THREE_D_POINT_CLOUD_READINESS_PIPELINE_ID: THREE_D_POINT_CLOUD_READINESS_PIPELINE_DEFINITION,
 }
 
+_HMSM_SOURCE_STEP = {
+    "execution_profile_ref": "local_docker",
+    "scope": "record",
+    "input_bindings": [{"kind": "input", "target": "input_file", "type": "pipeline_source_file"}],
+}
+_HMSM_DIGITIZE_STEP = {
+    **_HMSM_SOURCE_STEP,
+    "id": "digitize_scan",
+    "name": "Digitize carrier scan",
+    "component_ref": "hmsm_scan_digitizer",
+}
+_HMSM_RECONSTRUCT_STEP = {
+    **_HMSM_SOURCE_STEP,
+    "id": "reconstruct_carrier",
+    "name": "Reconstruct carrier from MIDI",
+    "component_ref": "hmsm_midi_reconstruction",
+}
+_HMSM_INTERPRET_STEP = {
+    **_HMSM_SOURCE_STEP,
+    "id": "interpret_midi",
+    "name": "Analyze MIDI interpretation",
+    "component_ref": "hmsm_midi_interpretation",
+}
+_HMSM_PIPELINE_DEFAULTS = {
+    "status": "active",
+    "modality": "Mechanical Music",
+    "processingMode": "root",
+    "version": "1.0.0",
+    "tags": ["hmsm", "mechanical-music", "local-container"],
+}
+HMSM_PIPELINE_DEFINITIONS = {
+    "hmsm_scan_digitization": {
+        **_HMSM_PIPELINE_DEFAULTS,
+        "identifier": "hmsm_scan_digitization",
+        "name": "HMSM Scan Digitization",
+        "description": "Extract candidate events and MIDI from a mechanical-music carrier scan, with optical evidence for review.",
+        "steps": [_HMSM_DIGITIZE_STEP],
+    },
+    "hmsm_midi_reconstruction": {
+        **_HMSM_PIPELINE_DEFAULTS,
+        "identifier": "hmsm_midi_reconstruction",
+        "name": "HMSM MIDI Reconstruction",
+        "description": "Generate a candidate physical carrier layout from MIDI with a declared model and reconstruction audit.",
+        "steps": [_HMSM_RECONSTRUCT_STEP],
+    },
+    "hmsm_midi_interpretation": {
+        **_HMSM_PIPELINE_DEFAULTS,
+        "identifier": "hmsm_midi_interpretation",
+        "name": "HMSM MIDI Interpretation",
+        "description": "Measure expressive and musical features in a staged MIDI file.",
+        "steps": [_HMSM_INTERPRET_STEP],
+    },
+    "hmsm_digitize_and_interpret": {
+        **_HMSM_PIPELINE_DEFAULTS,
+        "identifier": "hmsm_digitize_and_interpret",
+        "name": "HMSM Digitize and Interpret",
+        "description": "Digitize a carrier scan and analyze the MIDI produced for each record.",
+        "steps": [
+            _HMSM_DIGITIZE_STEP,
+            {
+                **_HMSM_INTERPRET_STEP,
+                "input_bindings": [{
+                    "kind": "input",
+                    "target": "input_file",
+                    "type": "artifact_file",
+                    "source_step": "digitize_scan",
+                    "source_output": "midi_file",
+                }],
+            },
+        ],
+    },
+}
+HMSM_COMPONENT_KEYS = frozenset(
+    step["component_ref"]
+    for definition in HMSM_PIPELINE_DEFINITIONS.values()
+    for step in definition["steps"]
+)
+
 SHARED_SCAN_OPTIONS = {
     "extensions": [".obj", ".mtl", ".jpg", ".png", ".xml", ".txt"],
     "primarysourceext": ".obj",

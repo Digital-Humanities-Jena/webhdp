@@ -49,10 +49,49 @@ Administrators can issue temporary recovery access for a user. That flow creates
 ## Operational Expectations
 
 Operators should:
-- set `CREDENTIAL_ENCRYPTION_KEY` separately from `SECRET_KEY`
+- use a random production `SECRET_KEY` of at least 32 bytes for HS256 JWT
+  signing and set `CREDENTIAL_ENCRYPTION_KEY` separately
 - rotate any credential that was committed, copied into an issue, pasted into a log, or exposed in a screenshot
 - keep `.env`, service-account JSON, local databases, logs, and session directories out of Git
 - verify backups and screenshots do not expose cleartext credentials
+
+## Connected Applications
+
+WebHDP-Link registers exact application origins and callbacks. It uses
+authorization code with S256 PKCE for browser consent and scopes access to
+the approved client, verified user and pipeline publications. The browser
+SDK holds Link access tokens in memory. Keep tokens out of persistent browser
+storage, callback URLs, telemetry and logs. A separate administrator-issued
+service token is for trusted server-side use only. Use a short lifetime and
+a secret store. Revoking a grant can stop authorized work at a subsequent
+execution boundary; ordinary browser token expiry allows the user to reconnect
+and track work already accepted.
+
+Link publications can use only installed, reviewed components. A native host
+CLI runs as the worker's OS identity and is not a filesystem sandbox. Use an
+isolated runtime for untrusted tools. The approved Sandbox upload component
+receives only the initiating user's active Sandbox credential at invocation;
+never put it in a pipeline parameter, image or HPC environment. Treat private
+Link data and its encryption key as separate backup material.
+
+## Reserved GPUs
+
+The browser does not receive gateway or SSH credentials. Use a separate
+administrator credential to register an operator-held scheduler job in the
+private gateway. Delegate the opaque registration to WebHDP's restricted
+service principal. WebHDP grants access only to named verified accounts with
+HPC Access. A claim is bound to the claimant's upload session. Only release an
+idle claim; detachment does not cancel the Slurm job. Protect the gateway
+registry, cluster identity and artifact workspace with private mounts.
+
+When cloud staging is enabled, the gateway checks HTTPS destination, expected
+host and public address for every request and redirect. Raw object references
+sent from WebHDP must match recorded mirrors of that upload session. When a
+native pipeline is authorized to upload a Zenodo draft remotely, it supplies
+the credential through standard input and the HTTPS Authorization header,
+without writing the credential to a remote file. It uploads only regular
+outputs to the selected Zenodo origin. This is separate from the local-only
+WebHDP-Link Sandbox example.
 
 ## Related Documentation
 
@@ -60,3 +99,5 @@ Operators should:
 - [Zenodo Account Deep Retrieval](zenodo_account_retrieval.md)
 - [Metadata And Retrieval Walkthroughs](video_guides/metadata_and_retrieval.md)
 - [WebHDP API Reference](../api/webhdp_api_reference.md)
+- [WebHDP-Link deployment runbook](webhdp_link_deployment.md)
+- [Pre-reserved GPU runbook](prereserved_gpu_demo.md)
