@@ -33,6 +33,8 @@ SINGLE_FILE_ALLOWED_EXTENSIONS = {
     ".tiff",
     ".xml",
     ".txt",
+    # An individual scene archive is a component input, not a batch extraction request.
+    ".zip",
 }
 
 

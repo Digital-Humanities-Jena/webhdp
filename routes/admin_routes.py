@@ -836,6 +836,35 @@ def validate_hpc_link_config():
     return APIResponse.success(data={"config": config}, message="HPC-Link configuration validation completed")
 
 
+@admin_bp.route("/hpc-reservations", methods=["GET", "POST"])
+@jwt_required()
+@require_admin
+def hpc_reservations():
+    from services.hpc_reservation_service import HpcReservationService
+
+    service = HpcReservationService(current_app.hpc_allocation_service)
+    if request.method == "GET":
+        return APIResponse.success(data={"reservations": service.list(admin=True)})
+    payload = request.get_json()
+    if not isinstance(payload, dict):
+        raise ValidationError("Expected a GPU reservation object")
+    actor = db.session.get(User, int(get_jwt_identity()))
+    return APIResponse.success(data={"reservation": service.register(actor, payload)}, status_code=201)
+
+
+@admin_bp.route("/hpc-reservations/<reservation_id>", methods=["PATCH"])
+@jwt_required()
+@require_admin
+def edit_hpc_reservation(reservation_id):
+    from services.hpc_reservation_service import HpcReservationService
+
+    payload = request.get_json()
+    if not isinstance(payload, dict):
+        raise ValidationError("Expected a GPU reservation object")
+    service = HpcReservationService(current_app.hpc_allocation_service)
+    return APIResponse.success(data={"reservation": service.edit(reservation_id, payload)})
+
+
 @admin_bp.route("/users/<int:user_id>/hdpc/import", methods=["POST"])
 @jwt_required()
 @require_admin

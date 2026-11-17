@@ -189,8 +189,8 @@ def test_hpc_link_adapter_forwards_component_payload_to_allocation_service():
         def __init__(self):
             self.payload = None
 
-        def get_active_for_session(self, session_id):
-            assert session_id == 42
+        def get_active_for_session(self, session_id, *, user_id=None):
+            assert session_id == 42 and user_id == 88
             return {"allocation_id": "alloc-1"}
 
         def stage_local_files(self, allocation, paths):
@@ -213,6 +213,7 @@ def test_hpc_link_adapter_forwards_component_payload_to_allocation_service():
         parameters={"width": 512},
         metadata={
             "session_id": 42,
+            "initiated_by_user_id": 88,
             "record_context": {"record_id": 7, "file_path": "/data/model.glb", "secret": "ignored"},
         },
     )

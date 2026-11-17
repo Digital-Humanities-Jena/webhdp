@@ -11,6 +11,7 @@ import re
 import shlex
 import socket
 import stat as stat_module
+import tempfile
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -62,6 +63,11 @@ from app.schemas.apps import (
     WebHdpComponentTestRequest,
     WebHdpPreflightRequest,
     WebHdpPreflightResponse,
+    WebHdpReservationFacts,
+    WebHdpReservationInspectRequest,
+    WebHdpReservationRegisterRequest,
+    WebHdpReservationResponse,
+    WebHdpSessionAdoptRequest,
     WebHdpSessionCreateRequest,
     WebHdpSessionCreateResponse,
     WebHdpSessionStatusResponse,
@@ -71,7 +77,7 @@ from app.schemas.apps import (
     WebHdpZenodoUploadedFile,
 )
 from app.ssh_manager import ssh_manager
-from app.security import enforce_allocation_policy
+from app.security import auth_store, enforce_allocation_policy, require_admin_user
 
 
 TERMINAL_STATES = {
@@ -229,6 +235,19 @@ class _WebHdpSession:
     expires_at: datetime
     status: str = "queued"
     owner_username: str = ""
+    reservation_id: str | None = None
+    claim_id: str | None = None
+
+
+@dataclass
+class _WebHdpReservation:
+    reservation_id: str
+    owner_username: str
+    facts: WebHdpReservationFacts
+    submit_time: int
+    owner_uid: int
+    closed_claims: dict[str, str] = field(default_factory=dict)
+    revoked: bool = False
 
 
 class HpcApplicationGatewayService:
@@ -240,6 +259,8 @@ class HpcApplicationGatewayService:
         self._pi3_sessions: dict[str, _Pi3Session] = {}
         self._marker_sessions: dict[str, _MarkerSession] = {}
         self._webhdp_sessions: dict[str, _WebHdpSession] = {}
+        self._webhdp_reservations: dict[str, _WebHdpReservation] = {}
+        self._active_webhdp_steps: set[str] = set()
         self._reserved_ports: set[int] = set()
         self._lock = asyncio.Lock()
         self._models = self._parse_vllm_models(self._settings.vllm_models_json)
@@ -268,8 +289,11 @@ class HpcApplicationGatewayService:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             return
-        sessions = payload.get("sessions") if isinstance(payload, dict) else []
-        if not isinstance(sessions, list):
+        if not isinstance(payload, dict):
+            return
+        sessions = payload.get("sessions", [])
+        reservations = payload.get("reservations", [])
+        if not isinstance(sessions, list) or not isinstance(reservations, list):
             return
         loaded: dict[str, _WebHdpSession] = {}
         for item in sessions:
@@ -292,14 +316,32 @@ class HpcApplicationGatewayService:
                     expires_at=self._parse_datetime(item.get("expires_at")),
                     status=str(item.get("status") or "queued"),
                     owner_username=str(item.get("owner_username") or ""),
+                    reservation_id=item.get("reservation_id"),
+                    claim_id=item.get("claim_id"),
                 )
             except (TypeError, ValueError):
                 continue
             loaded[session.session_id] = session
         self._webhdp_sessions.update(loaded)
+        for item in reservations:
+            try:
+                reservation = _WebHdpReservation(
+                    reservation_id=str(uuid.UUID(item["reservation_id"])),
+                    owner_username=item["owner_username"],
+                    facts=WebHdpReservationFacts.model_validate(item["facts"]),
+                    submit_time=int(item["submit_time"]),
+                    owner_uid=int(item["owner_uid"]),
+                    closed_claims={str(uuid.UUID(claim)): str(uuid.UUID(session)) if session else ""
+                                   for claim, session in item.get("closed_claims", {}).items()},
+                    revoked=item.get("revoked") is True,
+                )
+            except (KeyError, TypeError, ValueError, AttributeError):
+                continue
+            self._webhdp_reservations[reservation.reservation_id] = reservation
 
-    def _save_webhdp_sessions_to_registry(self) -> None:
+    def _save_webhdp_sessions_to_registry(self, *, required: bool = False) -> None:
         path = self._webhdp_registry_path()
+        temporary_path = None
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             sessions = []
@@ -321,11 +363,38 @@ class HpcApplicationGatewayService:
                         "expires_at": session.expires_at.isoformat(),
                         "status": session.status,
                         "owner_username": session.owner_username,
+                        "reservation_id": session.reservation_id,
+                        "claim_id": session.claim_id,
                     }
                 )
-            path.write_text(json.dumps({"sessions": sessions}, indent=2, sort_keys=True), encoding="utf-8")
-        except OSError:
-            return
+            reservations = [
+                {
+                    "reservation_id": reservation.reservation_id,
+                    "owner_username": reservation.owner_username,
+                    "facts": reservation.facts.model_dump(mode="json"),
+                    "submit_time": reservation.submit_time,
+                    "owner_uid": reservation.owner_uid,
+                    "closed_claims": reservation.closed_claims,
+                    "revoked": reservation.revoked,
+                }
+                for reservation in self._webhdp_reservations.values()
+            ]
+            with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, prefix=".webhdp-sessions-",
+                                             encoding="utf-8", delete=False) as stream:
+                temporary_path = Path(stream.name)
+                json.dump({"sessions": sessions, "reservations": reservations}, stream, indent=2, sort_keys=True)
+                stream.flush()
+                os.fsync(stream.fileno())
+            temporary_path.replace(path)
+        except OSError as exc:
+            if required:
+                raise HTTPException(status_code=503, detail="WebHDP reservation registry is not writable") from exc
+        finally:
+            if temporary_path is not None:
+                try:
+                    temporary_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
     @staticmethod
     def _parse_vllm_models(raw_json: str) -> dict[str, VllmModelDescriptor]:
@@ -1831,6 +1900,199 @@ echo "WebHDP component session ready. Waiting for component commands..."
 while true; do sleep 120; done
 """
 
+    async def _inspect_running_webhdp_job(self, job_id: str) -> tuple[WebHdpReservationFacts, int, int]:
+        """Read scheduler-owned structured fields instead of trusting a caller or job output."""
+        if not re.fullmatch(r"[1-9][0-9]{0,18}", job_id):
+            raise HTTPException(status_code=400, detail="Invalid Slurm job ID")
+        try:
+            stdout, _, code = await ssh_manager.run_command(f"scontrol --json show job {shlex.quote(job_id)}", timeout=20)
+        except (OSError, TimeoutError, asyncssh.Error) as exc:
+            raise HTTPException(status_code=503, detail="Could not reach the Slurm scheduler") from exc
+
+        try:
+            document = json.loads(stdout)
+            jobs = document["jobs"]
+        except (TypeError, json.JSONDecodeError, KeyError) as exc:
+            raise HTTPException(status_code=503, detail="Slurm did not return structured job information") from exc
+        if code or document.get("errors") or not isinstance(jobs, list) or len(jobs) != 1:
+            raise HTTPException(status_code=404, detail="Slurm job was not found as a single allocation")
+        job = jobs[0]
+        if not isinstance(job, dict) or str(job.get("job_id")) != job_id:
+            raise HTTPException(status_code=404, detail="Slurm did not return the requested job")
+        if job.get("user_name") != self._settings.hpc_user:
+            raise HTTPException(status_code=403, detail="The Slurm job is not owned by this gateway's SSH account")
+        if job.get("job_state") not in ("RUNNING", ["RUNNING"]):
+            raise HTTPException(status_code=409, detail="The Slurm job is not running")
+        try:
+            # Epoch timestamps avoid the login node's local timezone. Job ID,
+            # owner UID and submission/start times pin the actual allocation.
+            submitted = int(job["submit_time"])
+            started = datetime.fromtimestamp(int(job["start_time"]), timezone.utc)
+            expires = datetime.fromtimestamp(int(job["end_time"]), timezone.utc)
+            owner_uid = int(job["user_id"])
+            allocated = dict(value.split("=", maxsplit=1) for value in job["tres_alloc_str"].split(","))
+            memory = re.fullmatch(r"(\d+)([KMGT]?)", allocated["mem"])
+            if memory is None:
+                raise ValueError("Unsupported memory unit")
+            amount, unit = memory.groups()
+            memory_mb = int(amount) * {"": 1, "K": 1 / 1024, "M": 1, "G": 1024, "T": 1024**2}[unit]
+            partition, node = job["partition"], job["nodes"]
+            gpu_count, cpus = int(allocated["gres/gpu"]), int(allocated["cpu"])
+            gpu_types = [(key.removeprefix("gres/gpu:"), int(value)) for key, value in allocated.items()
+                         if key.startswith("gres/gpu:") and int(value) > 0]
+            gpu_type = gpu_types[0][0] if len(gpu_types) == 1 and gpu_types[0][1] == gpu_count else None
+            if (int(allocated["node"]) != 1 or not re.fullmatch(r"[A-Za-z0-9_.-]+", node)
+                    or not re.fullmatch(r"[A-Za-z0-9_.-]+", partition)
+                    or gpu_count < 1 or cpus < 1 or memory_mb < 1 or submitted < 1 or owner_uid < 1
+                    or started.timestamp() < submitted or expires <= datetime.now(timezone.utc)):
+                raise ValueError("Invalid or exhausted allocation")
+        except (KeyError, ValueError, TypeError, OverflowError, AttributeError, OSError) as exc:
+            raise HTTPException(status_code=409, detail="Expected a running single-node allocation with an allocated GPU, CPU and memory") from exc
+        return WebHdpReservationFacts(job_id=job_id, partition=partition, node_name=node, gpu_count=gpu_count,
+                                      gpu_type=gpu_type, cpus=cpus, memory_mb=int(memory_mb),
+                                      started_at=started, expires_at=expires), submitted, owner_uid
+
+    async def inspect_webhdp_reservation(self, request: WebHdpReservationInspectRequest,
+                                        actor: AuthenticatedUser) -> WebHdpReservationFacts:
+        require_admin_user(actor)
+        facts, _, _ = await self._inspect_running_webhdp_job(request.job_id)
+        return facts
+
+    @staticmethod
+    def _reservation_payload(reservation: _WebHdpReservation, facts: WebHdpReservationFacts,
+                             status: str) -> WebHdpReservationResponse:
+        return WebHdpReservationResponse(**facts.model_dump(), reservation_id=reservation.reservation_id, status=status)
+
+    @staticmethod
+    def _check_reservation_identity(reservation: _WebHdpReservation, facts: WebHdpReservationFacts,
+                                    submitted: int, owner_uid: int) -> None:
+        if (submitted != reservation.submit_time or owner_uid != reservation.owner_uid
+                or facts.model_dump(exclude={"expires_at"}) != reservation.facts.model_dump(exclude={"expires_at"})):
+            raise HTTPException(status_code=409, detail="The registered Slurm allocation has changed")
+
+    async def _current_reservation_facts(self, reservation: _WebHdpReservation) -> WebHdpReservationFacts:
+        facts, submitted, owner_uid = await self._inspect_running_webhdp_job(reservation.facts.job_id)
+        self._check_reservation_identity(reservation, facts, submitted, owner_uid)
+        return facts
+
+    def _get_reservation(self, reservation_id: str, actor: AuthenticatedUser) -> _WebHdpReservation:
+        reservation = self._webhdp_reservations.get(reservation_id)
+        if reservation is None:
+            raise HTTPException(status_code=404, detail="WebHDP reservation not found")
+        self._ensure_owner_access(reservation.owner_username, actor)
+        return reservation
+
+    def _active_claim(self, reservation_id: str) -> _WebHdpSession | None:
+        return next((row for row in self._webhdp_sessions.values() if row.reservation_id == reservation_id), None)
+
+    async def register_webhdp_reservation(self, request: WebHdpReservationRegisterRequest,
+                                         actor: AuthenticatedUser) -> WebHdpReservationResponse:
+        require_admin_user(actor)
+        owner = auth_store.get_user_by_username(request.owner_username)
+        if owner is None or not owner.is_active or not owner.invited:
+            raise HTTPException(status_code=400, detail="Select an active HPC-Link account")
+        facts, submitted, owner_uid = await self._inspect_running_webhdp_job(request.job_id)
+        async with self._lock:
+            for existing in self._webhdp_reservations.values():
+                if existing.facts.job_id != facts.job_id or existing.revoked:
+                    continue
+                if existing.owner_username != owner.username:
+                    raise HTTPException(status_code=409, detail="This job ID already has a different reservation registration")
+                self._check_reservation_identity(existing, facts, submitted, owner_uid)
+                return self._reservation_payload(existing, facts, "in_use" if self._active_claim(existing.reservation_id) else "available")
+            if any(row.job_id == facts.job_id for row in self._webhdp_sessions.values()):
+                raise HTTPException(status_code=409, detail="This Slurm job already belongs to a WebHDP session")
+            reservation_id = str(uuid.uuid4())
+            reservation = _WebHdpReservation(reservation_id, owner.username, facts, submitted, owner_uid)
+            self._webhdp_reservations[reservation_id] = reservation
+            try:
+                self._save_webhdp_sessions_to_registry(required=True)
+            except HTTPException:
+                del self._webhdp_reservations[reservation_id]
+                raise
+        return self._reservation_payload(reservation, facts, "available")
+
+    async def get_webhdp_reservation(self, reservation_id: str, actor: AuthenticatedUser) -> WebHdpReservationResponse:
+        async with self._lock:
+            reservation = self._get_reservation(reservation_id, actor)
+            if reservation.revoked:
+                raise HTTPException(status_code=404, detail="WebHDP reservation was revoked")
+        try:
+            facts = await self._current_reservation_facts(reservation)
+        except HTTPException:
+            status = "expired" if self._remaining_seconds(reservation.facts.expires_at) == 0 else "unavailable"
+            return self._reservation_payload(reservation, reservation.facts, status)
+        async with self._lock:
+            if reservation.revoked:
+                raise HTTPException(status_code=404, detail="WebHDP reservation was revoked")
+            status = "in_use" if self._active_claim(reservation_id) else "available"
+        return self._reservation_payload(reservation, facts, status)
+
+    async def revoke_webhdp_reservation(self, reservation_id: str, actor: AuthenticatedUser) -> None:
+        require_admin_user(actor)
+        async with self._lock:
+            reservation = self._get_reservation(reservation_id, actor)
+            if self._active_claim(reservation_id):
+                raise HTTPException(status_code=409, detail="Detach the active WebHDP claim before revoking the reservation")
+            if reservation.revoked:
+                return
+            reservation.revoked = True
+            try:
+                self._save_webhdp_sessions_to_registry(required=True)
+            except HTTPException:
+                reservation.revoked = False
+                raise
+
+    @staticmethod
+    def _adopted_session_payload(session: _WebHdpSession, facts: WebHdpReservationFacts) -> WebHdpSessionCreateResponse:
+        return WebHdpSessionCreateResponse(
+            session_id=session.session_id, app_id="webhdp", job_id=facts.job_id, partition=facts.partition,
+            gpu_count=facts.gpu_count, remote_session_dir=session.remote_session_dir, input_dir=session.remote_input_dir,
+            output_dir=session.remote_output_dir, status="running", created_at=session.created_at, expires_at=facts.expires_at,
+            externally_managed=True, reservation_id=session.reservation_id, node_name=facts.node_name,
+            gpu_type=facts.gpu_type, cpus=facts.cpus, memory_mb=facts.memory_mb,
+        )
+
+    async def adopt_webhdp_session(self, request: WebHdpSessionAdoptRequest,
+                                  actor: AuthenticatedUser) -> WebHdpSessionCreateResponse:
+        reservation_id, claim_id = str(request.reservation_id), str(request.claim_id)
+        async with self._lock:
+            reservation = self._get_reservation(reservation_id, actor)
+            if reservation.revoked:
+                raise HTTPException(status_code=404, detail="WebHDP reservation was revoked")
+            if claim_id in reservation.closed_claims:
+                raise HTTPException(status_code=409, detail="This WebHDP claim was already detached")
+            facts = await self._current_reservation_facts(reservation)
+            active = self._active_claim(reservation_id)
+            if active is not None:
+                if active.claim_id != claim_id:
+                    raise HTTPException(status_code=409, detail="This GPU reservation already has an active WebHDP claim")
+                return self._adopted_session_payload(active, facts)
+            session_id = str(uuid.uuid4())
+            remote_dir = f"{self._settings.hpc_apps_root.rstrip('/')}/webhdp/sessions/{session_id}"
+            duration_minutes = max(1, int((facts.expires_at - facts.started_at).total_seconds() / 60))
+            session = _WebHdpSession(
+                session_id=session_id, partition=facts.partition, gpu_type=facts.gpu_type, gpu_count=facts.gpu_count,
+                duration_minutes=duration_minutes, time_limit=self._minutes_to_slurm_time(duration_minutes),
+                job_id=facts.job_id, remote_session_dir=remote_dir, remote_input_dir=f"{remote_dir}/inputs",
+                remote_output_dir=f"{remote_dir}/outputs", cuda_module=None, created_at=datetime.now(timezone.utc),
+                expires_at=facts.expires_at, status="running", owner_username=reservation.owner_username,
+                reservation_id=reservation_id, claim_id=claim_id,
+            )
+            command = (f"umask 077; mkdir -p {shlex.quote(str(PurePosixPath(remote_dir).parent))} && "
+                       f"mkdir {shlex.quote(remote_dir)} && "
+                       f"mkdir {shlex.quote(session.remote_input_dir)} {shlex.quote(session.remote_output_dir)}")
+            _, _, code = await ssh_manager.run_command(command, timeout=20)
+            if code:
+                raise HTTPException(status_code=503, detail="Could not create a private WebHDP reservation workspace")
+            self._webhdp_sessions[session_id] = session
+            try:
+                self._save_webhdp_sessions_to_registry(required=True)
+            except HTTPException:
+                del self._webhdp_sessions[session_id]
+                raise
+        return self._adopted_session_payload(session, facts)
+
     async def create_webhdp_session(
         self,
         request: WebHdpSessionCreateRequest,
@@ -1915,6 +2177,8 @@ while true; do sleep 120; done
         if session is None:
             raise HTTPException(status_code=404, detail="WebHDP session not found")
         self._ensure_owner_access(session.owner_username, actor)
+        if session.reservation_id is not None:
+            return await self._get_adopted_session_status(session, actor)
         scheduler_state, scheduler_reason = await self._scheduler_state_for_job(session.job_id)
         remaining_seconds = self._remaining_seconds(session.expires_at)
         if scheduler_state == "RUNNING":
@@ -1945,6 +2209,24 @@ while true; do sleep 120; done
             created_at=session.created_at,
             expires_at=session.expires_at,
             remaining_seconds=remaining_seconds,
+        )
+
+    async def _get_adopted_session_status(self, session: _WebHdpSession,
+                                          actor: AuthenticatedUser) -> WebHdpSessionStatusResponse:
+        reservation = await self.get_webhdp_reservation(session.reservation_id, actor)
+        async with self._lock:
+            if self._webhdp_sessions.get(session.session_id) is not session:
+                raise HTTPException(status_code=404, detail="WebHDP session was detached")
+        usable = reservation.status == "in_use"
+        return WebHdpSessionStatusResponse(
+            session_id=session.session_id, app_id="webhdp", job_id=reservation.job_id,
+            partition=reservation.partition, gpu_count=reservation.gpu_count, status="running" if usable else "finished",
+            scheduler_state="RUNNING" if usable else ("COMPLETED_OR_UNKNOWN" if reservation.status == "expired" else "UNKNOWN"),
+            scheduler_reason=None if usable else reservation.status, node_name=reservation.node_name,
+            created_at=session.created_at, expires_at=reservation.expires_at,
+            remaining_seconds=self._remaining_seconds(reservation.expires_at), externally_managed=True,
+            reservation_id=session.reservation_id, gpu_type=reservation.gpu_type, cpus=reservation.cpus,
+            memory_mb=reservation.memory_mb,
         )
 
     async def get_webhdp_session_logs(
@@ -2185,11 +2467,65 @@ while true; do sleep 120; done
         )
 
     async def _run_in_webhdp_allocation(self, session: _WebHdpSession, inner_cmd: str, *, timeout: int | float = 7200):
+        if session.reservation_id is not None:
+            return await self._run_in_adopted_allocation(session, inner_cmd, timeout)
         command = (
             f"srun --jobid={shlex.quote(session.job_id)} --overlap --ntasks=1 --nodes=1 "
             f"bash -lc {shlex.quote(inner_cmd)}"
         )
         return await ssh_manager.run_command(command, timeout=timeout)
+
+    @staticmethod
+    def _adopted_step_name(session: _WebHdpSession) -> str:
+        return f"webhdp-{session.session_id}"
+
+    @staticmethod
+    def _adopted_guard_command(session: _WebHdpSession, command: str) -> str:
+        # The lock also covers the interval before Slurm reports the named
+        # step, including when the API process is restarted during launch.
+        lock_path = shlex.quote(session.remote_session_dir + "/.claim-execution.lock")
+        return f"flock -n -E 75 {lock_path} /bin/sh -c {shlex.quote(command)}"
+
+    async def _adopted_step_is_running(self, session: _WebHdpSession) -> bool:
+        # Slurm tracks active steps independently of this API process. That also
+        # detects an orphaned SSH client or a gateway restart during an execution.
+        job = shlex.quote(session.job_id)
+        try:
+            stdout, _, code = await ssh_manager.run_command(
+                f"squeue --steps --jobs={job} --noheader --format '%i|%j'", timeout=20,
+            )
+        except (OSError, TimeoutError, asyncssh.Error) as exc:
+            raise HTTPException(status_code=503, detail="Could not verify whether a WebHDP job step is still active") from exc
+        if code:
+            raise HTTPException(status_code=503, detail="Could not verify whether a WebHDP job step is still active")
+        marker = self._adopted_step_name(session)
+        return any(line.strip().split("|", maxsplit=1)[-1] == marker for line in stdout.splitlines())
+
+    async def _run_in_adopted_allocation(self, session: _WebHdpSession, inner_cmd: str, timeout: int | float):
+        async with self._lock:
+            if self._webhdp_sessions.get(session.session_id) is not session:
+                raise HTTPException(status_code=404, detail="WebHDP session was detached")
+            reservation = self._webhdp_reservations.get(session.reservation_id)
+            if reservation is None or reservation.revoked:
+                raise HTTPException(status_code=409, detail="WebHDP reservation is unavailable")
+            await self._current_reservation_facts(reservation)
+            if session.session_id in self._active_webhdp_steps or await self._adopted_step_is_running(session):
+                raise HTTPException(status_code=409, detail="This WebHDP reservation already has an active job step")
+            self._active_webhdp_steps.add(session.session_id)
+        command = (f"srun --jobid={shlex.quote(session.job_id)} --overlap --ntasks=1 --nodes=1 --immediate=15 "
+                   f"--job-name={shlex.quote(self._adopted_step_name(session))} bash -lc {shlex.quote(inner_cmd)}")
+        detached_marker = shlex.quote(session.remote_session_dir + "/.claim-detached")
+        guarded = self._adopted_guard_command(session, f"test ! -e {detached_marker} || exit 76; exec {command}")
+        try:
+            result = await ssh_manager.run_command(guarded, timeout=timeout)
+            if result[2] == 75:
+                raise HTTPException(status_code=409, detail="This WebHDP reservation already has an active job step")
+            if result[2] == 76:
+                raise HTTPException(status_code=409, detail="This WebHDP claim has been detached")
+            return result
+        finally:
+            async with self._lock:
+                self._active_webhdp_steps.discard(session.session_id)
 
     @staticmethod
     def _safe_component_segment(value: str, field: str) -> str:
@@ -2573,7 +2909,7 @@ while true; do sleep 120; done
         response_path = f"{session.remote_session_dir}/response-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S%f')}.json"
         payload = request.model_dump(mode="json")
         payload["remote_input_dir"] = session.remote_input_dir
-        payload["remote_output_dir"] = session.remote_output_dir
+        payload["remote_output_dir"] = session.remote_output_dir + "/invocation-" + uuid.uuid4().hex
         if request.component_key not in {"fast_renderer", "any_to_usdz"}:
             version = request.component_version or str(request.profile.get("version") or request.parameters.get("component_version") or "").strip() or None
             component_runtime = await self._load_webhdp_component_profile(request.component_key, version)
@@ -2597,7 +2933,7 @@ while true; do sleep 120; done
             f"export WEBHDP_COMPONENT_REQUEST={shlex.quote(request_path)}; "
             f"export WEBHDP_COMPONENT_RESPONSE={shlex.quote(response_path)}; "
             f"export WEBHDP_INPUT_DIR={shlex.quote(session.remote_input_dir)}; "
-            f"export WEBHDP_OUTPUT_DIR={shlex.quote(session.remote_output_dir)}; "
+            f"export WEBHDP_OUTPUT_DIR={shlex.quote(payload['remote_output_dir'])}; "
             f"{command_template}"
         )
         stdout, stderr, exit_code = await self._run_in_webhdp_allocation(
@@ -2904,13 +3240,59 @@ if __name__ == "__main__":
             error=parsed.get("error"),
         )
 
+    @staticmethod
+    def _detached_claim_response(reservation: _WebHdpReservation, session_id: str) -> SessionStopResponse:
+        return SessionStopResponse(session_id=session_id, job_id=reservation.facts.job_id, cancelled=False,
+                                   detached=True, message="WebHDP claim detached. The Slurm allocation was kept.")
+
+    async def _detach_webhdp_claim_locked(self, reservation: _WebHdpReservation, claim_id: str) -> SessionStopResponse:
+        if claim_id in reservation.closed_claims:
+            return self._detached_claim_response(reservation, reservation.closed_claims[claim_id])
+        active = self._active_claim(reservation.reservation_id)
+        session = active if active is not None and active.claim_id == claim_id else None
+        if session is not None:
+            if session.session_id in self._active_webhdp_steps or await self._adopted_step_is_running(session):
+                raise HTTPException(status_code=409, detail="This WebHDP claim has an active job step")
+            detached_marker = shlex.quote(session.remote_session_dir + "/.claim-detached")
+            command = self._adopted_guard_command(session, f"umask 077; touch {detached_marker}")
+            try:
+                _, _, code = await ssh_manager.run_command(command, timeout=20)
+            except (OSError, TimeoutError, asyncssh.Error) as exc:
+                raise HTTPException(status_code=503, detail="Could not close the remote WebHDP claim") from exc
+            if code == 75:
+                raise HTTPException(status_code=409, detail="This WebHDP claim is launching a job step")
+            if code:
+                raise HTTPException(status_code=503, detail="Could not close the remote WebHDP claim")
+            del self._webhdp_sessions[session.session_id]
+        session_id = session.session_id if session else ""
+        reservation.closed_claims[claim_id] = session_id
+        try:
+            self._save_webhdp_sessions_to_registry(required=True)
+        except HTTPException:
+            del reservation.closed_claims[claim_id]
+            if session is not None:
+                self._webhdp_sessions[session_id] = session
+            raise
+        return self._detached_claim_response(reservation, session_id)
+
+    async def detach_webhdp_claim(self, reservation_id: str, claim_id: str, actor: AuthenticatedUser) -> SessionStopResponse:
+        async with self._lock:
+            reservation = self._get_reservation(reservation_id, actor)
+            return await self._detach_webhdp_claim_locked(reservation, claim_id)
+
     async def stop_webhdp_session(self, session_id: str, actor: AuthenticatedUser) -> SessionStopResponse:
         async with self._lock:
             session = self._webhdp_sessions.get(session_id)
-        if session is None:
-            raise HTTPException(status_code=404, detail="WebHDP session not found")
-        self._ensure_owner_access(session.owner_username, actor)
-        async with self._lock:
+            if session is None:
+                for reservation in self._webhdp_reservations.values():
+                    if session_id and session_id in reservation.closed_claims.values():
+                        self._ensure_owner_access(reservation.owner_username, actor)
+                        return self._detached_claim_response(reservation, session_id)
+                raise HTTPException(status_code=404, detail="WebHDP session not found")
+            self._ensure_owner_access(session.owner_username, actor)
+            if session.reservation_id is not None:
+                reservation = self._get_reservation(session.reservation_id, actor)
+                return await self._detach_webhdp_claim_locked(reservation, session.claim_id)
             self._webhdp_sessions.pop(session_id, None)
             self._save_webhdp_sessions_to_registry()
         _, stderr, exit_code = await ssh_manager.run_command(f"scancel {shlex.quote(session.job_id)}")

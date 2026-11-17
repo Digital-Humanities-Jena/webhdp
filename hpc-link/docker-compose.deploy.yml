@@ -48,6 +48,8 @@ services:
       - MOCK_HPC=false
       - HPC_DATA_ROOT=${HPC_DATA_ROOT:-/srv/hpc-link/data}
       - HPC_APPS_ROOT=${HPC_APPS_ROOT:-/srv/hpc-link/apps}
+      # The container root is read-only. Keep claim state on the private writable mount.
+      - WEBHDP_SESSIONS_REGISTRY_PATH=${WEBHDP_SESSIONS_REGISTRY_PATH:-/data/auth/webhdp_sessions.json}
       - PI3_PYTHON=/srv/hpc-link/apps/pi3/venv/bin/python
       - PI3_REPO_PATH=/srv/hpc-link/apps/pi3/runtime/Pi3
       - PI3_DEFAULT_PARTITION=partition-a

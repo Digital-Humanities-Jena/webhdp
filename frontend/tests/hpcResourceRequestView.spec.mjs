@@ -10,6 +10,8 @@ const mocked = vi.hoisted(() => ({
 }))
 
 vi.mock('@/services/hpcResourceRequest.service', () => ({ default: mocked.service }))
+vi.mock('@/services/hpcLink.service', () => ({ default: { listReservations: async () => ({ data: { reservations: [] } }) } }))
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ user: { id: 7 } }) }))
 vi.mock('@/composables/useToast', () => ({ useToast: () => mocked.toast }))
 
 import HpcResourceRequestView from '../src/views/hpc/HpcResourceRequestView.vue'

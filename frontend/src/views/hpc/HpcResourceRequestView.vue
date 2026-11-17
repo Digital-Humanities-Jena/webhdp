@@ -77,6 +77,7 @@
           </aside>
         </div>
       </section>
+      <ReservedGpuAccess v-if="!loading && hasAccess" select-session class="mt-6" />
     </div>
   </div>
 </template>
@@ -85,6 +86,7 @@
 import { computed, reactive, ref } from 'vue'
 import hpcResourceRequestService from '@/services/hpcResourceRequest.service'
 import { useToast } from '@/composables/useToast'
+import ReservedGpuAccess from '@/components/hpc/ReservedGpuAccess.vue'
 
 const toast = useToast()
 const loading = ref(true)

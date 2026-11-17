@@ -919,6 +919,31 @@ class HpcLinkConfig(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
 
+class HpcReservation(db.Model):
+    __tablename__ = "hpc_reservations"
+
+    id = db.Column(db.Integer, primary_key=True)
+    public_id = db.Column(db.String(36), unique=True, nullable=False, default=lambda: str(uuid.uuid4()))
+    gateway_reservation_id = db.Column(db.String(128), nullable=False, unique=True)
+    gateway_url = db.Column(db.String(500), nullable=False)
+    label = db.Column(db.String(120), nullable=False)
+    enabled = db.Column(db.Boolean, nullable=False, default=True)
+    scheduler_json = db.Column(db.Text, nullable=False)
+    expires_at = db.Column(db.DateTime, nullable=False)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    grants = db.relationship("HpcReservationGrant", cascade="all, delete-orphan", lazy=True)
+
+
+class HpcReservationGrant(db.Model):
+    __tablename__ = "hpc_reservation_grants"
+
+    reservation_id = db.Column(db.Integer, db.ForeignKey("hpc_reservations.id", ondelete="CASCADE"), primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    user = db.relationship("User", lazy=True)
+
+
 class HpcAllocation(db.Model):
     __tablename__ = "hpc_allocations"
 
@@ -926,6 +951,7 @@ class HpcAllocation(db.Model):
     public_id = db.Column(db.String(36), unique=True, nullable=False, default=lambda: str(uuid.uuid4()))
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
     session_id = db.Column(db.Integer, db.ForeignKey("sessions.id"), nullable=True, index=True)
+    reservation_id = db.Column(db.Integer, db.ForeignKey("hpc_reservations.id"), nullable=True, index=True)
     purpose = db.Column(db.String(32), nullable=False, default="workflow")
     status = db.Column(db.String(32), nullable=False, default="queued", index=True)
     requested_partition = db.Column(db.String(64), nullable=False)
@@ -954,6 +980,7 @@ class HpcAllocation(db.Model):
 
     user = db.relationship("User", lazy=True)
     session = db.relationship("Session", lazy=True)
+    reservation = db.relationship("HpcReservation", lazy=True)
 
 
 class HpcArtifact(db.Model):

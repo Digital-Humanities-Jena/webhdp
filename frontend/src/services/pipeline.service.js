@@ -150,6 +150,15 @@ export default {
     return requestV2({ method: 'post', url: `/runs/${runId}/cancel`, suppressGlobalError: true })
   },
 
+  downloadPipelineArtifact(runId, artifactId) {
+    return requestV2({
+      method: 'get',
+      url: `/runs/${encodeURIComponent(runId)}/artifacts/${artifactId}`,
+      responseType: 'blob',
+      suppressGlobalError: true
+    })
+  },
+
   downloadPlaygroundArtifact(runId, artifactIndex, requestOptions = {}) {
     return requestV2({
       method: 'get',

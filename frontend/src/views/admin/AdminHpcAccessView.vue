@@ -25,6 +25,14 @@
             >
               Accounts
             </button>
+            <button
+              type="button"
+              class="rounded px-3 py-1.5 text-sm font-medium"
+              :class="activeTab === 'reservations' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-600'"
+              @click="activeTab = 'reservations'"
+            >
+              Reserved GPUs
+            </button>
           </div>
         </div>
 
@@ -77,7 +85,7 @@
           </div>
         </div>
 
-        <div v-else class="p-6">
+        <div v-else-if="activeTab === 'access'" class="p-6">
           <div class="mb-4 flex justify-end">
             <button type="button" class="rounded-md border border-indigo-200 px-3 py-1.5 text-xs font-medium text-indigo-700 hover:bg-indigo-50" @click="loadAccessUsers">Refresh</button>
           </div>
@@ -114,6 +122,7 @@
             </table>
           </div>
         </div>
+        <AdminGpuReservations v-else />
       </section>
     </div>
 
@@ -181,6 +190,7 @@
 import { ref, watch } from 'vue'
 import adminService from '@/services/admin.service'
 import { useToast } from '@/composables/useToast'
+import AdminGpuReservations from '@/components/hpc/AdminGpuReservations.vue'
 
 const toast = useToast()
 const activeTab = ref('requests')

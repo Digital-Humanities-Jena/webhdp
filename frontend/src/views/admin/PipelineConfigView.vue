@@ -249,6 +249,7 @@
           :validation-result="validationResult"
           :preflight-result="preflightResult"
           :preflight-session-id="preflightSessionId"
+          :uses-hpc="editor.steps.some(step => step.enabled !== false && step.execution_profile_ref === 'hpc_singularity')"
           :preflight-file-paths-text="preflightFilePathsText"
           :constructor-session-files="constructorSessionFiles"
           :constructor-session-directories="constructorSessionDirectories"
@@ -260,6 +261,7 @@
           @update:preflight-session-id="preflightSessionId = $event"
           @update:preflight-file-paths-text="preflightFilePathsText = $event"
           @refresh-session-resources="refreshSessionResources"
+          @reservation-changed="preflightResult = null"
           @run-pipeline-execution="runPipelineExecution"
           @run-preflight="runPreflight"
           />
@@ -1431,13 +1433,16 @@ async function runPreflight() {
   preflightResult.value = null
   validationResult.value = null
   try {
-    const payload = buildPipelinePayload()
+    const snapshot = JSON.stringify(editor)
+    // The server reserves runs against the saved config, including its original defaults.
+    const payload = loadedPipelineConfig.value && snapshot === savedEditorSnapshot.value
+      ? loadedPipelineConfig.value
+      : buildPipelinePayload()
     const localFilePaths = String(preflightFilePathsText.value || '')
       .split('\n')
       .map((line) => line.trim())
       .filter(Boolean)
     if (!Number.isSafeInteger(Number(preflightSessionId.value)) || Number(preflightSessionId.value) <= 0 || !localFilePaths.length) throw new Error('Choose a valid session ID and at least one file for preflight.')
-    const snapshot = JSON.stringify(editor)
     const context = JSON.stringify([preflightSessionId.value, preflightFilePathsText.value])
     const response = await pipelineService.preflightPipelineConstructor({
       pipeline_definition: payload,

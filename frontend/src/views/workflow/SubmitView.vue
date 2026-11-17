@@ -193,6 +193,14 @@
                   </span>
                 </div>
                 <ProgressBar v-if="hpcPreflightState === 'checking'" class="mt-3" :label="componentPreflightTitle" :show-label="false" />
+                <ReservedGpuAccess
+                  v-if="workflowStore.sessionId"
+                  class="mt-3"
+                  :session-id="workflowStore.sessionId"
+                  :disabled="submitting || processing || readinessBusy"
+                  @claimed="onReservedGpuChanged($event)"
+                  @released="onReservedGpuChanged(null)"
+                />
               </div>
 
               <div v-if="!isUsdzDisabled" class="p-4 bg-rose-50 rounded-lg border border-rose-200">
@@ -516,6 +524,7 @@
 
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import ReservedGpuAccess from '@/components/hpc/ReservedGpuAccess.vue'
 import SubmissionOutcomes from '@/components/workflow/SubmissionOutcomes.vue'
 import { isPermanentProgressError, progressRetryDelay } from '@/utils/progressMonitoring'
 import { useRoute, useRouter } from 'vue-router'
@@ -1957,6 +1966,13 @@ const ensureHpcAllocationAndPreflight = async (sessionId) => {
 
   hpcPreflightState.value = 'ready'
   hpcPreflightMessage.value = `HPC-Link is ready for ${components.join(', ')}.`
+}
+
+const onReservedGpuChanged = (allocation) => {
+  hpcAllocation.value = allocation
+  hpcPreflightState.value = 'idle'
+  hpcPreflightMessage.value = 'HDP Component runtimes will be checked before processing starts.'
+  checkReadiness()
 }
 
 const handleSubmit = async () => {

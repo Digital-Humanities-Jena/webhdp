@@ -14,6 +14,7 @@ from database.models import (
 from middleware import setup_error_handlers
 from routes.pipeline_v2_routes import pipeline_v2_bp
 from services.native_pipeline_system import NativePipelineSystemService
+from services.hpc_allocation_service import HpcAllocationService
 
 
 @pytest.fixture
@@ -68,6 +69,93 @@ def playground(tmp_path):
                               session=session, users=users, headers=headers, payload=payload, root=tmp_path)
         db.session.remove()
         db.drop_all()
+
+
+def _hpc_artifact_fixture(p, path_field="path", remote_path=None):
+    from database.models import HpcAllocation
+    from pathlib import Path
+
+    allocation = HpcAllocation(user_id=p.users[0].id, session_id=p.session.id, purpose="playground",
+                               status="running", requested_partition="vis", remote_session_id="owned-test-session",
+                               remote_session_dir="/remote/owned-test-session")
+    db.session.add(allocation)
+    profile = ComponentProfile.query.one()
+    profile.adapter = "hpc_link"
+    db.session.commit()
+    gateway = HpcAllocationService()
+    client = Mock()
+    client.download_to_file.side_effect = lambda url, destination, **kwargs: Path(destination).write_bytes(b"generated artifact bytes")
+    gateway.client = Mock(return_value=client)
+    p.app.hpc_allocation_service = gateway
+    p.service._ensure_component_runtime_available = Mock()
+    p.service._adapter_registry["hpc_link"] = p.adapter
+    remote_path = remote_path or "/remote/owned-test-session/outputs/invocation/model.zip"
+    p.adapter.execute.return_value = {
+        "success": True, "status": "completed", "outputs": {"dataset": remote_path},
+        "artifacts": [{"name": "model.zip", "artifact_kind": "file", path_field: remote_path}],
+    }
+    return gateway, client, remote_path
+
+
+@pytest.mark.parametrize("path_field", ["path", "remote_path"])
+def test_hpc_playground_materializes_portable_artifacts_for_authenticated_download(playground, path_field):
+    from pathlib import Path
+    from database.models import HpcArtifact
+
+    p = playground
+    gateway, client, remote = _hpc_artifact_fixture(p, path_field)
+    response = p.client.post("/api/v2/playground/execute", json=p.payload, headers=p.headers[0])
+    assert response.status_code == 201
+    run = response.get_json()["data"]["playground_run"]
+    assert run["status"] == "completed"
+    artifact = run["result"]["artifacts"][0]
+    assert artifact["remote_path"] == remote
+    assert Path(artifact["path"]).is_relative_to(p.root / "playground" / run["run_id"])
+    assert run["result"]["outputs"]["dataset"] == artifact["path"]
+    downloaded = p.client.get(f"/api/v2/playground/runs/{run['run_id']}/artifacts/0", headers=p.headers[0])
+    assert downloaded.status_code == 200 and downloaded.data == b"generated artifact bytes"
+    assert p.client.get(f"/api/v2/playground/runs/{run['run_id']}/artifacts/0", headers=p.headers[1]).status_code == 404
+    stored = HpcArtifact.query.one()
+    assert stored.remote_path == remote and stored.playground_run_id == PlaygroundRun.query.one().id
+    assert stored.pipeline_run_id is None and stored.step_run_id is None
+    client.download_to_file.assert_called_once()
+
+
+def test_hpc_playground_rejects_artifact_outside_owned_remote_session(playground):
+    from database.models import HpcArtifact
+
+    p = playground
+    gateway, client, _ = _hpc_artifact_fixture(p, remote_path="/remote/another-session/private.zip")
+    result = p.service.execute_playground(p.payload, p.users[0].id)
+    assert result["status"] == "failed"
+    assert "outside the active HPC allocation directory" in result["error"]
+    client.download_to_file.assert_not_called()
+    assert HpcArtifact.query.count() == 0
+
+
+def test_native_hpc_portable_path_contract_becomes_local_downstream_binding(playground):
+    from pathlib import Path
+    from services.pipeline_artifacts import pipeline_artifact_location
+
+    p = playground
+    gateway, client, remote = _hpc_artifact_fixture(p)
+    gateway.register_remote_artifacts = Mock()
+    result = p.adapter.execute.return_value
+    paths = p.service._materialize_hpc_artifacts(
+        {"db_session_id": p.session.id}, {"specific_output_dir": str(p.root / "outputs/record-7/source"), "record_id": 7},
+        SimpleNamespace(id=11), SimpleNamespace(id=12), "historic_prepare", result,
+    )
+    assert paths == [str(p.root / "outputs/record-7/source/step-12/outputs/model.zip")]
+    assert Path(paths[0]).read_bytes() == b"generated artifact bytes"
+    assert result["outputs"]["dataset"] == result["artifacts"][0]["path"] == paths[0]
+    assert result["artifacts"][0]["remote_path"] == remote
+    kwargs = gateway.register_remote_artifacts.call_args.kwargs
+    assert kwargs["pipeline_run_id"] == 11 and kwargs["step_run_id"] == 12 and kwargs["record_id"] == 7
+    # A successfully downloaded HPC artifact must also satisfy the native
+    # authenticated download resolver, not merely exist on the host.
+    artifact = SimpleNamespace(path=paths[0], pipeline_run_id=11, step_run_id=12, record_id=7)
+    step = SimpleNamespace(id=12, pipeline_run_id=11, record_id=7, record_path="/uploads/source.zip")
+    assert pipeline_artifact_location(SimpleNamespace(session_dir=str(p.root)), step, artifact) == Path(paths[0])
 
 
 def test_playground_execution_and_results_require_session_permission(playground):

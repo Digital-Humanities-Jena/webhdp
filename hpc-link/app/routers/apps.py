@@ -1,4 +1,6 @@
 """Application gateway endpoints for pre-specified app integrations."""
+from uuid import UUID
+
 from fastapi import APIRouter, Query, Request
 
 from app.limiter import limiter
@@ -39,6 +41,11 @@ from app.schemas.apps import (
     WebHdpComponentTestRequest,
     WebHdpPreflightRequest,
     WebHdpPreflightResponse,
+    WebHdpReservationFacts,
+    WebHdpReservationInspectRequest,
+    WebHdpReservationRegisterRequest,
+    WebHdpReservationResponse,
+    WebHdpSessionAdoptRequest,
     WebHdpSessionCreateRequest,
     WebHdpSessionCreateResponse,
     WebHdpSessionStatusResponse,
@@ -265,6 +272,51 @@ async def create_webhdp_session(request: Request, payload: WebHdpSessionCreateRe
     return await hpc_application_service.create_webhdp_session(payload, get_request_user(request))
 
 
+@router.post("/webhdp/reservations/inspect", response_model=WebHdpReservationFacts)
+@limiter.limit("10/minute")
+async def inspect_webhdp_reservation(request: Request, payload: WebHdpReservationInspectRequest):
+    """Read scheduler facts for an existing job owned by the gateway's SSH account."""
+    actor = get_request_user(request)
+    require_admin_user(actor)
+    return await hpc_application_service.inspect_webhdp_reservation(payload, actor)
+
+
+@router.post("/webhdp/reservations", response_model=WebHdpReservationResponse)
+@limiter.limit("10/minute")
+async def register_webhdp_reservation(request: Request, payload: WebHdpReservationRegisterRequest):
+    """Delegate an existing running GPU allocation to one HPC-Link account."""
+    actor = get_request_user(request)
+    require_admin_user(actor)
+    return await hpc_application_service.register_webhdp_reservation(payload, actor)
+
+
+@router.get("/webhdp/reservations/{reservation_id}", response_model=WebHdpReservationResponse)
+async def get_webhdp_reservation(request: Request, reservation_id: UUID):
+    """Inspect one registered reservation without revealing its private claim workspace."""
+    return await hpc_application_service.get_webhdp_reservation(str(reservation_id), get_request_user(request))
+
+
+@router.delete("/webhdp/reservations/{reservation_id}", status_code=204)
+async def revoke_webhdp_reservation(request: Request, reservation_id: UUID):
+    """Revoke idle delegation of a GPU reservation without affecting Slurm."""
+    actor = get_request_user(request)
+    require_admin_user(actor)
+    await hpc_application_service.revoke_webhdp_reservation(str(reservation_id), actor)
+
+
+@router.post("/webhdp/sessions/adopt", response_model=WebHdpSessionCreateResponse)
+@limiter.limit("10/minute")
+async def adopt_webhdp_session(request: Request, payload: WebHdpSessionAdoptRequest):
+    """Claim a registered reservation with a new private workflow workspace."""
+    return await hpc_application_service.adopt_webhdp_session(payload, get_request_user(request))
+
+
+@router.delete("/webhdp/reservations/{reservation_id}/claims/{claim_id}", response_model=SessionStopResponse)
+async def detach_webhdp_claim(request: Request, reservation_id: UUID, claim_id: UUID):
+    """Detach by a known claim ID, including recovery after a lost response."""
+    return await hpc_application_service.detach_webhdp_claim(str(reservation_id), str(claim_id), get_request_user(request))
+
+
 @router.get("/webhdp/sessions/{session_id}", response_model=WebHdpSessionStatusResponse)
 async def get_webhdp_session_status(request: Request, session_id: str):
     """Inspect scheduler state for a WebHDP component allocation."""
@@ -397,5 +449,5 @@ async def upload_webhdp_zenodo_draft(request: Request, session_id: str, payload:
 
 @router.delete("/webhdp/sessions/{session_id}", response_model=SessionStopResponse)
 async def stop_webhdp_session(request: Request, session_id: str):
-    """Cancel the WebHDP component allocation."""
+    """Release a WebHDP allocation or detach a claim on an independently held job."""
     return await hpc_application_service.stop_webhdp_session(session_id, get_request_user(request))

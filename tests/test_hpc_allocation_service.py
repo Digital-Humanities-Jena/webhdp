@@ -307,7 +307,11 @@ def test_local_staging_streams_dependency_tree_without_basename_collisions(tmp_p
     monkeypatch.setattr(service, 'client', lambda: Client())
     monkeypatch.setattr('services.hpc_allocation_service.db.session.commit', lambda: None)
     result = service.stage_local_files(allocation, files)['staged_files']
-    assert [r['remote_path'] for r in result] == ['/remote/inputs/first/buffer.bin', '/remote/inputs/模型/buffer.bin']
+    prefix = result[0]['remote_path'].split('/first/')[0]
+    assert prefix.startswith('/remote/inputs/invocation-')
+    assert [r['remote_path'] for r in result] == [prefix + '/first/buffer.bin', prefix + '/模型/buffer.bin']
+    again = service.stage_local_files(allocation, files)['staged_files']
+    assert {r['remote_path'] for r in result}.isdisjoint({r['remote_path'] for r in again})
     assert [r['local_path'] for r in result] == files
 
 

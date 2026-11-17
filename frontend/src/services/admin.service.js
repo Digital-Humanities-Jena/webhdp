@@ -69,6 +69,18 @@ const adminService = {
     return api.post(`/admin/hpc-access-users/${userId}/revoke`, {})
   },
 
+  listHpcReservations() {
+    return api.get('/admin/hpc-reservations')
+  },
+
+  registerHpcReservation(payload) {
+    return api.post('/admin/hpc-reservations', payload)
+  },
+
+  updateHpcReservation(reservationId, payload) {
+    return api.patch(`/admin/hpc-reservations/${encodeURIComponent(reservationId)}`, payload)
+  },
+
   getSessionMonitoring(params = {}) {
     return api.get('/admin/session-monitoring', { params })
   },

@@ -138,13 +138,22 @@
                 <button
                   type="button"
                   class="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
-                  :disabled="hpcPlaygroundLoading || !form.sessionId"
+                  :disabled="hpcPlaygroundLoading || !form.sessionId || Boolean(hpcPlaygroundAllocation?.reservation_id)"
                   @click="requestPlaygroundHpcAllocation"
                 >
-                  {{ hpcPlaygroundLoading ? 'Requesting...' : 'Allocate HPC' }}
+                  {{ hpcPlaygroundLoading ? 'Requesting...' : hpcPlaygroundAllocation?.reservation_id ? 'Reserved GPU selected' : 'Allocate HPC' }}
                 </button>
               </div>
             </div>
+
+            <ReservedGpuAccess
+              v-if="form.sessionId"
+              class="mt-3"
+              purpose="playground"
+              :session-id="form.sessionId"
+              :disabled="running || hpcPlaygroundLoading"
+              @session-allocation="setPlaygroundReservedGpu"
+            />
 
             <div v-if="errorMessage" class="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
               {{ errorMessage }}
@@ -299,6 +308,7 @@ import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, reactive, re
 import fileService from '@/services/file.service'
 import hpcLinkService from '@/services/hpcLink.service'
 import LoadingSpinner from '@/components/ui/LoadingSpinner.vue'
+import ReservedGpuAccess from '@/components/hpc/ReservedGpuAccess.vue'
 import PlaygroundFieldRenderer from '@/components/tools/playground/PlaygroundFieldRenderer.vue'
 import { useToast } from '@/composables/useToast'
 import { useAuthStore } from '@/stores/auth'
@@ -450,6 +460,18 @@ async function requestPlaygroundHpcAllocation() {
     localError.value = hpcPlaygroundMessage.value
   } finally {
     hpcPlaygroundLoading.value = false
+  }
+}
+
+function setPlaygroundReservedGpu(allocation) {
+  if (allocation) {
+    hpcPlaygroundAllocation.value = allocation
+    hpcPlaygroundMessage.value = allocation.status === 'running'
+      ? 'A reserved GPU is ready for this Playground session.'
+      : 'HPC-Link is confirming the reserved GPU for this Playground session.'
+  } else if (hpcPlaygroundAllocation.value?.reservation_id) {
+    hpcPlaygroundAllocation.value = null
+    hpcPlaygroundMessage.value = 'Allocate HPC resources before running HDP Components remotely.'
   }
 }
 

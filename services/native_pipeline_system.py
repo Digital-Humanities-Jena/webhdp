@@ -1281,7 +1281,9 @@ class NativePipelineSystemService:
                     raise ValidationError('The queued component version or profile is unavailable.')
                 session_row, definition, _, profile, manifest, payload = self._prepare_playground_request(
                     _json_loads(run.request_json, {}), run.initiated_by_user_id, version=version, profile=profile)
-                result = self._execute_playground_component(session_row, definition, profile, manifest, payload, run.public_id)
+                result = self._execute_playground_component(
+                    session_row, definition, profile, manifest, payload, run.public_id, user_id=run.initiated_by_user_id,
+                )
                 run.status = PipelineRunStatus.COMPLETED if result.get('success', True) else PipelineRunStatus.FAILED
                 run.result_json = _json_dumps(result)
                 run.logs_json = _json_dumps(result.get('logs', {}))
@@ -1297,36 +1299,47 @@ class NativePipelineSystemService:
             db.session.commit()
             return self._serialize_playground_run(run)
 
-    def _execute_playground_component(self, session_row, component_definition, profile, manifest, payload, run_id):
+    def _execute_playground_component(self, session_row, component_definition, profile, manifest, payload, run_id, *, user_id=None):
         workdir = os.path.join(session_row.session_dir, "playground", run_id)
         os.makedirs(workdir, exist_ok=True)
         adapter_name = profile.adapter
-        if self._should_route_component_to_hpc_link(component_definition.key, session_row.id):
+        execution_context = {"db_session_id": session_row.id, "initiated_by_user_id": user_id, "outputs_dir": workdir}
+        if self._should_route_component_to_hpc_link(component_definition.key, session_row.id, user_id):
             adapter_name = "hpc_link"
         elif adapter_name == "hpc_link":
             self._ensure_component_runtime_available(
                 component_definition.key,
-                {"db_session_id": session_row.id},
+                execution_context,
                 hpc_only=True,
             )
         elif component_definition.key in {"fast_renderer", "any_to_usdz"}:
             self._ensure_component_runtime_available(
                 component_definition.key,
-                {"db_session_id": session_row.id},
+                execution_context,
             )
 
         request = AdapterExecutionRequest(
             step_id=component_definition.key,
-            profile={**self._profile_payload(profile, component_key=component_definition.key), "adapter": adapter_name},
+            profile={**self._profile_payload(profile, component_key=component_definition.key), "adapter": adapter_name, "version": manifest.get("metadata", {}).get("version")},
             workdir=workdir,
             inputs=payload['inputs'],
             parameters=payload['parameters'],
-            metadata={"manifest": manifest, "timeout_seconds": payload.get('timeout_seconds', 3600), "session_id": session_row.id},
+            metadata={"manifest": manifest, "timeout_seconds": payload.get('timeout_seconds', 3600),
+                      "session_id": session_row.id, "initiated_by_user_id": user_id},
         )
         adapter = self._adapter_registry.get(adapter_name)
         if adapter is None:
             raise ValidationError("Unsupported adapter", details={"adapter": adapter_name})
-        return adapter.execute(request)
+        result = adapter.execute(request)
+        if adapter_name == "hpc_link":
+            playground_run = PlaygroundRun.query.filter_by(public_id=run_id).one()
+            self._materialize_hpc_artifacts(
+                execution_context,
+                {"specific_output_dir": workdir, "record_id": None},
+                None, None, component_definition.key, result,
+                playground_run_id=playground_run.id,
+            )
+        return result
 
     def _ensure_builtin_components_seeded(self) -> None:
         for component_key, manifest in self._builtin_component_manifests().items():
@@ -1619,6 +1632,7 @@ class NativePipelineSystemService:
         return summary
 
     def _serialize_pipeline_run(self, run: PipelineRun, user_id=None) -> Dict[str, Any]:
+        from services.pipeline_artifacts import pipeline_artifact_location
         from services.submission_outcomes import summarize_outcomes
         version = db.session.get(PipelineVersion, run.pipeline_version_id)
         config = _json_loads(version.config_json, {})
@@ -1627,6 +1641,7 @@ class NativePipelineSystemService:
         result = _json_loads(run.result_json, {})
         outcomes = summarize_outcomes(result, session, run_id=run.public_id, config=config,
                                       recoverable=bool(editable and run.status == PipelineRunStatus.FAILED and _json_loads(run.request_json, {}).get('_checkpoints')))
+        steps_by_id = {step.id: step for step in run.step_runs}
         return {
             "run_id": run.public_id,
             "session_id": run.session_id,
@@ -1646,6 +1661,8 @@ class NativePipelineSystemService:
             "steps": [self._serialize_step_run(step) for step in run.step_runs],
             "artifacts": [
                 {
+                    "id": artifact.id,
+                    "downloadable": pipeline_artifact_location(session, steps_by_id.get(artifact.step_run_id), artifact) is not None,
                     "name": artifact.name,
                     "path": artifact.path,
                     "artifact_kind": artifact.artifact_kind,
@@ -3704,15 +3721,15 @@ class NativePipelineSystemService:
     def _component_can_use_hpc_link(self, component_key: str) -> bool:
         return hpc_required_component(component_key)
 
-    def _has_active_hpc_allocation(self, session_id: Any) -> bool:
+    def _has_active_hpc_allocation(self, session_id: Any, user_id=None) -> bool:
         try:
             if session_id in (None, "") or not hasattr(current_app, "hpc_allocation_service"):
                 return False
-            return current_app.hpc_allocation_service.get_active_for_session(int(session_id)) is not None
+            return current_app.hpc_allocation_service.get_active_for_session(int(session_id), user_id=user_id) is not None
         except Exception:
             return False
 
-    def _should_route_component_to_hpc_link(self, component_key: str, session_id: Any) -> bool:
+    def _should_route_component_to_hpc_link(self, component_key: str, session_id: Any, user_id=None) -> bool:
         if not self._component_can_use_hpc_link(component_key):
             return False
         try:
@@ -3721,7 +3738,7 @@ class NativePipelineSystemService:
                 return False
         except Exception:
             return False
-        return self._has_active_hpc_allocation(session_id)
+        return self._has_active_hpc_allocation(session_id, user_id)
 
     def _local_component_health(self, component_key: str) -> bool:
         try:
@@ -3742,7 +3759,7 @@ class NativePipelineSystemService:
     ) -> None:
         if not hpc_only and not self._component_can_use_hpc_link(component_key):
             return
-        if self._has_active_hpc_allocation(execution_context.get("db_session_id")):
+        if self._has_active_hpc_allocation(execution_context.get("db_session_id"), execution_context.get("initiated_by_user_id")):
             return
         hpc_link_available = False
         try:
@@ -3884,7 +3901,9 @@ class NativePipelineSystemService:
             execution_context,
             hpc_only=adapter_name == "hpc_link",
         )
-        if self._should_route_component_to_hpc_link(component_key, execution_context.get("db_session_id")):
+        if self._should_route_component_to_hpc_link(
+            component_key, execution_context.get("db_session_id"), execution_context.get("initiated_by_user_id"),
+        ):
             adapter_name = "hpc_link"
         adapter = self._adapter_registry.get(adapter_name)
         if adapter is None:
@@ -3922,7 +3941,7 @@ class NativePipelineSystemService:
             )
             request = AdapterExecutionRequest(
                 step_id=step["id"],
-                profile={**self._profile_payload(profile, component_key=component_key), "adapter": adapter_name},
+                profile={**self._profile_payload(profile, component_key=component_key), "adapter": adapter_name, "version": component_version.version},
                 workdir=execution_context["outputs_dir"],
                 inputs=request_inputs,
                 parameters=_deepcopy(bucket["parameters"]),
@@ -4054,13 +4073,25 @@ class NativePipelineSystemService:
             execution_context,
             hpc_only=adapter_name == "hpc_link",
         )
-        if self._should_route_component_to_hpc_link(component_key, execution_context.get("db_session_id")):
+        if self._should_route_component_to_hpc_link(
+            component_key, execution_context.get("db_session_id"), execution_context.get("initiated_by_user_id"),
+        ):
             adapter_name = "hpc_link"
 
+        profile_payload = {**self._profile_payload(profile, component_key=component_key), "adapter": adapter_name, "version": component_version.version}
+        workdir = record_context["specific_output_dir"]
+        if (
+            adapter_name == "container_cli"
+            and profile_payload.get("runtime") == "docker"
+            and (profile_payload.get("config") or {}).get("webhdp_contract")
+        ):
+            # Each invocation mounts its own inputs, outputs, and response file.
+            workdir = os.path.join(workdir, f"step-{step_run.id}")
+            os.makedirs(workdir, exist_ok=True)
         request = AdapterExecutionRequest(
             step_id=step["id"],
-            profile={**self._profile_payload(profile, component_key=component_key), "adapter": adapter_name},
-            workdir=record_context["specific_output_dir"],
+            profile=profile_payload,
+            workdir=workdir,
             inputs=resolved_inputs,
             parameters=resolved_parameters,
             metadata={
@@ -4589,18 +4620,25 @@ class NativePipelineSystemService:
         self,
         execution_context: Dict[str, Any],
         record_context: Dict[str, Any],
-        pipeline_run: PipelineRun,
-        step_run: StepRun,
+        pipeline_run: Optional[PipelineRun],
+        step_run: Optional[StepRun],
         component_key: str,
         result: Dict[str, Any],
+        *,
+        playground_run_id: Optional[int] = None,
     ) -> List[str]:
         artifacts = result.get("artifacts") if isinstance(result.get("artifacts"), list) else []
         remote_paths: List[str] = []
         for artifact in artifacts:
             if isinstance(artifact, dict):
-                remote_path = str(artifact.get("remote_path") or "").strip()
+                # The portable component contract declares ``path``. Older
+                # gateway handlers already add ``remote_path``; accept both
+                # while keeping the allocation-scoped download guard below.
+                remote_path = str(artifact.get("remote_path") or artifact.get("path") or "").strip()
                 if remote_path and remote_path not in remote_paths:
                     remote_paths.append(remote_path)
+                if remote_path:
+                    artifact["remote_path"] = remote_path
 
         outputs = result.get("outputs") if isinstance(result.get("outputs"), dict) else {}
         for candidate in _listify(outputs.get("output_path")) + _listify(outputs.get("render_outputs")) + _listify(outputs.get("thumbnail_files")):
@@ -4611,14 +4649,20 @@ class NativePipelineSystemService:
             return []
 
         db_session_id = execution_context.get("db_session_id")
-        allocation = current_app.hpc_allocation_service.get_active_for_session(int(db_session_id)) if db_session_id else None
+        allocation = current_app.hpc_allocation_service.get_active_for_session(
+            int(db_session_id), user_id=execution_context.get("initiated_by_user_id"),
+        ) if db_session_id else None
         if allocation is None:
             raise FileProcessingError("Cannot materialize HPC artifacts without an active HPC-Link allocation.")
 
         destination_dir = str(record_context.get("specific_output_dir") or execution_context.get("outputs_dir") or "").strip()
         if not destination_dir:
             raise FileProcessingError("Cannot materialize HPC artifacts without a local output directory.")
-        if component_key == "fast_renderer":
+        if step_run is not None:
+            # Match the native adapter output contract and authenticated
+            # artifact resolver, including its isolated ``outputs`` directory.
+            destination_dir = os.path.join(destination_dir, f"step-{step_run.id}", "outputs")
+        elif component_key == "fast_renderer":
             destination_dir = os.path.join(destination_dir, "render")
         elif component_key == "any_to_usdz":
             destination_dir = os.path.join(destination_dir, "usdz")
@@ -4642,8 +4686,9 @@ class NativePipelineSystemService:
                 allocation,
                 component_key=component_key,
                 artifacts=artifacts,
-                pipeline_run_id=pipeline_run.id,
-                step_run_id=step_run.id,
+                pipeline_run_id=pipeline_run.id if pipeline_run is not None else None,
+                step_run_id=step_run.id if step_run is not None else None,
+                playground_run_id=playground_run_id,
                 record_id=record_context.get("record_id"),
             )
             for artifact in artifacts:

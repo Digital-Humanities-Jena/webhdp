@@ -1405,6 +1405,7 @@ def execute_submission_pipeline(
         "execution_items": execution_items,
         "db_session_id": db_session_id,
         "db_session": db_session,
+        "initiated_by_user_id": queued_run.initiated_by_user_id if queued_run else readiness_user_id,
         "hdpc_path": hdpc_path,
         "is_sandbox": effective_is_sandbox,
         "access_token": access_token,

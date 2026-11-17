@@ -7,12 +7,15 @@ from flask_jwt_extended import get_jwt_identity, jwt_required
 
 from api_utils import APIResponse
 from database.database import db
-from database.models import User
+from database.models import Session, User
+from exceptions import ValidationError
 from services.hdp_component_policy import (
     component_runtime_report,
     webhdp_deployment_class,
     webhdp_deployment_label,
 )
+from services.hpc_reservation_service import HpcReservationService
+from services.session_access_service import can_view_session
 
 hpc_link_bp = Blueprint("hpc_link", __name__)
 
@@ -37,8 +40,10 @@ def get_hpc_link_status():
     active_hpc_allocation = False
     if session_id not in (None, ""):
         try:
-            active_hpc_allocation = service.get_active_for_session(int(session_id)) is not None
-        except Exception:
+            session = db.session.get(Session, int(session_id))
+            active_hpc_allocation = bool(session and can_view_session(session, user)
+                                         and service.get_active_for_session(session.id, user_id=user.id))
+        except (TypeError, ValueError):
             active_hpc_allocation = False
     available = bool(config.enabled and config.base_url)
     can_allocate = service.user_can_allocate(user, purpose=purpose)
@@ -67,6 +72,26 @@ def get_hpc_link_status():
             else None
         )
     return APIResponse.success(data=payload)
+
+
+@hpc_link_bp.route("/reservations", methods=["GET"])
+@jwt_required()
+def list_gpu_reservations():
+    purpose = request.args.get("purpose", "workflow")
+    if purpose not in ("workflow", "playground"):
+        raise ValidationError("Select workflow or playground as the reservation purpose")
+    service = HpcReservationService(current_app.hpc_allocation_service)
+    return APIResponse.success(data={"reservations": service.list(user=_current_user())})
+
+
+@hpc_link_bp.route("/reservations/<reservation_id>/claim", methods=["POST"])
+@jwt_required()
+def claim_gpu_reservation(reservation_id):
+    payload = request.get_json()
+    if not isinstance(payload, dict):
+        raise ValidationError("Expected a GPU claim object")
+    service = HpcReservationService(current_app.hpc_allocation_service)
+    return APIResponse.success(data={"allocation": service.claim(reservation_id, _current_user(), payload)})
 
 
 @hpc_link_bp.route("/allocations", methods=["POST"])

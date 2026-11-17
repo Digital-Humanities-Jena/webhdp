@@ -51,6 +51,13 @@
           <p v-if="sessionsError" role="alert" class="mt-2 text-sm text-rose-700">{{ sessionsError }}</p>
           <button type="button" class="mt-2 text-xs text-indigo-700 underline" :disabled="loadingSessions" @click="$emit('retry-sessions')">Refresh sessions</button>
         </div>
+        <ReservedGpuAccess
+          v-if="preflightSessionId && usesHpc"
+          :session-id="preflightSessionId"
+          :disabled="executingPipeline"
+          @claimed="$emit('reservation-changed')"
+          @released="$emit('reservation-changed')"
+        />
         <div v-if="preflightSessionId" class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
           <div class="flex flex-wrap items-center justify-between gap-4">
             <div>
@@ -197,9 +204,10 @@
             <span class="font-semibold text-slate-900">{{ stepName(step) }}</span>
             <span :class="step.status === 'completed' ? 'text-emerald-700' : 'text-rose-700'" class="font-medium">{{ step.status }}</span>
           </div>
-          <div v-if="Object.keys(stepOutputs(step)).length" class="mt-1 break-all">
-            Outputs: {{ JSON.stringify(stepOutputs(step)) }}
-          </div>
+          <details v-if="Object.keys(stepOutputs(step)).length" class="mt-1">
+            <summary class="cursor-pointer">Step outputs</summary>
+            <pre class="mt-1 whitespace-pre-wrap break-all">{{ JSON.stringify(stepOutputs(step), null, 2) }}</pre>
+          </details>
           <div v-if="step.error" class="mt-1 text-rose-700">{{ step.error }}</div>
         </article>
       </div>
@@ -208,12 +216,26 @@
         <div class="mt-2 space-y-2">
           <div
             v-for="artifact in pipelineExecutionArtifacts"
-            :key="`${artifact.name}-${artifact.path || artifact.record_id}`"
+            :key="artifact.id ?? `${artifact.name}-${artifact.path || artifact.record_id}`"
             class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600"
           >
-            <div class="font-medium text-slate-900">{{ artifact.name }}</div>
-            <div v-if="artifact.metadata?.role" class="mt-1">{{ artifact.metadata.role }}</div>
-            <div v-if="artifact.path" class="mt-1 break-all font-mono text-[11px]">{{ artifact.path }}</div>
+            <div class="flex items-start justify-between gap-3">
+              <div class="min-w-0">
+                <div class="break-all font-medium text-slate-900">{{ artifact.name }}</div>
+                <div v-if="artifact.metadata?.role" class="mt-1">{{ artifact.metadata.role }}</div>
+              </div>
+              <button
+                v-if="artifact.downloadable && pipelineExecutionRunId"
+                type="button"
+                class="shrink-0 font-medium text-indigo-700 underline disabled:opacity-50"
+                :aria-label="`Download ${artifact.name}`"
+                :disabled="downloadingArtifacts.has(artifact.id)"
+                @click="downloadArtifact(artifact)"
+              >
+                {{ downloadingArtifacts.has(artifact.id) ? 'Downloading…' : 'Download' }}
+              </button>
+            </div>
+            <div v-if="artifact.path && !artifact.downloadable" class="mt-1 break-all font-mono text-[11px]">{{ artifact.path }}</div>
           </div>
         </div>
       </div>
@@ -223,10 +245,13 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, reactive } from 'vue'
+import ReservedGpuAccess from '@/components/hpc/ReservedGpuAccess.vue'
 import ProgressBar from '@/components/ui/ProgressBar.vue'
 import SessionPathPicker from '@/components/ui/SessionPathPicker.vue'
 import LoadingSpinner from '@/components/ui/LoadingSpinner.vue'
+import { useToast } from '@/composables/useToast'
+import pipelineService from '@/services/pipeline.service'
 
 const props = defineProps({
   sessions: { type: Array, default: () => [] },
@@ -236,6 +261,7 @@ const props = defineProps({
   runId: { type: String, default: '' },
   runElapsed: { type: Number, default: 0 },
   executionBlockedReason: { type: String, default: '' },
+  usesHpc: { type: Boolean, default: false },
   validationResult: {
     type: Object,
     default: null,
@@ -284,6 +310,7 @@ const props = defineProps({
 
 const emit = defineEmits([
   'retry-sessions', 'reconnect-run', 'retry-run-request', 'dismiss-run', 'cancel-run', 'focus-diagnostic',
+  'reservation-changed',
   'update:preflight-session-id',
   'update:preflight-file-paths-text',
   'refresh-session-resources',
@@ -346,6 +373,27 @@ const pipelineExecutionRunError = computed(() => (
 ))
 
 const pipelineExecutionArtifacts = computed(() => props.pipelineExecutionRun?.artifacts || [])
+const downloadingArtifacts = reactive(new Set())
+const toast = useToast()
+
+async function downloadArtifact(artifact) {
+  downloadingArtifacts.add(artifact.id)
+  try {
+    const blob = await pipelineService.downloadPipelineArtifact(pipelineExecutionRunId.value, artifact.id)
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = artifact.name
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+  } catch {
+    toast.error(`Could not download ${artifact.name}. Refresh the run and try again.`)
+  } finally {
+    downloadingArtifacts.delete(artifact.id)
+  }
+}
 
 function stepOutputs(step) {
   return step?.result?.outputs || {}

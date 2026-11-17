@@ -1059,10 +1059,20 @@ describe('PipelineConfigView constructor interactions', () => {
     mocked.pipelineService.preflightPipelineConstructor.mockResolvedValue({ data: { valid: true, validation: { valid: true }, steps: [] } })
     await wrapper.get('[data-testid="run-preflight"]').trigger('click')
     await flushPromises()
+    expect(mocked.pipelineService.preflightPipelineConstructor).toHaveBeenLastCalledWith({
+      pipeline_definition: reliabilityConfig,
+      session_id: 42,
+      local_file_paths: ['/tmp/model.glb'],
+    })
     expect(wrapper.get('[data-testid="run-pipeline-execution"]').attributes('disabled')).toBeUndefined()
     await wrapper.get('[data-testid="preflight-local-file-paths"]').setValue('/tmp/other.glb')
     expect(wrapper.get('[data-testid="run-pipeline-execution"]').attributes('disabled')).toBeDefined()
     await wrapper.get('input[aria-label="Name"]').setValue('Unpublished revision')
+    await wrapper.get('[data-testid="run-preflight"]').trigger('click')
+    await flushPromises()
+    expect(mocked.pipelineService.preflightPipelineConstructor).toHaveBeenLastCalledWith(expect.objectContaining({
+      pipeline_definition: expect.objectContaining({ name: 'Unpublished revision' }),
+    }))
     expect(wrapper.text()).toContain('Publish these changes before running')
     expect(mocked.pipelineService.executePipelineOnFiles).not.toHaveBeenCalled()
     wrapper.unmount()
@@ -1081,6 +1091,22 @@ describe('PipelineConfigView constructor interactions', () => {
     await flushPromises()
     expect(wrapper.get('[data-testid="run-pipeline-execution"]').attributes('disabled')).toBeDefined()
     expect(wrapper.text()).toContain('Connection interrupted')
+    wrapper.unmount()
+  })
+
+  it('shows invalid file diagnostics and leaves the run disabled', async () => {
+    const wrapper = await mountConstructorView({ pipelineConfig: reliabilityConfig })
+    await wrapper.get('[data-testid="preflight-session-id"]').setValue('42')
+    await wrapper.get('[data-testid="preflight-local-file-paths"]').setValue('/tmp/scan.png')
+    const diagnostic = "Step 'consume' input 'input_file' for scan.png requires .mid, .midi."
+    mocked.pipelineService.preflightPipelineConstructor.mockResolvedValue({
+      data: { valid: false, validation: { valid: false, errors: [diagnostic] }, preflight_token: null, steps: [] },
+    })
+    await wrapper.get('[data-testid="run-preflight"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Preflight needs attention')
+    expect(wrapper.text()).toContain(diagnostic)
+    expect(wrapper.get('[data-testid="run-pipeline-execution"]').attributes('disabled')).toBeDefined()
     wrapper.unmount()
   })
 

@@ -1,8 +1,9 @@
 """Schemas for HPC application gateway endpoints."""
 from datetime import datetime
 from typing import Any, Literal, Optional
+from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.security import validate_slurm_resource_token
 
@@ -107,6 +108,7 @@ class SessionStopResponse(BaseModel):
     job_id: str
     cancelled: bool
     message: str
+    detached: bool = False
 
 
 class Pi3SessionCreateRequest(BaseModel):
@@ -328,6 +330,44 @@ class WebHdpSessionCreateRequest(BaseModel):
         return _validated_slurm_token(value, info.field_name)
 
 
+class WebHdpReservationInspectRequest(BaseModel):
+    """Identify an existing single-node Slurm job on this gateway's cluster."""
+
+    model_config = ConfigDict(extra="forbid")
+    job_id: str = Field(pattern=r"^[1-9][0-9]{0,18}$")
+
+
+class WebHdpReservationRegisterRequest(WebHdpReservationInspectRequest):
+    """Delegate one verified reservation to an existing HPC-Link account."""
+
+    owner_username: str = Field(min_length=1, max_length=128)
+
+
+class WebHdpReservationFacts(BaseModel):
+    job_id: str
+    partition: str
+    gpu_type: str | None = None
+    gpu_count: int
+    cpus: int
+    memory_mb: int
+    node_name: str
+    started_at: datetime
+    expires_at: datetime
+
+
+class WebHdpReservationResponse(WebHdpReservationFacts):
+    reservation_id: str
+    status: Literal["available", "in_use", "expired", "unavailable"]
+
+
+class WebHdpSessionAdoptRequest(BaseModel):
+    """Open a private, idempotent claim on an operator-registered reservation."""
+
+    model_config = ConfigDict(extra="forbid")
+    reservation_id: UUID
+    claim_id: UUID
+
+
 class WebHdpSessionCreateResponse(BaseModel):
     """WebHDP allocation response."""
     session_id: str
@@ -341,6 +381,12 @@ class WebHdpSessionCreateResponse(BaseModel):
     status: str
     created_at: datetime
     expires_at: datetime
+    externally_managed: bool = False
+    reservation_id: str | None = None
+    node_name: str | None = None
+    gpu_type: str | None = None
+    cpus: int | None = None
+    memory_mb: int | None = None
 
 
 class WebHdpSessionStatusResponse(BaseModel):
@@ -357,6 +403,11 @@ class WebHdpSessionStatusResponse(BaseModel):
     created_at: datetime
     expires_at: datetime
     remaining_seconds: int
+    externally_managed: bool = False
+    reservation_id: str | None = None
+    gpu_type: str | None = None
+    cpus: int | None = None
+    memory_mb: int | None = None
 
 
 class WebHdpCloudStageFile(BaseModel):

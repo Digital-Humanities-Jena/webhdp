@@ -495,6 +495,116 @@
         ]
       }
     },
+    "/api/v1/admin/hpc-reservations": {
+      "get": {
+        "operationId": "get_admin_hpc_reservations",
+        "responses": {
+          "200": {
+            "description": "Successful response. WebHDP API responses generally use {success, data, message, metadata}."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "admin hpc_reservations",
+        "tags": [
+          "admin"
+        ]
+      },
+      "post": {
+        "operationId": "post_admin_hpc_reservations",
+        "responses": {
+          "201": {
+            "description": "Successful response. WebHDP API responses generally use {success, data, message, metadata}."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "admin hpc_reservations",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/hpc-reservations/{reservation_id}": {
+      "patch": {
+        "operationId": "patch_admin_edit_hpc_reservation",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "reservation_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response. WebHDP API responses generally use {success, data, message, metadata}."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "admin edit_hpc_reservation",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/api/v1/admin/hpc-resource-requests": {
       "get": {
         "operationId": "get_admin_list_hpc_resource_requests",
@@ -4056,6 +4166,87 @@
           }
         ],
         "summary": "hpc_link upload_hpc_zenodo_draft",
+        "tags": [
+          "hpc-link"
+        ]
+      }
+    },
+    "/api/v1/hpc-link/reservations": {
+      "get": {
+        "operationId": "get_hpc_link_list_gpu_reservations",
+        "responses": {
+          "200": {
+            "description": "Successful response. WebHDP API responses generally use {success, data, message, metadata}."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "hpc_link list_gpu_reservations",
+        "tags": [
+          "hpc-link"
+        ]
+      }
+    },
+    "/api/v1/hpc-link/reservations/{reservation_id}/claim": {
+      "post": {
+        "operationId": "post_hpc_link_claim_gpu_reservation",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "reservation_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response. WebHDP API responses generally use {success, data, message, metadata}."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "409": {
+            "description": "The reservation or upload session is already in use, or the reservation is unavailable."
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "hpc_link claim_gpu_reservation",
         "tags": [
           "hpc-link"
         ]
@@ -13580,6 +13771,58 @@
           }
         ],
         "summary": "pipeline_v2 get_pipeline_run_v2",
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/api/v2/runs/{run_id}/artifacts/{artifact_id}": {
+      "get": {
+        "operationId": "get_pipeline_v2_download_pipeline_artifact_v2",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "artifact_id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response. WebHDP API responses generally use {success, data, message, metadata}."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "pipeline_v2 download_pipeline_artifact_v2",
         "tags": [
           "runs"
         ]

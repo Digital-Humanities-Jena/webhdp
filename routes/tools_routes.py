@@ -773,7 +773,11 @@ def tools_context():
             can_allocate_hpc = bool(user and hpc_service.user_can_allocate(user, purpose="workflow"))
             session_id = request.args.get("session_id")
             if session_id not in (None, ""):
-                active_hpc_allocation = hpc_service.get_active_for_session(int(session_id)) is not None
+                from services.session_access_service import can_view_session
+
+                session = db.session.get(DBSession, int(session_id))
+                active_hpc_allocation = bool(session and can_view_session(session, user)
+                                             and hpc_service.get_active_for_session(session.id, user_id=user.id))
         except Exception:
             hpc_link_available = False
             can_allocate_hpc = False

@@ -514,7 +514,8 @@ class HpcLinkExecutionAdapter(BaseExecutionAdapter):
                 "command": ["hpc_link", request.step_id],
             }
 
-        allocation = current_app.hpc_allocation_service.get_active_for_session(int(session_id))
+        user_id = execution_context.get("initiated_by_user_id") or request.metadata.get("initiated_by_user_id")
+        allocation = current_app.hpc_allocation_service.get_active_for_session(int(session_id), user_id=user_id)
         if allocation is None:
             return {
                 "success": False,

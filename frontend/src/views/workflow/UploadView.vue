@@ -273,7 +273,7 @@ textures/albedo.jpg</pre>
               </div>
 
               <p id="direct-file-help" class="text-sm text-gray-500">
-                Upload a model (GLB, glTF, OBJ, STL, FBX, PLY) or an image. For models with separate materials or textures, use a ZIP batch to keep the files together.
+                Upload a model, an image, or a ZIP scene for a component. Use ZIP batch when you want WebHDP to unpack the files before processing.
               </p>
             </div>
           </div>

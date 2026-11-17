@@ -8,6 +8,9 @@ import re
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 from urllib.parse import quote
+from uuid import uuid4
+
+from sqlalchemy import or_
 
 from database.database import db
 from database.models import HpcAllocation, HpcArtifact, HpcLinkConfig, Session as DBSession, User, UserRole
@@ -16,7 +19,7 @@ from services.credential_crypto import decrypt_secret, encrypt_secret
 from services.cloud_upload_service import STORAGE_DROPBOX, STORAGE_GDRIVE, STORAGE_SERVER, CloudUploadService
 from services.hpc_link_client import HpcLinkClient
 from services.notification_service import notify_user
-from services.registry_lock import OperationConflict, registry_lock
+from services.registry_lock import OperationConflict, registry_lock, serialize_registry
 
 
 TERMINAL_ALLOCATION_STATES = {"failed", "released", "expired", "cancelled"}
@@ -222,6 +225,7 @@ class HpcAllocationService:
     def serialize_allocation(self, allocation: HpcAllocation) -> Dict[str, Any]:
         return {
             "allocation_id": allocation.public_id,
+            "reservation_id": allocation.reservation.public_id if allocation.reservation_id else None,
             "user_id": allocation.user_id,
             "session_id": allocation.session_id,
             "purpose": allocation.purpose,
@@ -355,6 +359,7 @@ class HpcAllocationService:
             return False
         return True
 
+    @serialize_registry("hpc-allocation-queue")
     def request_allocation(self, *, user: User, session_id: Optional[int], purpose: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         config = self.get_or_create_config()
         if not config.enabled:
@@ -373,13 +378,15 @@ class HpcAllocationService:
             existing = (
                 HpcAllocation.query.filter(
                     HpcAllocation.session_id == int(session_id),
-                    HpcAllocation.purpose == purpose,
+                    or_(HpcAllocation.purpose == purpose, HpcAllocation.reservation_id.is_not(None)),
                     HpcAllocation.status.in_(list(QUEUEABLE_ALLOCATION_STATES)),
                 )
                 .order_by(HpcAllocation.requested_at.desc())
                 .first()
             )
         if existing is not None:
+            if existing.reservation_id is not None and existing.user_id != user.id:
+                raise SecurityError("This upload session already has a reserved GPU claim")
             self.process_queue()
             if existing.status in QUEUEABLE_ALLOCATION_STATES:
                 return self.serialize_allocation(existing)
@@ -552,16 +559,42 @@ class HpcAllocationService:
             raise SecurityError("Access denied for this HPC allocation")
         return allocation
 
-    def get_active_for_session(self, session_id: int) -> Optional[HpcAllocation]:
-        return (
+    def get_active_for_session(self, session_id: int, *, user_id: Optional[int] = None) -> Optional[HpcAllocation]:
+        candidates = (
             HpcAllocation.query.filter(
                 HpcAllocation.session_id == int(session_id),
                 HpcAllocation.status.in_(list(ACTIVE_ALLOCATION_STATES)),
             )
             .order_by(HpcAllocation.allocated_at.desc())
-            .first()
+            .all()
         )
+        for allocation in candidates:
+            if allocation.reservation_id is None:
+                return allocation
+            if (allocation.user_id == user_id and allocation.status == "running"
+                    and allocation.expires_at and allocation.expires_at > _utc_now_naive()):
+                from services.hpc_reservation_service import HpcReservationService
 
+                if HpcReservationService(self).can_use(allocation.reservation, allocation.user):
+                    return allocation
+        return None
+
+    def _reservation_client(self, allocation: HpcAllocation, *, for_compute=True) -> HpcLinkClient:
+        if getattr(allocation, "reservation_id", None) is None:
+            return self.client()
+        from services.hpc_reservation_service import HpcReservationService
+
+        reservations = HpcReservationService(self)
+        if for_compute:
+            db.session.refresh(allocation)
+            if allocation.status != "running" or not allocation.expires_at or allocation.expires_at <= _utc_now_naive():
+                raise ValidationError("This reserved GPU claim has ended")
+            db.session.refresh(allocation.user)
+            if not reservations.can_use(allocation.reservation, allocation.user):
+                raise SecurityError("Access to this reserved GPU is no longer enabled")
+        return reservations.client_for(allocation.reservation)
+
+    @serialize_registry("hpc-allocation-queue")
     def attach_allocation_to_session(self, public_id: str, user: User, session_id: int) -> Dict[str, Any]:
         allocation = self.get_allocation(public_id, user)
         session_row = db.session.get(DBSession, int(session_id))
@@ -571,16 +604,33 @@ class HpcAllocationService:
             raise SecurityError("Access denied for this workflow session")
         if allocation.session_id not in (None, int(session_id)):
             raise ValidationError("HPC allocation is already attached to another workflow session")
+        if HpcAllocation.query.filter(
+            HpcAllocation.session_id == int(session_id), HpcAllocation.reservation_id.is_not(None),
+            HpcAllocation.status.in_(ACTIVE_ALLOCATION_STATES), HpcAllocation.id != allocation.id,
+        ).first():
+            raise OperationConflict("This upload session already has a reserved GPU claim")
         allocation.session_id = int(session_id)
         db.session.commit()
         return self.serialize_allocation(allocation)
 
     def refresh_allocation(self, allocation: HpcAllocation) -> Dict[str, Any]:
+        if allocation.reservation_id is not None and allocation.status in ACTIVE_ALLOCATION_STATES:
+            if allocation.expires_at and allocation.expires_at <= _utc_now_naive():
+                allocation.status = "expired"
+                db.session.commit()
+                return self.serialize_allocation(allocation)
+            if allocation.status == "allocating" and not allocation.remote_session_id:
+                from services.hpc_reservation_service import HpcReservationService
+
+                HpcReservationService(self).complete_claim(allocation)
+                return self.serialize_allocation(allocation)
         if not allocation.remote_session_id or allocation.status in TERMINAL_ALLOCATION_STATES:
             return self.serialize_allocation(allocation)
         previous_status = allocation.status
         try:
-            response = self.client().get(f"/api/apps/webhdp/sessions/{allocation.remote_session_id}", timeout=20)
+            response = self._reservation_client(allocation, for_compute=False).get(
+                f"/api/apps/webhdp/sessions/{allocation.remote_session_id}", timeout=20,
+            )
             allocation.scheduler_state = response.get("scheduler_state")
             allocation.scheduler_reason = response.get("scheduler_reason")
             allocation.node_name = response.get("node_name")
@@ -616,7 +666,7 @@ class HpcAllocationService:
         if not allocation.remote_session_id:
             raise ValidationError("Allocation has no remote HPC-Link session")
         payload = {"components": components or ["fast_renderer", "any_to_usdz"]}
-        response = self.client().post(
+        response = self._reservation_client(allocation).post(
             f"/api/apps/webhdp/sessions/{allocation.remote_session_id}/components/preflight",
             payload,
             timeout=120,
@@ -645,7 +695,7 @@ class HpcAllocationService:
                     "relative_dir": str(item.get("relative_dir") or "").strip().strip("/"),
                 }
             )
-        response = self.client().post(
+        response = self._reservation_client(allocation).post(
             f"/api/apps/webhdp/sessions/{allocation.remote_session_id}/stage/cloud",
             {"files": sanitized_files},
             timeout=7200,
@@ -699,6 +749,7 @@ class HpcAllocationService:
             raise ValidationError("Allocation has no remote HPC input directory")
 
         staged_files: list[Dict[str, Any]] = []
+        staging_namespace = "invocation-" + uuid4().hex
         seen: set[str] = set()
         normalized_paths = [os.path.abspath(str(path)) for path in file_paths or [] if str(path).strip()]
         common_root = os.path.commonpath([os.path.dirname(path) for path in normalized_paths]) if normalized_paths else ""
@@ -715,8 +766,9 @@ class HpcAllocationService:
             relative_dir = os.path.relpath(os.path.dirname(local_path), common_root)
             if relative_dir == ".":
                 relative_dir = ""
+            relative_dir = "/".join(part for part in [staging_namespace, relative_dir] if part)
             relative_path = "/".join(part for part in [relative_dir, remote_name] if part)
-            uploaded = self.client().upload_file(
+            uploaded = self._reservation_client(allocation).upload_file(
                 f"/api/apps/webhdp/sessions/{allocation.remote_session_id}/stage/file?path={quote(relative_path, safe='')}",
                 local_path,
             )
@@ -759,7 +811,7 @@ class HpcAllocationService:
             "publish": False,
             "allow_production": payload.get("allow_production") is True,
         }
-        response = self.client().post(
+        response = self._reservation_client(allocation).post(
             f"/api/apps/webhdp/sessions/{allocation.remote_session_id}/zenodo/upload-draft",
             request_payload,
             timeout=float(payload.get("timeout_seconds") or 7200),
@@ -769,6 +821,16 @@ class HpcAllocationService:
         return response
 
     def release(self, allocation: HpcAllocation) -> Dict[str, Any]:
+        if allocation.reservation_id is not None:
+            from services.hpc_reservation_service import HpcReservationService
+
+            with registry_lock("hpc-allocation-queue"):
+                db.session.refresh(allocation)
+                response = HpcReservationService(self).detach(allocation)
+                allocation.status = "released"
+                allocation.released_at = allocation.released_at or _utc_now_naive()
+                db.session.commit()
+                return {"allocation": self.serialize_allocation(allocation), "remote": response}
         response: Dict[str, Any] = {"cancelled": False}
         if allocation.remote_session_id and allocation.status not in TERMINAL_ALLOCATION_STATES:
             response = self.client().delete(f"/api/apps/webhdp/sessions/{allocation.remote_session_id}", timeout=30) or {}
@@ -795,10 +857,10 @@ class HpcAllocationService:
             "component_version": request_payload.get("component_version") or profile.get("version"),
             "profile": {key: profile[key] for key in ("version", "sif_sha256") if profile.get(key)},
         }
-        return self.client().post(
+        return self._reservation_client(allocation).post(
             f"/api/apps/webhdp/sessions/{allocation.remote_session_id}/components/run",
             payload,
-            timeout=float(request_payload.get("timeout_seconds") or 7200),
+            timeout=float(request_payload.get("timeout_seconds") or 7200) + 60,
         )
 
     def download_remote_file(self, allocation: HpcAllocation, remote_path: str, local_path: str) -> Dict[str, Any]:
@@ -811,7 +873,7 @@ class HpcAllocationService:
         session_dir = str(allocation.remote_session_dir or "").rstrip("/")
         if session_dir and remote_path != session_dir and not remote_path.startswith(f"{session_dir}/"):
             raise SecurityError("Remote artifact is outside the active HPC allocation directory")
-        bytes_written = self.client().download_to_file(
+        bytes_written = self._reservation_client(allocation).download_to_file(
             f"/api/apps/webhdp/sessions/{allocation.remote_session_id}/artifacts/download?path={quote(remote_path, safe='')}",
             local_path,
             timeout=900,

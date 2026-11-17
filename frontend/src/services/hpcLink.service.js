@@ -5,6 +5,14 @@ const hpcLinkService = {
     return api.get('/hpc-link/status', { params })
   },
 
+  listReservations(purpose) {
+    return api.get('/hpc-link/reservations', { params: { purpose }, suppressGlobalError: true })
+  },
+
+  claimReservation(reservationId, payload) {
+    return api.post(`/hpc-link/reservations/${encodeURIComponent(reservationId)}/claim`, payload, { suppressGlobalError: true })
+  },
+
   requestAllocation(payload) {
     return api.post('/hpc-link/allocations', payload)
   },

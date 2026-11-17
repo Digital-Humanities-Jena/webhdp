@@ -8,13 +8,14 @@ from flask_jwt_extended import get_jwt_identity, jwt_required
 
 from api_utils import APIResponse
 from database.database import db
-from database.models import User, UserRole
-from exceptions import SecurityError, ValidationError
+from database.models import ExecutionArtifact, PipelineRun, StepRun, User, UserRole
+from exceptions import ResourceNotFoundError, SecurityError, ValidationError
 from uuid import UUID
 from routes.admin_routes import require_admin
 from routes.access_helpers import get_session_with_permission
 from schemas.native_pipeline_schemas import PipelineExecutionRequestSchema
 from schemas.native_pipeline_schemas import PlaygroundExecutionRequestSchema
+from services.pipeline_artifacts import pipeline_artifact_location
 from services.pipeline_platform_service import get_pipeline_platform_contract
 from services.submission_pipeline_service import execute_submission_pipeline
 
@@ -336,6 +337,30 @@ def execute_pipeline_v2(identifier):
 def get_pipeline_run_v2(run_id):
     run_payload = current_app.native_pipeline_service.get_pipeline_run(run_id, int(get_jwt_identity()))
     return APIResponse.success(data={"run": run_payload})
+
+
+@pipeline_v2_bp.route("/runs/<run_id>/artifacts/<int:artifact_id>", methods=["GET"])
+@jwt_required()
+def download_pipeline_artifact_v2(run_id, artifact_id):
+    run = PipelineRun.query.filter_by(public_id=run_id).first()
+    if run is None or run.session_id is None:
+        raise ResourceNotFoundError("Pipeline run not found")
+    session, _, error_response = get_session_with_permission(run.session_id, permission="view")
+    if error_response:
+        return error_response
+    artifact = ExecutionArtifact.query.filter_by(id=artifact_id, pipeline_run_id=run.id).first()
+    if artifact is None or artifact.step_run_id is None:
+        raise ResourceNotFoundError("Pipeline artifact not found")
+    path = pipeline_artifact_location(session, db.session.get(StepRun, artifact.step_run_id), artifact)
+    if path is None:
+        raise ResourceNotFoundError("Pipeline artifact not found")
+    try:
+        response = send_file(path, as_attachment=True)
+    except FileNotFoundError as exc:
+        raise ResourceNotFoundError("Pipeline artifact not found") from exc
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
 
 
 @pipeline_v2_bp.route("/runs/<run_id>/cancel", methods=["POST"])

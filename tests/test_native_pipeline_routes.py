@@ -452,6 +452,63 @@ class TestNativePipelineRoutes(unittest.TestCase):
         response = self.client.get("/api/v2/pipelines/constructor-support", headers=self._headers())
         self.assertEqual(response.status_code, 403)
 
+    def test_v2_pipeline_artifact_download_requires_matching_run_and_isolated_file(self):
+        from database.models import ExecutionArtifact, PipelineDefinition, PipelineRun, PipelineStep, PipelineVersion, StepRun
+
+        session_dir = Path(self.temp_dir).resolve()
+        with self.app.app_context():
+            session = db.session.get(DBSession, self.session_id)
+            session.session_dir = str(session_dir)
+            definition = PipelineDefinition(identifier="fixture", name="Artifact fixture")
+            db.session.add(definition)
+            db.session.flush()
+            version = PipelineVersion(pipeline_definition_id=definition.id, version="1", config_json="{}", config_hash="fixture")
+            db.session.add(version)
+            db.session.flush()
+            runs = [PipelineRun(pipeline_definition_id=definition.id, pipeline_version_id=version.id, session_id=session.id) for _ in range(2)]
+            step = PipelineStep(pipeline_version_id=version.id, step_key="scan", component_key="scan", name="Scan", order_index=1)
+            db.session.add_all([*runs, step])
+            db.session.flush()
+            step_run = StepRun(pipeline_run_id=runs[0].id, pipeline_step_id=step.id, record_id=7, record_path="/uploads/example.png")
+            db.session.add(step_run)
+            db.session.flush()
+            record_dir = session_dir / "outputs" / "record-7" / "example"
+            output_dir = record_dir / f"step-{step_run.id}" / "outputs"
+            output_dir.mkdir(parents=True)
+            result_path = output_dir / "result.mid"
+            result_path.write_bytes(b"test midi")
+            legacy_path = record_dir / "unscoped.txt"
+            legacy_path.write_bytes(b"unscoped")
+            linked_path = output_dir / "linked.mid"
+            linked_path.symlink_to(result_path)
+            linked_dir = output_dir / "linked-directory"
+            linked_dir.symlink_to(output_dir, target_is_directory=True)
+            artifacts = [
+                ExecutionArtifact(pipeline_run_id=runs[0].id, step_run_id=step_run.id, record_id=7,
+                                  artifact_kind="file", name=path.name, path=str(path))
+                for path in (result_path, legacy_path, linked_path, linked_dir / result_path.name,
+                             output_dir / ".." / "outputs" / result_path.name, output_dir / "missing.mid")
+            ]
+            db.session.add_all(artifacts)
+            db.session.commit()
+            run_urls = [f"/api/v2/runs/{run.public_id}/artifacts" for run in runs]
+            artifact_ids = [artifact.id for artifact in artifacts]
+
+        url = f"{run_urls[0]}/{artifact_ids[0]}"
+        response = self.client.get(url, headers=self._headers())
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, b"test midi")
+        self.assertIn("attachment; filename=result.mid", response.headers["Content-Disposition"])
+        self.assertIn("no-store", response.headers["Cache-Control"])
+        response.close()
+        self.assertEqual(self.client.get(url).status_code, 401)
+        self.assertEqual(self.client.get(url, headers=self._author_headers()).status_code, 404)
+        self.assertEqual(self.client.get(f"{run_urls[1]}/{artifact_ids[0]}", headers=self._headers()).status_code, 404)
+        for artifact_id in artifact_ids[1:]:
+            with self.subTest(artifact_id=artifact_id):
+                response = self.client.get(f"{run_urls[0]}/{artifact_id}", headers=self._headers())
+                self.assertEqual(response.status_code, 404)
+
     def test_v2_playground_artifact_download_route_uses_native_backend(self):
         artifact_path = Path(self.temp_dir) / "artifact.png"
         artifact_path.write_bytes(b"png-data")
