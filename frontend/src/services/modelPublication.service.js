@@ -37,12 +37,16 @@ export default {
     const { data } = await publicApi.get(`${prefix}/samples`)
     return data.data
   },
-  async availability() {
-    const response = await api.get(`${prefix}/availability`, quiet)
+  async availability(signal) {
+    const response = await api.get(`${prefix}/availability`, { ...quiet, signal, timeout: 10000 })
+    return response.data
+  },
+  async queue(signal) {
+    const response = await api.get(`${prefix}/queue`, { ...quiet, signal, timeout: 10000 })
     return response.data
   },
   async jobs(signal) {
-    const response = await api.get(`${prefix}/jobs`, { ...quiet, signal })
+    const response = await api.get(`${prefix}/jobs`, { ...quiet, signal, timeout: 10000 })
     return response.data
   },
   async start(form, requestId, onUploadProgress) {

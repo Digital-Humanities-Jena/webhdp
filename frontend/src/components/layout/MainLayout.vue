@@ -1,7 +1,7 @@
 <template>
   <div class="min-h-screen bg-gray-50">
     <a href="#main-content" class="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:rounded-md focus:bg-white focus:p-3 focus:text-indigo-700">Skip to content</a>
-    <nav v-if="publicationOnly" aria-label="Main navigation" class="border-b border-gray-200 bg-white">
+    <nav v-if="publicationOnly" id="webhdp-primary-navigation" aria-label="Main navigation" class="border-b border-gray-200 bg-white">
       <div class="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3 px-4 py-4 sm:px-6">
         <router-link to="/model-publication" class="text-lg font-semibold text-gray-900 hover:text-indigo-700">
           WebHDP
@@ -16,7 +16,7 @@
         </div>
       </div>
     </nav>
-    <nav v-else aria-label="Main navigation" class="sticky top-0 z-40 border-b border-gray-200 bg-white/95 backdrop-blur">
+    <nav v-else id="webhdp-primary-navigation" aria-label="Main navigation" class="sticky top-0 z-40 border-b border-gray-200 bg-white/95 backdrop-blur">
       <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div class="flex min-h-[64px] flex-wrap items-center justify-between gap-3 py-3">
           <div class="flex items-center gap-3 min-w-0">

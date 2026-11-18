@@ -93,9 +93,14 @@
       <h3 id="repair-heading" class="text-lg font-semibold">Texture repairs</h3>
       <ul class="mt-3 space-y-3">
         <li v-for="(repair, index) in job.repairs" :key="index" class="break-words rounded-lg bg-slate-50 p-3 text-sm">
-          <p class="font-semibold">{{ repair.kind === 'relinked' ? 'Texture relinked' : 'Material color used' }}</p>
+          <p class="font-semibold">
+            {{ repair.kind === 'relinked' ? 'Texture relinked' : repair.reason === 'unreadable_texture' ? 'Unreadable texture replaced' : 'Material color used' }}
+          </p>
           <p v-if="repair.kind === 'relinked'" class="mt-1 text-slate-700">
             <code>{{ repair.reference }}</code> now points to <code>{{ repair.replacement }}</code>.
+          </p>
+          <p v-else-if="repair.reason === 'unreadable_texture'" class="mt-1 text-slate-700">
+            WebHDP could not decode <code>{{ repair.reference }}</code>. The prepared model keeps its material settings and other usable textures.
           </p>
           <p v-else class="mt-1 text-slate-700">
             WebHDP could not find a unique image for <code>{{ repair.reference }}</code>. The prepared model uses a solid material color in its place.

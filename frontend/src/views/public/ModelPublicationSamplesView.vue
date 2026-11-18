@@ -12,13 +12,13 @@
       <h1 class="text-3xl font-bold tracking-tight sm:text-4xl">Sample 3D models</h1>
       <p class="mt-3 max-w-2xl text-base leading-7 text-slate-600">
         Each ZIP contains a small model and a metadata spreadsheet (MSF). Try a different folder layout
-        or see how WebHDP handles a missing or misnamed texture.
+        or see how WebHDP handles missing, misplaced, misnamed, or unreadable textures.
       </p>
       <a v-if="publishedExample" :href="publishedExample" target="_blank" rel="noopener noreferrer"
         class="mt-3 inline-block text-sm font-semibold text-indigo-700 underline underline-offset-4">
         See a finished record in Zenodo Sandbox
       </a>
-      <div v-if="samples.length" class="mt-7 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div v-if="samples.length" class="mt-7 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <ModelSampleCard v-for="sample in samples" :key="sample.id" :sample="sample" />
       </div>
       <p v-else-if="loading" role="status" class="mt-7 text-sm text-slate-600">Loading sample models…</p>

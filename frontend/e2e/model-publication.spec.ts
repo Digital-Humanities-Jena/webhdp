@@ -19,7 +19,10 @@ const completedJob = {
   stage: 'completed',
   status: 'completed',
   files: [{ name: 'edm.xml', size: 256, format: 'EDM' }, { name: 'metadata.csv', size: 640, format: 'MSF' }],
-  repairs: [{ kind: 'relinked', reference: 'texture-missing.png', replacement: 'tile-pattern.png' }],
+  repairs: [
+    { kind: 'relinked', reference: 'texture-missing.png', replacement: 'tile-pattern.png' },
+    { kind: 'material_fallback', reason: 'unreadable_texture', reference: 'detail.png' },
+  ],
   metadata: { title: dataset.title, creators: [{ name: dataset.creator }], source: 'msf', license: 'cc0-1.0' },
   draft: {
     id: 482,
@@ -40,6 +43,10 @@ async function setup(page: Page) {
   await page.route(apiV1('/model-publication/availability'), route => fulfillJson(route, {
     data: { ready: true, credential_ready: true },
   }))
+  await page.route(apiV1('/model-publication/queue'), route => fulfillJson(route, {
+    data: { queued: 0, running: 0, capacity: 4, ready: true, updated: 1795000000 },
+  }))
+  await page.route(apiV1('/model-publication/jobs'), route => fulfillJson(route, { data: { jobs: [] } }))
 }
 
 test('offers download links publicly and retains the workflow after sign in', async ({ page }) => {
@@ -57,17 +64,22 @@ test('offers download links publicly and retains the workflow after sign in', as
     page.getByRole('link', { name: 'Download Painted floor tile (ZIP)' }).click(),
   ])
   expect(download.suggestedFilename()).toBe('painted-floor-tile.zip')
-  await page.getByRole('link', { name: 'Open 3D workflow' }).click()
-  await expect(page).toHaveURL(/\/login\?redirect=\/model-publication$/)
-  const demoUser = { ...defaultUser, model_publication_only: true }
+  await expect(page.getByRole('link', { name: 'Open 3D workflow' })).toHaveAttribute('href', '/model-publication')
+  await page.route(apiV1('/model-publication/jobs'), route => fulfillJson(route, { data: { jobs: [completedJob] } }))
+  await page.getByRole('link', { name: 'Try Painted floor tile in WebHDP' }).click()
+  await expect.poll(() => new URL(page.url()).searchParams.get('redirect')).toBe('/model-publication?sample=painted-floor-tile')
+  const demoUser = { ...defaultUser, model_publication_only: true, model_publication_expires_at: 1795000900 }
   await mockLogin(page, { user: demoUser })
   await page.getByTestId('login-email').fill('demo@example.com')
   await page.getByTestId('login-password').fill('browser-test-password')
   await page.getByTestId('login-submit').click()
-  await expect(page).toHaveURL(/\/model-publication$/)
+  await expect(page).toHaveURL(/\/model-publication\?sample=painted-floor-tile$/)
   await expect(page.getByRole('button', { name: 'Sign out' })).toBeVisible()
   await expect(page.getByRole('link', { name: 'Account', exact: true })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Upload a sample ZIP' })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Selected sample' })).toContainText(dataset.title)
+  await expect(page.getByRole('region', { name: 'Processing queue' })).toContainText('0 waiting')
+  await expect(page.getByRole('region', { name: 'Processing queue' })).toContainText('Demo access ends at')
 })
 
 test('shows queue, texture repair, private draft, and downloads, then restores on reload', async ({ page }) => {
@@ -92,14 +104,18 @@ test('shows queue, texture repair, private draft, and downloads, then restores o
     status: 200, contentType: 'application/xml', body: '<rdf/>'
   }))
   await page.goto('/model-publication')
+  const queue = page.getByRole('region', { name: 'Processing queue' })
+  await expect(queue).toContainText('0 waiting')
   await page.getByRole('button', { name: 'Use Painted floor tile' }).click()
   await expect(page.getByRole('region', { name: 'Selected sample' })).toBeFocused()
   await page.getByRole('button', { name: 'Prepare Sandbox draft' }).click()
+  await expect(queue).toContainText('Your place in the queue is 4.')
   await expect(page.getByText('3 requests are ahead of yours.', { exact: false })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Prepare another model' })).toHaveCount(0)
   latest = completedJob
   await expect(page.getByText('Draft ready', { exact: true })).toBeVisible()
   await expect(page.getByText('Texture relinked', { exact: true })).toBeVisible()
+  await expect(page.getByText('Unreadable texture replaced', { exact: true })).toBeVisible()
   await expect(page.getByText('tile-pattern.png')).toBeVisible()
   await expect(page.getByText('Draft 482 · 2 files uploaded')).toBeVisible()
   await expect(page.getByText('Metadata spreadsheet (MSF)', { exact: true })).toBeVisible()
@@ -115,6 +131,35 @@ test('shows queue, texture repair, private draft, and downloads, then restores o
   expect(download.suggestedFilename()).toBe('edm.xml')
   await page.reload()
   await expect(page.getByText('Draft ready', { exact: true })).toBeVisible()
+})
+
+test('keeps the queue in view during upload setup and updates when the worker returns', async ({ page }) => {
+  await setup(page)
+  await page.setViewportSize({ width: 375, height: 650 })
+  await seedAuthToken(page)
+  await mockCurrentUser(page, { ...defaultUser, model_publication_only: true })
+  let workerReady = false
+  await page.route(apiV1('/model-publication/queue'), route => fulfillJson(route, {
+    data: { queued: 3, running: 2, capacity: 4, ready: workerReady, updated: 1795000000 },
+  }))
+  await page.goto('/model-publication')
+  const queue = page.getByRole('region', { name: 'Processing queue' })
+  await expect(queue).toContainText('Processing is temporarily unavailable.')
+  await page.getByRole('button', { name: 'Upload a sample ZIP' }).click()
+  const archive = page.getByLabel('3D model file')
+  await archive.setInputFiles({ name: 'bad-data.txt', mimeType: 'text/plain', buffer: Buffer.from('data') })
+  await expect(archive).toHaveAttribute('aria-invalid', 'true')
+  await expect(page.getByRole('alert')).toContainText('Choose a nonempty sample ZIP')
+  await archive.setInputFiles({ name: 'sample.zip', mimeType: 'application/zip', buffer: Buffer.from('sample') })
+  const submit = page.getByRole('button', { name: 'Prepare Sandbox draft' })
+  await expect(submit).toBeDisabled()
+  await submit.scrollIntoViewIfNeeded()
+  await expect(queue).toBeInViewport()
+  workerReady = true
+  await queue.getByRole('button', { name: 'Refresh queue' }).click()
+  await expect(queue).toContainText('3 waiting')
+  await expect(queue).toContainText('2 running')
+  await expect(submit).toBeEnabled()
 })
 
 test('accepts a regular user’s GLB and sends its description to the Sandbox queue', async ({ page }) => {

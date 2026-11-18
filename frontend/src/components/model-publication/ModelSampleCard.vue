@@ -33,6 +33,10 @@
           @click="$emit('select', sample)">
           {{ selected ? 'Selected' : 'Use sample' }}
         </button>
+        <router-link v-else :to="{ name: 'ModelPublication', query: { sample: sample.id } }" :aria-label="'Try ' + sample.title + ' in WebHDP'"
+          class="rounded-md bg-indigo-50 px-3 py-2 text-sm font-semibold text-indigo-800 hover:bg-indigo-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600">
+          Try in WebHDP
+        </router-link>
         <a :href="sampleUrl(sample.id)" :aria-label="'Download ' + sample.title + ' (ZIP)'" download
           class="rounded-md px-1 py-2 text-sm font-medium text-indigo-700 underline decoration-indigo-200 underline-offset-4 hover:decoration-indigo-700">
           Download ZIP
