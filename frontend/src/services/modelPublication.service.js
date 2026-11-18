@@ -26,6 +26,12 @@ export function sandboxDraftUrl(value) {
   return ''
 }
 
+export function sandboxDraftPreviewUrl(value, id) {
+  if (typeof value !== 'string' || value.length > 2000) return ''
+  const matched = value.match(/^https:\/\/sandbox\.zenodo\.org\/records\/([1-9][0-9]*)\?preview=1&token=[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+){2}$/)
+  return matched?.[0] === value && matched[1] === String(id) ? value : ''
+}
+
 export default {
   async samples() {
     const { data } = await publicApi.get(`${prefix}/samples`)

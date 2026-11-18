@@ -26,6 +26,7 @@ const completedJob = {
     title: dataset.title,
     files: ['edm.xml', 'metadata.csv'],
     url: 'https://sandbox.zenodo.org/uploads/482',
+    preview_url: 'https://sandbox.zenodo.org/records/482?preview=1&token=demo.test.signature',
   },
 }
 
@@ -102,6 +103,9 @@ test('shows queue, texture repair, private draft, and downloads, then restores o
   await expect(page.getByText('Draft 482 · 2 files uploaded')).toBeVisible()
   await expect(page.getByText('Metadata spreadsheet (MSF)', { exact: true })).toBeVisible()
   await expect(page.getByRole('link', { name: 'Open private draft in Zenodo Sandbox' })).toHaveCount(0)
+  const previewLink = page.getByRole('link', { name: 'Preview this draft in Zenodo Sandbox' })
+  await expect(previewLink).toHaveAttribute('href', completedJob.draft.preview_url)
+  await expect(previewLink).toHaveAttribute('rel', 'noopener noreferrer')
   await expect(page.getByRole('link', { name: 'View a published Sandbox example' })).toHaveAttribute('href', 'https://sandbox.zenodo.org/records/481')
   const [download] = await Promise.all([
     page.waitForEvent('download'),

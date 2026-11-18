@@ -84,7 +84,12 @@
       <p class="mt-1 text-sm">
         Draft {{ job.draft.id }} · {{ draftFileCount }} {{ draftFileCount === 1 ? 'file' : 'files' }} uploaded
       </p>
-      <p v-if="demoAccount" class="mt-2 text-sm leading-6">The Sandbox owner can open this draft. Your files and repairs are available here in WebHDP.</p>
+      <a v-if="demoAccount && previewUrl" :href="previewUrl" target="_blank" rel="noopener noreferrer"
+        class="mt-2 inline-flex items-center gap-1 rounded-md bg-white px-3 py-2 text-sm font-semibold text-teal-900 hover:underline">
+        Preview this draft in Zenodo Sandbox
+        <ArrowTopRightOnSquareIcon aria-hidden="true" class="h-4 w-4" />
+      </a>
+      <p v-else-if="demoAccount" class="mt-2 text-sm leading-6">The Sandbox owner can open this draft. Your files and repairs are available here in WebHDP.</p>
       <a v-else-if="draftUrl" :href="draftUrl" target="_blank" rel="noopener noreferrer"
         class="mt-2 inline-flex items-center gap-1 rounded-md bg-white px-3 py-2 text-sm font-semibold text-teal-900 hover:underline">
         Open private draft in Zenodo Sandbox
@@ -123,7 +128,7 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { ArrowDownTrayIcon, ArrowTopRightOnSquareIcon, CheckIcon } from '@heroicons/vue/24/outline'
-import publicationService, { sampleUrl, sandboxDraftUrl } from '@/services/modelPublication.service'
+import publicationService, { sampleUrl, sandboxDraftPreviewUrl, sandboxDraftUrl } from '@/services/modelPublication.service'
 
 const props = defineProps({
   job: { type: Object, required: true },
@@ -165,6 +170,7 @@ const progressText = computed(() => {
   return stageText[props.job.stage] || 'WebHDP is preparing your files.'
 })
 const draftUrl = computed(() => sandboxDraftUrl(props.job.draft?.url))
+const previewUrl = computed(() => sandboxDraftPreviewUrl(props.job.draft?.preview_url, props.job.draft?.id))
 const draftFileCount = computed(() => Array.isArray(props.job.draft?.files)
   ? props.job.draft.files.length
   : (props.job.draft?.files ?? 0))
