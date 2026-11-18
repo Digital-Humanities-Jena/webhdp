@@ -4,9 +4,11 @@ import json
 import math
 from datetime import datetime
 from typing import Dict, Any, List, Optional
+from urllib.parse import urlsplit
 import jinja2
 from services.edm_service import EdmService, DotDict
 from services.iiif_validation import content_type, validate_manifest
+from services.lod_reliability import public_url
 
 logger = logging.getLogger(__name__)
 
@@ -59,18 +61,23 @@ class IiifService:
         return ref or units or ""
 
     def _default_manifest_id(self, metadata: Dict[str, Any], zenodo_record: Dict[str, Any]) -> str:
+        if metadata.get("iiif_manifest_id"):
+            return str(metadata["iiif_manifest_id"])
         return str(
-            metadata.get("iiif_manifest_id")
-            or zenodo_record.get("zenodo_url")
+            zenodo_record.get("zenodo_url")
             or self.edm_service.get_record_html_url(zenodo_record)
             or "https://example.invalid/iiif/manifest"
         ).rstrip("/") + "/manifest.json"
+
+    def _child_id(self, metadata: Dict[str, Any], zenodo_record: Dict[str, Any], kind: str) -> str:
+        base = self._default_manifest_id(metadata, zenodo_record).split('#', 1)[0].split('?', 1)[0]
+        return f"{base.rstrip('/').removesuffix('/manifest.json')}/{kind}/1"
 
     def _default_canvas_id(self, metadata: Dict[str, Any], zenodo_record: Dict[str, Any]) -> str:
         return str(
             metadata.get("iiif_canvas_id")
             or metadata.get("iiif_scene_id")
-            or self._default_manifest_id(metadata, zenodo_record).replace("/manifest.json", "/canvas/1")
+            or self._child_id(metadata, zenodo_record, "canvas")
         )
 
     def _default_scene_id(self, metadata: Dict[str, Any], zenodo_record: Dict[str, Any]) -> str:
@@ -78,10 +85,10 @@ class IiifService:
         return self._default_canvas_id(metadata, zenodo_record)
 
     def _default_annotation_page_id(self, metadata: Dict[str, Any], zenodo_record: Dict[str, Any]) -> str:
-        return str(metadata.get("iiif_annotation_page_id") or self._default_manifest_id(metadata, zenodo_record).replace("/manifest.json", "/page/1"))
+        return str(metadata.get("iiif_annotation_page_id") or self._child_id(metadata, zenodo_record, "page"))
 
     def _default_annotation_id(self, metadata: Dict[str, Any], zenodo_record: Dict[str, Any]) -> str:
-        return str(metadata.get("iiif_annotation_id") or self._default_manifest_id(metadata, zenodo_record).replace("/manifest.json", "/annotation/1"))
+        return str(metadata.get("iiif_annotation_id") or self._child_id(metadata, zenodo_record, "annotation"))
 
     def _normalize_lang_map(self, value: Any, fallback: str = "Untitled") -> Dict[str, List[str]]:
         if isinstance(value, dict):
@@ -208,6 +215,25 @@ class IiifService:
         description = str(metadata.get("description") or "").strip()
         if description and not manifest.get("summary"):
             manifest["summary"] = self.lang_map(description)
+
+        license_id = metadata.get("license")
+        if isinstance(license_id, dict):
+            license_id = license_id.get("id")
+        if isinstance(license_id, str) and license_id and not manifest.get("rights"):
+            rights = self.edm_service._map_license_to_uri(license_id)
+            if public_url(rights) and urlsplit(rights).hostname in {"creativecommons.org", "rightsstatements.org"}:
+                manifest["rights"] = rights
+
+        if not manifest.get("metadata"):
+            creators = metadata.get("creators")
+            keywords = metadata.get("keywords") or []
+            entries = {
+                "Creator": self.join_creators([item for item in creators if isinstance(item, dict)]) if isinstance(creators, list) else "",
+                "Keywords": ", ".join(str(value) for value in keywords) if isinstance(keywords, list) else str(keywords),
+            }
+            labels = [{"label": self.lang_map(label), "value": self.lang_map(value)} for label, value in entries.items() if value]
+            if labels:
+                manifest["metadata"] = labels
 
         if thumbnail_files and not manifest.get("thumbnail"):
             manifest["thumbnail"] = [

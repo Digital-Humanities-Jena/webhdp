@@ -17,6 +17,7 @@ lxml
 Flask-Mail
 pandas>=2.0.0
 openpyxl>=3.1.0
+xlrd>=2.0.2
 PyYAML>=6.0
 redis>=5.0.0
 celery>=5.3.0

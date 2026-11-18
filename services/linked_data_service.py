@@ -53,6 +53,11 @@ def generate_linked_data(metadata, record, *, main_file_key, additional_files=No
         graph.add((subject, DCTERMS.language, Literal(str(metadata["language"]))))
     if metadata.get("publication_date"):
         graph.add((subject, DCTERMS.issued, Literal(str(metadata["publication_date"]))))
+    keywords = metadata.get("keywords")
+    if isinstance(keywords, list):
+        for keyword in keywords:
+            if isinstance(keyword, str) and keyword.strip():
+                graph.add((subject, DCTERMS.subject, Literal(keyword.strip())))
     creators = metadata.get("creators") or []
     if isinstance(creators, list) and creators:
         creation = URIRef(record_url + "#creation")
