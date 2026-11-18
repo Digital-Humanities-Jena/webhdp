@@ -93,7 +93,7 @@ def scan(source, inputs, parameters, data):
         command.extend(["--classifier-json", str(classifier)])
     # Preserve native optical stages, published MIDI and the sealed worker
     # bundle, using the same path HMSM uses for local and compute CLI runs.
-    if subprocess.run(command, check=False).returncode:
+    if subprocess.run(command, cwd=SOURCE.parent, check=False).returncode:
         raise ValueError("HMSM scan digitization failed. See the component logs for details.")
     folder = data / "projects" / "scan"
     result = json.loads((folder / "result.json").read_text(encoding="utf-8"))

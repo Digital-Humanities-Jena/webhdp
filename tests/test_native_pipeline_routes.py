@@ -13,6 +13,7 @@ from exceptions import ResourceNotFoundError
 from middleware import setup_error_handlers
 from routes.pipeline_routes import pipeline_bp
 from routes.pipeline_v2_routes import pipeline_v2_bp
+from routes.tools_routes import tools_bp
 
 
 class TestNativePipelineRoutes(unittest.TestCase):
@@ -32,8 +33,10 @@ class TestNativePipelineRoutes(unittest.TestCase):
         setup_error_handlers(self.app)
 
         self.app.native_pipeline_service = MagicMock()
+        self.app.component_installer_service = MagicMock()
         self.app.register_blueprint(pipeline_bp, url_prefix="/api/v1/pipelines")
         self.app.register_blueprint(pipeline_v2_bp, url_prefix="/api/v2")
+        self.app.register_blueprint(tools_bp, url_prefix="/api/v1/tools")
 
         with self.app.app_context():
             db.create_all()
@@ -91,6 +94,40 @@ class TestNativePipelineRoutes(unittest.TestCase):
 
     def _author_headers(self):
         return {"Authorization": f"Bearer {self.author_token}"}
+
+    @patch("routes.tools_routes.CloudUploadService.get_storage_mode", return_value="cloud_backup")
+    @patch.dict("os.environ", {"WEBHDP_CORE_ONLY": "true", "WEBHDP_ENABLE_NATIVE_TOOLS": "false"})
+    def test_native_tools_opt_in_preserves_profile_and_account_guards(self, _storage_mode):
+        tools = "/api/v1/tools"
+        constructor = "/api/v2/pipelines?scope=constructor"
+        installer = f"{tools}/hdp-components/catalog"
+        admin = self._admin_headers()
+
+        def features(headers):
+            context = self.client.get(f"{tools}/context", headers=headers).get_json()["data"]
+            self.assertTrue(context["core_only"])
+            return {name for name, feature in context["features"].items() if feature["enabled"]}
+
+        self.assertEqual(features(admin), {"hpc_diagnostics"})
+        self.assertEqual(self.client.get(constructor, headers=admin).status_code, 403)
+        self.assertEqual(self.client.get(installer, headers=admin).status_code, 403)
+
+        self.app.native_pipeline_service.list_pipelines.return_value = []
+        self.app.component_installer_service.list_available_catalog.return_value = {}
+        with patch.dict("os.environ", {"WEBHDP_ENABLE_NATIVE_TOOLS": "true"}):
+            self.assertEqual(features(admin), {
+                "hpc_diagnostics", "native_playground", "pipeline_constructor", "hdp_component_installer",
+            })
+            self.assertEqual(features(self._headers()), {"native_playground"})
+            self.assertEqual(features(self._author_headers()), {"native_playground", "pipeline_constructor"})
+            self.assertEqual(self.client.get(constructor, headers=self._headers()).status_code, 403)
+            self.assertEqual(self.client.get(constructor, headers=self._author_headers()).status_code, 200)
+            self.app.native_pipeline_service.list_pipelines.assert_called_once_with(status=None, authoring=True)
+            self.assertEqual(self.client.get(installer).status_code, 401)
+            self.assertEqual(self.client.get(installer, headers=self._headers()).status_code, 403)
+            self.assertEqual(self.client.get(installer, headers=admin).status_code, 200)
+            self.assertEqual(self.client.post(f"{tools}/pipeline-preflight/local", headers=admin, json={}).status_code, 403)
+            self.assertEqual(self.client.get(f"{tools}/community-migrations/context", headers=admin).status_code, 403)
 
     def test_v1_pipeline_list_and_detail_use_native_service(self):
         self.app.native_pipeline_service.list_pipelines.return_value = [

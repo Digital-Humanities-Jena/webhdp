@@ -1,6 +1,6 @@
 # HMSM Studio components and pipelines in WebHDP
 
-Use the HMSM Studio components to digitize a mechanical-music carrier, analyze MIDI, or generate a physical layout study from MIDI. The three components share an offline Docker runtime built from an explicit HMSM Studio checkout.
+Use the HMSM Studio components to digitize a mechanical-music carrier, analyze MIDI, or generate a physical layout study from MIDI. All three run the same processors from an explicit HMSM Studio source snapshot. The local installer uses Docker. Hosted WebHDP can run the processors through HPC-Link with a checksum-pinned Singularity image.
 
 | Saved pipeline | Input | Main results |
 | --- | --- | --- |
@@ -9,7 +9,7 @@ Use the HMSM Studio components to digitize a mechanical-music carrier, analyze M
 | HMSM MIDI Reconstruction | Standard MIDI File and a supported roll or disc model | SVG layouts, print PDF when available, playback MIDI, and a fixity-checked evidence ZIP |
 | HMSM Digitize and Interpret | Carrier scan | Both the extraction outputs and an interpretation report for the extracted MIDI |
 
-## Build and install
+## Build and install locally
 
 1. Run the image build from the WebHDP repository root with Python 3.11 or later. Point `--source` at the root of your HMSM Studio Git checkout.
 
@@ -24,6 +24,30 @@ Use the HMSM Studio components to digitize a mechanical-music carrier, analyze M
 3. Sign in as an admin. Open **Tools → HDP Component Installer**, select **Local Docker**, and search the local catalog for **HMSM**. For each component, select **Validate Package**, **Install Locally**, and **Run Smoke Test**. The smoke test checks that the component creates its required files. The installer pins the resolved image ID. To adopt a rebuilt image, install a new component version and save a pipeline version that references it.
 
 ![The HMSM Scan Digitizer package in WebHDP with validation, installation, and smoke test completed](../assets/hmsm/01-local-component-catalog.png)
+
+## Install for hosted Playground
+
+1. Build the HMSM runtime for the cluster's Linux architecture. Package the
+   runtime as a Singularity SIF, including `/app/component_runner.py` and
+   `/app/hmsm-source.json`. Keep the source snapshot receipt and verify the
+   scan, interpretation, and reconstruction fixtures in that image.
+2. Put the SIF on private storage readable by the HPC-Link account. Compute
+   its SHA-256 and generate three install requests with the command below.
+
+   ```sh
+   python scripts/hpc_singularity/package_hmsm.py \
+     --sif /work/project/images/hmsm-studio.sif \
+     --sha256 "$sif_sha256" --version 1.0.1
+   ```
+
+   The output is JSON keyed by component name. In **Tools → HDP Component
+   Installer → HPC SIF**, supply each request's manifest, SIF path, and
+   checksum. Installation needs administrator access to both registries.
+   See [HDP Component installation](hdp_component_hpc_installation.md).
+3. Upload a carrier scan or MIDI file and attach an active HPC-Link allocation
+   to that upload session. In **Tools → Playground**, search for **HMSM** and
+   run the corresponding component with its `hpc_singularity` profile. HMSM
+   uses CPU cores and memory within the allocation.
 
 ## Try the scan in Playground
 
@@ -72,4 +96,4 @@ These pipelines can run immediately after upload. WebHDP keeps the output artifa
 - If a performance MIDI contains independent Type-2 sequences, select one with `sequence_track`. Use a synchronous Type-0 or Type-1 MIDI for the written score. Interpretation reports score-relative measures when it can align the inputs. For a reconstruction profile that references artwork from the Studio asset registry, set `artwork_policy` to `none` for this standalone runtime.
 - Retain `hmsm-source.json` with the scientific outputs. Keep the optical ledgers, any disc coverage mask, and the roll substrate support report when present alongside the scan ZIP. The Studio worker ZIP retains its native format. The separate ledgers preserve candidate and abstention decisions. Reconstruction's `manifest.json` and bundled `verify.py` check output fixity. Review the model evidence and omissions before drawing conclusions about the carrier or using physical-scale geometry.
 
-The integration runs the portable HMSM processors locally. Collection accounts, archive and cloud intake, historical acceptance reviews, and the Paula campaign operate in HMSM Studio.
+Collection accounts, archive and cloud intake, historical acceptance reviews, and the Paula campaign operate in HMSM Studio.

@@ -1,6 +1,5 @@
 import logging
 import json
-import os
 from functools import wraps
 
 from flask import Blueprint, current_app, request, send_file, Response, stream_with_context
@@ -8,7 +7,7 @@ from flask_jwt_extended import get_jwt_identity, jwt_required
 
 from api_utils import APIResponse
 from database.database import db
-from database.models import ExecutionArtifact, PipelineRun, StepRun, User, UserRole
+from database.models import ExecutionArtifact, PipelineRun, StepRun, User
 from exceptions import ResourceNotFoundError, SecurityError, ValidationError
 from uuid import UUID
 from routes.admin_routes import require_admin
@@ -18,6 +17,7 @@ from schemas.native_pipeline_schemas import PlaygroundExecutionRequestSchema
 from services.pipeline_artifacts import pipeline_artifact_location
 from services.pipeline_platform_service import get_pipeline_platform_contract
 from services.submission_pipeline_service import execute_submission_pipeline
+from services.tools_access_policy import can_author_pipelines, native_tools_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -69,25 +69,22 @@ def _enqueue_playground_task(run_id):
         return task
 
 
-def _current_user_can_author_pipelines() -> bool:
+def _check_pipeline_author():
+    if not native_tools_enabled():
+        return APIResponse.error("FEATURE_DISABLED", "Pipeline authoring is disabled in the core workflow profile.", 403)
     user_id = get_jwt_identity()
-    if user_id is None:
-        return False
-    user = db.session.get(User, int(user_id))
-    if user is None:
-        return False
-    if user.role == UserRole.ADMIN:
-        return True
-    return user.has_capability("native_pipeline_author")
+    user = db.session.get(User, int(user_id)) if user_id is not None else None
+    if not can_author_pipelines(user):
+        raise SecurityError("Pipeline author access required")
+    return None
 
 
 def require_pipeline_author(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
-        if os.environ.get("WEBHDP_CORE_ONLY", "false").lower() == "true":
-            return APIResponse.error("FEATURE_DISABLED", "Pipeline authoring is disabled in the core workflow profile.", 403)
-        if not _current_user_can_author_pipelines():
-            raise SecurityError("Pipeline author access required")
+        error = _check_pipeline_author()
+        if error is not None:
+            return error
         return func(*args, **kwargs)
 
     return wrapper
@@ -138,7 +135,12 @@ def import_component_v2():
 @jwt_required()
 def list_pipelines_v2():
     status = request.args.get("status")
-    pipelines = current_app.native_pipeline_service.list_pipelines(status=status)
+    authoring = request.args.get("scope") == "constructor"
+    if authoring:
+        error = _check_pipeline_author()
+        if error is not None:
+            return error
+    pipelines = current_app.native_pipeline_service.list_pipelines(status=status, authoring=authoring)
     return APIResponse.success(data={"pipelines": pipelines})
 
 
@@ -154,7 +156,12 @@ def validate_pipeline_v2():
 @pipeline_v2_bp.route("/pipelines/<identifier>", methods=["GET"])
 @jwt_required()
 def get_pipeline_v2(identifier):
-    pipeline = current_app.native_pipeline_service.get_pipeline(identifier)
+    authoring = request.args.get("scope") == "constructor"
+    if authoring:
+        error = _check_pipeline_author()
+        if error is not None:
+            return error
+    pipeline = current_app.native_pipeline_service.get_pipeline(identifier, authoring=authoring)
     return APIResponse.success(data={"pipeline": pipeline})
 
 

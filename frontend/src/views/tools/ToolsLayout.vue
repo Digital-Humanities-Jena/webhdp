@@ -11,7 +11,7 @@
 
     <div class="lg:grid lg:grid-cols-12 lg:gap-x-5">
       <aside class="py-2 lg:py-0 lg:col-span-3">
-        <nav class="flex gap-2 overflow-x-auto pb-2 lg:block lg:space-y-1 lg:overflow-visible lg:pb-0">
+        <nav aria-label="Available tools" class="flex gap-2 overflow-x-auto pb-2 lg:block lg:space-y-1 lg:overflow-visible lg:pb-0">
           <router-link
             v-for="item in enabledItems"
             :key="item.name"
@@ -37,45 +37,37 @@
             <span class="truncate">{{ item.name }}</span>
           </router-link>
 
-          <div
-            v-for="item in disabledItems"
-            :key="item.name"
-            :data-testid="`tools-nav-disabled-${item.featureKey}`"
-            class="group hidden rounded-md px-3 py-2 text-sm font-medium bg-gray-50 text-gray-400 cursor-not-allowed lg:flex lg:items-center"
-            :title="item.disabledReason || 'Unavailable'"
-          >
-            <component
-              :is="item.icon"
-              class="flex-shrink-0 -ml-1 mr-3 h-6 w-6 text-gray-300"
-              aria-hidden="true"
-            />
-            <div class="min-w-0 flex-1">
-              <span class="block truncate">{{ item.name }}</span>
-              <span class="mt-0.5 block text-[11px] font-normal text-gray-400">{{ item.disabledReason || 'Unavailable' }}</span>
-            </div>
-            <span class="ml-auto text-[10px] uppercase tracking-wide">Disabled</span>
-          </div>
         </nav>
 
-        <div
-          v-if="disabledItems.length > 0"
-          class="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 lg:mt-4"
-        >
-          <span class="lg:hidden">{{ disabledItems.length }} tools hidden on this screen are disabled by role, capability, or runtime.</span>
-          <span class="hidden lg:inline">Some tools are disabled because of role, capability, or runtime requirements.</span>
-        </div>
+        <details v-if="disabledItems.length" class="mt-3 rounded-md border border-gray-200 bg-white p-3 text-sm text-gray-700">
+          <summary class="cursor-pointer font-medium">Unavailable tools ({{ disabledItems.length }})</summary>
+          <ul class="mt-2 space-y-2">
+            <li v-for="item in disabledItems" :key="item.name" :data-testid="`tools-nav-disabled-${item.featureKey}`">
+              <router-link v-if="item.href === '/tools/pipeline-preflight'" :to="item.href" class="font-medium text-indigo-700 underline">{{ item.name }}</router-link>
+              <span v-else class="font-medium">{{ item.name }}</span>
+              <p class="text-xs text-gray-600">{{ item.disabledReason }}</p>
+            </li>
+          </ul>
+        </details>
       </aside>
 
       <div class="mt-6 space-y-6 lg:mt-0 lg:col-span-9">
-        <router-view />
+        <router-view v-if="!isToolsIndex" />
+        <div v-else class="rounded-lg bg-white p-6 shadow">
+          <p v-if="contextError" role="alert" class="text-sm text-gray-700">Could not load available tools.</p>
+          <p v-else-if="!context || enabledItems.length" role="status" class="text-sm text-gray-600">Loading available tools…</p>
+          <p v-else class="text-sm text-gray-700">No tools are available for your account on this deployment.</p>
+          <button v-if="contextError" type="button" class="mt-3 text-sm text-indigo-700 underline" @click="loadContext">Try again</button>
+          <router-link v-else-if="context && !enabledItems.length" to="/uploads" class="mt-3 inline-block text-sm text-indigo-700 underline">Open Uploads</router-link>
+        </div>
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { computed, onMounted, provide, ref, watchEffect } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import {
   BeakerIcon,
   ClipboardDocumentCheckIcon,
@@ -90,9 +82,10 @@ import {
 import toolsService from '@/services/tools.service'
 
 const route = useRoute()
-const context = ref({
-  features: {}
-})
+const router = useRouter()
+const context = ref(null)
+const contextError = ref(false)
+const isToolsIndex = computed(() => route.name === 'ToolsOverview')
 const isPipelineConstructorRoute = computed(() => route.name === 'PipelineConstructor')
 
 const rawNavigation = [
@@ -188,28 +181,38 @@ const rawNavigation = [
   }
 ]
 
-const navigation = computed(() => rawNavigation.map((item) => {
+const navigation = computed(() => context.value ? rawNavigation.map((item) => {
   const feature = context.value.features?.[item.featureKey] || {}
   return {
     ...item,
     enabled: !!feature.enabled,
     disabledReason: feature.reason || 'Unavailable'
   }
-}))
+}) : [])
 
 const enabledItems = computed(() => navigation.value.filter((item) => item.enabled))
-const disabledItems = computed(() => context.value.core_only ? [] : navigation.value.filter((item) => !item.enabled))
+const disabledItems = computed(() => navigation.value.filter((item) => !item.enabled))
 
 const isActive = (href) => route.path.startsWith(href)
 
 const loadContext = async () => {
+  contextError.value = false
   try {
     const response = await toolsService.getContext()
-    context.value = response.data || context.value
-  } catch (e) {
-    context.value = { features: {} }
+    context.value = response.data || null
+    contextError.value = !context.value
+  } catch {
+    contextError.value = true
   }
 }
+
+provide('tools-context', { context, contextError, loadContext })
+
+watchEffect(() => {
+  if (isToolsIndex.value && enabledItems.value.length) {
+    void router.replace({ path: enabledItems.value[0].href, query: route.query, hash: route.hash })
+  }
+})
 
 onMounted(loadContext)
 </script>

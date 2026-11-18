@@ -347,8 +347,8 @@ const routes = [
       },
       {
         path: 'tools',
+        name: 'ToolsOverview',
         component: () => import('@/views/tools/ToolsLayout.vue'),
-        redirect: '/tools/pipeline-preflight',
         children: [
           {
             path: 'playground',

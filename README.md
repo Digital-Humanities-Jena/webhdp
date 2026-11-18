@@ -57,9 +57,12 @@ their Zenodo draft. Extract that archive to restore the original paths before
 opening the model locally. It preserves parent-directory references and files
 that share a basename; the source files are not rewritten.
 
-Set `WEBHDP_CORE_ONLY=true` to expose only the predefined workflows and HPC
-diagnostics, and disable optional tools and pipeline authoring. Set
-`ZENODO_PUBLISH_ENABLED=false` for draft-only demonstrations and testing.
+Set `WEBHDP_CORE_ONLY=true` to expose the predefined workflows and HPC
+diagnostics. Set `WEBHDP_ENABLE_NATIVE_TOOLS=true` to also offer Playground,
+Pipeline Constructor and HDP Component Installer with their usual account and
+runtime checks. On hosted storage, run Submission readiness from the Submit
+step of an upload. Set `ZENODO_PUBLISH_ENABLED=false` for draft-only
+demonstrations and testing.
 Username (email) and password login is the default; users may enroll in email
 two-factor authentication from their account settings.
 

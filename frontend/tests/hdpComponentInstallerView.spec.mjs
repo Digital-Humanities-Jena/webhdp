@@ -23,6 +23,7 @@ vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ user: { id: 1 } }) }))
 
 vi.mock('vue-router', () => ({
   useRoute: () => mocked.route,
+  useRouter: () => ({ replace: vi.fn() }),
 }))
 
 vi.mock('@/services/tools.service', () => ({ default: mocked.toolsService }))

@@ -11,7 +11,7 @@ Publishing the repository version does not change a running deployment.
 | Feature | What an operator needs |
 | --- | --- |
 | Native submission, retry and result review | Matching backend, frontend and Celery worker. Check any interrupted runs and ambiguous Zenodo operations before retrying. |
-| Historic, Zenodo community and HMSM processing | Install the required component versions and locally available immutable Docker images or verified SIFs. Catalog entries do not install these runtimes. |
+| Historic, Zenodo community and HMSM processing | Retain installed versions and their pinned images. Use the Component Installer for new versions and follow the [component upgrade checks](hdp_component_hpc_installation.md#preserve-installations-during-a-webhdp-upgrade). |
 | GPU reservation sharing | Updated private HPC-Link gateway and component runner; a running single-node GPU job whose Slurm owner is the configured gateway account; one registration and named WebHDP grants. |
 | WebHDP-Link | Private shared storage, a separate supervised worker, publications with pinned native versions, and applications registered with exact origins and callbacks. |
 
@@ -35,8 +35,11 @@ need a Docker socket on the WebHDP server when the verified components run on HP
 2. Build or obtain matching images from the reviewed release. Also update
    HPC-Link and its remote runner if using reservations or updated HPC
    components. Keep the gateway registry on a private writable volume and
-   preserve its existing state. New installations and upgrades must both use
-   the target backend, frontend and worker builds together.
+   preserve its existing state. Keep the HPC application root and installed
+   component versions available at their existing paths. On a deployment
+   using the core workflow profile, carry forward `WEBHDP_ENABLE_NATIVE_TOOLS`
+   if signed-in users use Playground. Use the target backend, frontend and
+   worker builds together.
 3. Run the upgrade first against the restored staging copy. In the deployment,
    gate new submissions and let active jobs drain before stopping writers.
    Check the native, Celery and Link queues individually. If Link is enabled,

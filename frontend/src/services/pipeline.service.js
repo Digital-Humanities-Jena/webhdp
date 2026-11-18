@@ -11,14 +11,16 @@ function requestV2(config) {
 
 export default {
   // List all available pipelines (optionally filter by status)
-  listPipelines(status = null) {
+  listPipelines(status = null, { authoring = false } = {}) {
     const params = status ? { status } : {}
+    if (authoring) params.scope = 'constructor'
     return requestV2({ method: 'get', url: '/pipelines', params })
   },
 
   // Retrieve details for a specific pipeline
-  getPipeline(identifier = DEFAULT_PIPELINE_ID) {
-    return requestV2({ method: 'get', url: `/pipelines/${identifier}` })
+  getPipeline(identifier = DEFAULT_PIPELINE_ID, { authoring = false } = {}) {
+    const params = authoring ? { scope: 'constructor' } : undefined
+    return requestV2({ method: 'get', url: `/pipelines/${identifier}`, params })
   },
 
   listComponents(options = {}) {

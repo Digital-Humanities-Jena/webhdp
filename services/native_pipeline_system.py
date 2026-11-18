@@ -540,23 +540,23 @@ class NativePipelineSystemService:
             serialized.append(payload)
         return serialized
 
-    def list_pipelines(self, *, include_hidden: bool = False, status: Optional[str] = None) -> List[Dict[str, Any]]:
+    def list_pipelines(self, *, include_hidden: bool = False, status: Optional[str] = None, authoring: bool = False) -> List[Dict[str, Any]]:
         self.ensure_seeded()
         query = PipelineDefinition.query.filter_by(is_active=True)
         if not include_hidden:
             query = query.filter_by(is_public=True)
         if status:
             query = query.filter_by(status=status)
-        if os.environ.get("WEBHDP_CORE_ONLY", "false").lower() == "true":
+        if not authoring and os.environ.get("WEBHDP_CORE_ONLY", "false").lower() == "true":
             query = query.filter(PipelineDefinition.identifier.in_(["render", METADATA_ONLY_PIPELINE_ID, MESH_OPTIMIZATION_PIPELINE_ID, GEOREFERENCING_PIPELINE_ID]))
         definitions = query.order_by(PipelineDefinition.identifier.asc()).all()
         return [self._serialize_pipeline_summary(definition) for definition in definitions]
 
-    def get_pipeline(self, identifier: str) -> Dict[str, Any]:
+    def get_pipeline(self, identifier: str, *, authoring: bool = False) -> Dict[str, Any]:
         self.ensure_seeded()
         requested_identifier = str(identifier or "").strip()
         canonical_identifier = self.resolve_pipeline_identifier(requested_identifier)
-        if os.environ.get("WEBHDP_CORE_ONLY", "false").lower() == "true" and canonical_identifier not in {"render", METADATA_ONLY_PIPELINE_ID, MESH_OPTIMIZATION_PIPELINE_ID, GEOREFERENCING_PIPELINE_ID}:
+        if not authoring and os.environ.get("WEBHDP_CORE_ONLY", "false").lower() == "true" and canonical_identifier not in {"render", METADATA_ONLY_PIPELINE_ID, MESH_OPTIMIZATION_PIPELINE_ID, GEOREFERENCING_PIPELINE_ID}:
             raise ValidationError("This optional pipeline is disabled in the core workflow profile")
         definition = PipelineDefinition.query.filter_by(identifier=canonical_identifier, is_active=True).first()
         if definition is None:
@@ -3474,6 +3474,8 @@ class NativePipelineSystemService:
             manifests_by_step[step["id"]] = manifest
             profile = next((item for item in manifest.get("execution", {}).get("profiles", []) if item.get("id") == step.get("execution_profile_ref")), {})
             if step.get("enabled", True):
+                if component_key in HISTORIC_COMPONENT_KEYS and not profile:
+                    errors.append(f"Step '{step['id']}' requires the installed '{step['execution_profile_ref']}' execution profile.")
                 if component_key in HMSM_COMPONENT_KEYS and not (
                     profile.get("adapter") == "container_cli" and profile.get("runtime") == "docker"
                     and (profile.get("config") or {}).get("webhdp_contract") is True

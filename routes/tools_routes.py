@@ -42,6 +42,7 @@ from services.community_moderation_sweep_service import CommunityModerationSweep
 from services.community_migration_service import CommunityMigrationService
 from services.metadata_workflow_service import get_metadata_workflow_contract
 from services.pipeline_platform_service import get_pipeline_platform_contract
+from services.tools_access_policy import can_author_pipelines, core_workflow_only, native_tools_enabled
 from services.institution_service import InstitutionService
 from services.user_service import UserService
 from services.zenodo_config_service import ZenodoConfigService
@@ -714,21 +715,39 @@ def _build_validation_report(
     return validation
 
 
+CORE_TOOLS_ENDPOINTS = {"tools.tools_context", "tools.hpc_diagnostics"}
+NATIVE_INSTALLER_ENDPOINTS = {
+    "tools.validate_hdp_component_install",
+    "tools.list_hdp_component_catalog",
+    "tools.hdp_component_catalog_diagnostics",
+    "tools.install_hdp_component",
+    "tools.list_hdp_component_installations",
+    "tools.get_hdp_component_installation",
+    "tools.test_hdp_component_installation",
+}
+NATIVE_TOOLS_FEATURES = {"native_playground", "pipeline_constructor", "hdp_component_installer"}
+
+
 @tools_bp.before_request
 def enforce_core_tools_profile():
-    if os.environ.get("WEBHDP_CORE_ONLY", "false").lower() == "true":
-        if request.path.rstrip("/") not in {"/api/v1/tools/context", "/api/v1/tools/hpc-diagnostics"}:
-            return APIResponse.error("FEATURE_DISABLED", "This optional tool is disabled in the core workflow profile.", 403)
+    if not core_workflow_only() or request.endpoint in CORE_TOOLS_ENDPOINTS:
+        return None
+    if native_tools_enabled() and request.endpoint in NATIVE_INSTALLER_ENDPOINTS:
+        return None
+    return APIResponse.error("FEATURE_DISABLED", "This optional tool is disabled in the core workflow profile.", 403)
 
 
 @tools_bp.after_request
 def filter_core_tools_context(response):
-    if os.environ.get("WEBHDP_CORE_ONLY", "false").lower() == "true" and request.path.rstrip("/").endswith("/context") and response.status_code == 200:
+    if core_workflow_only() and request.endpoint == "tools.tools_context" and response.status_code == 200:
         payload = response.get_json()
         data = payload.get("data", {})
         data["core_only"] = True
+        allowed = {"hpc_diagnostics"}
+        if native_tools_enabled():
+            allowed.update(NATIVE_TOOLS_FEATURES)
         for key, feature in data.get("features", {}).items():
-            if key != "hpc_diagnostics":
+            if key not in allowed and feature["enabled"]:
                 feature.update(enabled=False, reason="Disabled in the core workflow profile")
         response.set_data(json.dumps(payload))
     return response
@@ -754,7 +773,7 @@ def tools_context():
         is_admin = role_value == "admin"
         is_moderator = role_value == "moderator"
         is_moderator_or_admin = role_value in {"moderator", "admin"}
-        is_pipeline_author = is_admin or ("native_pipeline_author" in {item.lower() for item in capabilities})
+        is_pipeline_author = can_author_pipelines(user)
         storage_mode = CloudUploadService.get_storage_mode()
         local_admin_enabled = bool(is_admin and storage_mode == STORAGE_MODE_LOCAL)
         from services.hdp_component_policy import (

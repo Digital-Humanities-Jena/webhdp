@@ -850,7 +850,7 @@ async function refreshSessionResources() {
 
 async function loadPipeline(identifier) {
   const token = ++pipelineLoadToken
-  const response = await pipelineService.getPipeline(identifier)
+  const response = await pipelineService.getPipeline(identifier, { authoring: true })
   if (token !== pipelineLoadToken) return
   const config = response.data.pipeline.config || response.data.pipeline
   savedComponents.value = response.data.pipeline.components || []
@@ -1593,7 +1593,7 @@ async function loadInitialData(preferredPipelineId = '') {
   loadFailed.value = false
   try {
     const [pipelinesResponse, componentsResponse, supportResponse] = await Promise.all([
-      pipelineService.listPipelines(),
+      pipelineService.listPipelines(null, { authoring: true }),
       pipelineService.listComponents(),
       pipelineService.getPipelineConstructorSupport(),
     ])

@@ -91,6 +91,20 @@ def test_templates_wait_for_pinned_profiles_and_preserve_saved_versions(registry
     assert PipelineVersion.query.count() == count
 
 
+def test_hpc_only_install_seeds_the_hpc_recipe(registry):
+    manifest = load("prepare")
+    manifest["execution"]["profiles"] = [
+        profile for profile in manifest["execution"]["profiles"] if profile["id"] == "hpc_singularity"
+    ]
+    registry.import_component_from_manifest(manifest)
+    assert {row.identifier for row in PipelineDefinition.query.all() if row.identifier.startswith("historic_")} == {
+        "historic_prepare_images_hpc"
+    }
+    validation = registry.validate_pipeline_config(HISTORIC_PIPELINE_DEFINITIONS["historic_prepare_images"])
+    assert not validation["valid"]
+    assert any("local_docker" in error for error in validation["errors"])
+
+
 @pytest.mark.parametrize("stage,parameter,value", [
     ("prepare", "max_image_size", 0), ("prepare", "max_image_size", True),
     ("pairs", "method", "shell"), ("pairs", "radius_m", float("inf")),

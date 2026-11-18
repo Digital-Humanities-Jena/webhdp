@@ -407,6 +407,31 @@ fixtures only.
 - Verification should allocate one node only and use the site's configured
   partition or queue order.
 
+## Preserve installations during a WebHDP upgrade
+
+WebHDP records installed component versions, execution profiles, and saved
+pipeline bindings in its database. HPC-Link keeps each installed SIF, manifest,
+and checksum record in `$HPC_APPS_ROOT/webhdp/components/<component>/<version>/`
+on the cluster. Upgrading the WebHDP application image reuses those records
+and files.
+
+1. Back up the WebHDP database and the HPC component registry. Keep the
+   original component versions used by saved pipelines. Include any private
+   model caches and operator configuration required by the registered images.
+2. Point the new backend and worker at the same persistent database. With the
+   production Compose file and SQLite, preserve the `WEBHDP_INSTANCE_PATH`
+   bind mount. Apply database migrations to that database. Keep the HPC
+   gateway pointed at the same `HPC_APPS_ROOT` and retain the component runner.
+3. After rollout, compare the installed component keys, versions and SIF
+   checksums in the **HDP Component Installer**. Open **Playground** and run
+   a small fixture through one of the installed profiles. Retain the checksums
+   alongside the deployment record.
+
+Install a new component version when its executable or manifest changes.
+Existing saved pipelines retain the component version they reference. When
+moving to another cluster, migrate the pinned files and their registry
+records and verify their paths and checksums before enabling execution.
+
 ## Example Component
 
 `external_code/gltf_validator` is a CPU-only example component. It validates

@@ -234,6 +234,22 @@ DOCS_CATALOG: List[DocEntry] = [
         rel_path="guides/zenodo_community_components.md",
     ),
     DocEntry(
+        doc_id="hmsm-components",
+        title="HMSM Studio Components",
+        category="workflows",
+        audience="all",
+        description="Digitize carrier scans, interpret MIDI, and generate carrier layouts in Playground.",
+        rel_path="guides/hmsm_components.md",
+    ),
+    DocEntry(
+        doc_id="hdp-component-installation",
+        title="HDP Component Installation and Upgrades",
+        category="operations",
+        audience="operator",
+        description="Install pinned component runtimes and preserve the registry through a WebHDP upgrade.",
+        rel_path="guides/hdp_component_hpc_installation.md",
+    ),
+    DocEntry(
         doc_id="historic-reconstruction",
         title="Historic Reconstruction Components and Pipelines",
         category="workflows",
