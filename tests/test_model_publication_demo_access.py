@@ -180,3 +180,31 @@ def test_closed_or_elevated_demo_cannot_sign_in_and_issue_link_credentials(api):
     db.session.commit()
     assert demo_login(api).json["error"]["code"] == "DEMO_CLOSED"
     assert client.get(PUBLICATION + "/jobs", headers=bearer(token)).status_code == 403
+
+
+def test_demo_login_throttling_is_independent_of_regular_logins_and_other_sources(api, monkeypatch):
+    monkeypatch.setenv("LOGIN_RATE_LIMIT_ATTEMPTS", "5")
+    client = api["client"]
+    first_ip = {"X-Forwarded-For": "192.0.2.10"}
+    second_ip = {"X-Forwarded-For": "192.0.2.11"}
+    good = {"email": DEMO_EMAIL, "password": DEMO_PASSWORD}
+    invalid = {"email": DEMO_EMAIL, "password": "incorrect"}
+    for _ in range(5):
+        response = client.post(AUTH + "/login", json=invalid, headers=first_ip)
+        assert response.status_code == 400
+        assert response.json["error"]["message"] == "Invalid email or password"
+
+    assert client.post(AUTH + "/login", json=good, headers=first_ip).status_code == 200
+
+    missing_demo = {"email": "model-demo-00000000@webhdp.invalid", "password": "incorrect"}
+    for _ in range(20):
+        assert client.post(AUTH + "/login", json=missing_demo, headers=first_ip).status_code == 400
+    limited = client.post(AUTH + "/login", json=good, headers=first_ip)
+    assert limited.status_code == 429
+    assert 1 <= limited.json["error"]["details"]["retry_after_seconds"] <= 30
+    assert client.post(AUTH + "/login", json=good, headers=second_ip).status_code == 200
+
+    regular = {"email": "regular@example.test", "password": "incorrect"}
+    for _ in range(5):
+        assert client.post(AUTH + "/login", json=regular, headers=first_ip).status_code == 400
+    assert client.post(AUTH + "/login", json=regular, headers=first_ip).status_code == 429

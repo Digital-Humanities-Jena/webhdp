@@ -17,7 +17,7 @@ from database.models import User, UserMfaChallenge, UserZenodoActiveCredential
 from exceptions import ValidationError
 from services.audit_service import record_audit_event
 from services.institution_service import InstitutionService
-from services.model_publication_accounts import DEMO_CLAIM, demo_expiry, demo_sign_in_allowed, is_demo
+from services.model_publication_accounts import DEMO_CLAIM, demo_expiry, demo_sign_in_allowed, is_demo, is_generated_demo_email
 from services.recovery_code_service import (
     find_valid_recovery_code,
     mark_recovery_code_used,
@@ -105,7 +105,7 @@ def _prune_rate_limit_state(now: float, window_seconds: int) -> None:
 def _rate_limit_keys(action: str, identifier: str | None = None) -> list[str]:
     keys = [f"{action}:ip:{_remote_ip()}"]
     normalized_identifier = str(identifier or "").strip().lower()
-    if normalized_identifier:
+    if normalized_identifier and action != "demo_login":
         keys.append(f"{action}:id:{normalized_identifier}")
     return keys
 
@@ -136,11 +136,16 @@ def _record_rate_limit_event(action: str, identifier: str | None = None, *, fail
     if not failed:
         return
     window = _rate_limit_value("AUTH_RATE_LIMIT_WINDOW_SECONDS", 300)
-    lockout = _rate_limit_value("AUTH_RATE_LIMIT_LOCKOUT_SECONDS", 900)
-    max_attempts = _rate_limit_value(
-        "REGISTER_RATE_LIMIT_ATTEMPTS" if action == "register" else "LOGIN_RATE_LIMIT_ATTEMPTS",
-        10 if action == "register" else 5,
-    )
+    if action == "demo_login":
+        # A single high-entropy system account is shared by the cohort. Failed
+        # attempts pause their source briefly without blocking everyone else.
+        max_attempts, lockout = 20, 30
+    else:
+        lockout = _rate_limit_value("AUTH_RATE_LIMIT_LOCKOUT_SECONDS", 900)
+        max_attempts = _rate_limit_value(
+            "REGISTER_RATE_LIMIT_ATTEMPTS" if action == "register" else "LOGIN_RATE_LIMIT_ATTEMPTS",
+            10 if action == "register" else 5,
+        )
     now = time.monotonic()
     keys = _rate_limit_keys(action, identifier)
     with _rate_limit_lock:
@@ -461,7 +466,8 @@ def login():
 
     email = (data.get("email") or "").strip()
     password = data.get("password")
-    limited_response = _check_rate_limit("login", email)
+    action = "demo_login" if is_generated_demo_email(email) else "login"
+    limited_response = _check_rate_limit(action, email)
     if limited_response:
         return limited_response
 
@@ -470,18 +476,18 @@ def login():
 
     user = user_service.authenticate(email=email, password=password)
     if not user:
-        _record_rate_limit_event("login", email, failed=True)
+        _record_rate_limit_event(action, email, failed=True)
         raise ValidationError("Invalid email or password")
 
     if is_demo(user) and not demo_sign_in_allowed(user):
         return APIResponse.error("DEMO_CLOSED", "The live demonstration is currently closed.", 403)
 
     if not user.is_verified:
-        _record_rate_limit_event("login", email, failed=True)
+        _record_rate_limit_event(action, email, failed=True)
         return APIResponse.error("EMAIL_NOT_VERIFIED", "Please verify your email address before logging in", 403)
 
     if not user.mfa_enabled:
-        _clear_rate_limit("login", email)
+        _clear_rate_limit(action, email)
         return APIResponse.success(
             data={"user": _serialize_user_context(user), "access_token": _create_access_token_for_user(user)},
             message="Login successful",
@@ -493,7 +499,7 @@ def login():
         db.session.rollback()
         return APIResponse.error("MFA_EMAIL_FAILED", "Unable to send the verification code email. Please try again later.", 500)
     db.session.commit()
-    _clear_rate_limit("login", email)
+    _clear_rate_limit(action, email)
     payload = _attach_development_mfa_code(_mfa_response_payload(challenge, token, user), code, delivery_mode)
 
     return APIResponse.success(

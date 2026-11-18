@@ -29,8 +29,12 @@ DEMO_ENDPOINTS = {
 }
 
 
+def is_generated_demo_email(email):
+    return DEMO_EMAIL.fullmatch(email or "") is not None
+
+
 def is_demo(user):
-    return DEMO_CAPABILITY in user.capabilities or DEMO_EMAIL.fullmatch(user.email or "") is not None
+    return DEMO_CAPABILITY in user.capabilities or is_generated_demo_email(user.email)
 
 
 def demo_config_key(user_id):
