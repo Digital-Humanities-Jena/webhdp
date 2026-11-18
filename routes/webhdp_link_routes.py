@@ -10,6 +10,7 @@ from database.database import db
 from database.models import User, UserRole
 from database.webhdp_link_models import LinkArtifact, LinkClient, LinkPublication, LinkRun, LinkToken, LinkUpload
 from services import webhdp_link_service as link
+from services.model_publication_accounts import is_demo
 from services.registry_lock import OperationConflict
 
 webhdp_link_bp = Blueprint('webhdp_link', __name__)
@@ -132,6 +133,7 @@ def bearer(scope):
         @wraps(fn)
         def wrapped(*args, **kwargs):
             g.link_token, g.link_client, g.link_user = link.authenticate(scope)
+            link.fail(is_demo(g.link_user), 'access_denied', 'This account is limited to the model publication demonstration.', 403)
             if request.path == '/api/v1/link/uploads' and request.method == 'POST':
                 # Set before request.files triggers Werkzeug multipart spooling.
                 request.max_content_length = link.client_config(g.link_client)['max_upload_bytes'] + 16384
@@ -334,6 +336,7 @@ def admin_create_token(client_id):
     data = link.object_payload(body(), {'user_id', 'scope', 'expires_in'})
     user_id = link.bounded_int(data.get('user_id', g.link_user.id), 'user_id', 1, 2**31 - 1)
     user = get_row(User, user_id, 'User')
+    link.fail(is_demo(user), 'access_denied', 'Demonstration accounts cannot authorize applications.', 403)
     return jsonify(link.issue_token(get_row(LinkClient, client_id, 'Application'), user, scope=data.get('scope'), expires_in=data.get('expires_in', 3600), service=True)), 201
 
 

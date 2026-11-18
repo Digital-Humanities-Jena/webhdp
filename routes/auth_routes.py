@@ -17,7 +17,7 @@ from database.models import User, UserMfaChallenge, UserZenodoActiveCredential
 from exceptions import ValidationError
 from services.audit_service import record_audit_event
 from services.institution_service import InstitutionService
-from services.model_publication_accounts import demo_expiry, demo_open, is_demo
+from services.model_publication_accounts import DEMO_CLAIM, demo_expiry, demo_sign_in_allowed, is_demo
 from services.recovery_code_service import (
     find_valid_recovery_code,
     mark_recovery_code_used,
@@ -235,6 +235,14 @@ def _serialize_membership(membership):
 
 
 def _serialize_user_context(user: User) -> dict:
+    if is_demo(user):
+        return {
+            "email": user.email,
+            "display_name": user.display_name,
+            "role": user.role.value,
+            "model_publication_only": True,
+            "model_publication_expires_at": demo_expiry(user.id),
+        }
     memberships = institution_service.list_for_user(user.id)
     institutions = []
     for membership in memberships:
@@ -246,7 +254,7 @@ def _serialize_user_context(user: User) -> dict:
 
     return {
         **user.to_dict(),
-        "model_publication_only": is_demo(user),
+        "model_publication_only": False,
         "memberships": [_serialize_membership(membership) for membership in memberships],
         "institutions": institutions,
         "default_institution": user.default_institution.to_dict() if getattr(user, "default_institution", None) else None,
@@ -256,12 +264,14 @@ def _serialize_user_context(user: User) -> dict:
 
 
 def _create_access_token_for_user(user: User) -> str:
+    demo = is_demo(user)
     return create_access_token(
         identity=str(user.id),
-        expires_delta=timedelta(seconds=max(1, demo_expiry(user.id) - time.time())) if is_demo(user) else None,
+        expires_delta=timedelta(seconds=max(1, demo_expiry(user.id) - time.time())) if demo else None,
         additional_claims={
             "token_version": int(user.token_version or 0),
             "force_password_change": bool(user.force_password_change),
+            **({DEMO_CLAIM: True} if demo else {}),
         },
     )
 
@@ -397,6 +407,8 @@ def _validate_mfa_challenge(challenge: UserMfaChallenge | None) -> tuple[UserMfa
     now = datetime.utcnow()
     if not challenge or challenge.consumed_at is not None or challenge.expires_at <= now:
         return None, APIResponse.error("MFA_CHALLENGE_INVALID", "The verification code has expired. Please sign in again.", 400)
+    if challenge.user and is_demo(challenge.user) and not demo_sign_in_allowed(challenge.user):
+        return None, APIResponse.error("DEMO_CLOSED", "The live demonstration is currently closed.", 403)
     if challenge.attempts >= _mfa_max_attempts():
         return None, APIResponse.error("MFA_CHALLENGE_LOCKED", "Too many verification attempts. Please sign in again.", 429)
     return challenge, None
@@ -461,7 +473,7 @@ def login():
         _record_rate_limit_event("login", email, failed=True)
         raise ValidationError("Invalid email or password")
 
-    if is_demo(user) and not demo_open(user.id):
+    if is_demo(user) and not demo_sign_in_allowed(user):
         return APIResponse.error("DEMO_CLOSED", "The live demonstration is currently closed.", 403)
 
     if not user.is_verified:

@@ -87,6 +87,8 @@ def _enforce_required_password_change():
         return None
     if not request.path.startswith("/api/"):
         return None
+    if request.path in PASSWORD_CHANGE_ALLOWED_PATHS:
+        return None
     auth_header = request.headers.get("Authorization", "")
     if request.path.startswith("/api/v1/link/") and auth_header.startswith("Bearer whl_"):
         return None  # Link checks account state and token-version revocation itself.
@@ -108,18 +110,7 @@ def _enforce_required_password_change():
         return None
     user = db.session.get(User, int(user_id))
 
-    from services.model_publication_accounts import is_demo
-    if user and is_demo(user) and not (
-        request.blueprint == "model_publication" or
-        request.endpoint in {"auth.get_current_user", "auth.logout"}
-    ):
-        return error_response(
-            "DEMO_WORKFLOW_ONLY",
-            "This account is limited to the model publication demonstration.",
-            403,
-            request_id=g.get("request_id"),
-        )
-    if user and user.force_password_change and request.path not in PASSWORD_CHANGE_ALLOWED_PATHS:
+    if user and user.force_password_change:
         return error_response(
             "PASSWORD_CHANGE_REQUIRED",
             "Password change required before continuing.",

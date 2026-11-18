@@ -58,6 +58,7 @@ from services.component_index_service import ComponentIndexService
 from services.hpc_component_installer_service import ComponentInstallerService
 from services.zenodo_config_service import ZenodoConfigService
 from services.hdpc_provenance_service import build_hdpc_provenance
+from services.model_publication_accounts import demo_sign_in_allowed, is_demo, register_demo_jwt_scope
 from database.seed_edm_templates import seed_templates as seed_edm_templates
 from database.seed_iiif_templates import seed_iiif_templates
 from database.seed_mets_mods_templates import seed_mets_templates
@@ -194,6 +195,7 @@ app.config["JWT_SECRET_KEY"] = app.config["SECRET_KEY"]
 app.config["JWT_ACCESS_TOKEN_EXPIRES"] = 86400  # 24 hours
 app.config["JWT_TOKEN_LOCATION"] = ["headers"]
 jwt = JWTManager(app)
+register_demo_jwt_scope(jwt)
 
 
 # JWT Error Handlers
@@ -231,8 +233,7 @@ def check_if_token_revoked(jwt_header, jwt_payload):
     if not user:
         return True
 
-    from services.model_publication_accounts import demo_open, is_demo
-    if is_demo(user) and not demo_open(user.id):
+    if is_demo(user) and not demo_sign_in_allowed(user):
         return True
 
     token_version = int(jwt_payload.get("token_version", 0) or 0)
