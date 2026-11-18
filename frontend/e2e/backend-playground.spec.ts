@@ -24,6 +24,54 @@ async function prepareForm(page: Page, fixture: any) {
   await dialog.locator('textarea').first().fill(fixture.path)
 }
 
+test('scrolling over the Run panel reaches the form below the fold', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1280, height: 560 })
+  const fixture = await (await request.post(`${backend}/__test__/fixture`)).json()
+  await openPlayground(page, fixture)
+  const dialog = page.getByRole('dialog')
+  await dialog.locator('select').first().selectOption(String(fixture.session_id))
+  await expect(dialog.getByText('Session Context', { exact: true })).toBeVisible()
+
+  const inputs = dialog.getByRole('heading', { name: 'Inputs', exact: true })
+  const inputsTop = () => inputs.evaluate(element => element.getBoundingClientRect().top)
+  await dialog.getByRole('heading', { name: 'Run', exact: true }).hover()
+  const initialInputsTop = await inputsTop()
+  const initialPageTop = await page.evaluate(() => window.scrollY)
+
+  await page.mouse.wheel(0, 1500)
+  await expect.poll(inputsTop).toBeLessThan(initialInputsTop - 50)
+  await expect(dialog.getByRole('button', { name: 'Run Playground' })).toBeInViewport()
+  expect(await page.evaluate(() => window.scrollY)).toBe(initialPageTop)
+
+  await dialog.getByRole('region', { name: 'Playground form and results' }).focus()
+  await page.keyboard.press('Home')
+  await expect.poll(inputsTop).toBeCloseTo(initialInputsTop, 0)
+  await page.keyboard.press('Escape')
+  await expect(dialog).toBeHidden()
+  await expect(page.getByRole('button', { name: /Browser component.*Open/ })).toBeFocused()
+})
+
+test('scrolling the narrow form reaches the stacked Run panel', async ({ page, request }) => {
+  await page.setViewportSize({ width: 620, height: 560 })
+  const fixture = await (await request.post(`${backend}/__test__/fixture`)).json()
+  await openPlayground(page, fixture)
+  const dialog = page.getByRole('dialog')
+  await dialog.locator('select').first().selectOption(String(fixture.session_id))
+  await expect(dialog.getByText('Session Context', { exact: true })).toBeVisible()
+
+  const run = dialog.getByRole('button', { name: 'Run Playground' })
+  const runTop = () => run.evaluate(element => element.getBoundingClientRect().top)
+  await dialog.getByText('Session Context', { exact: true }).hover()
+  const initialRunTop = await runTop()
+  const initialPageTop = await page.evaluate(() => window.scrollY)
+
+  await page.mouse.wheel(0, 600)
+  await expect.poll(runTop).toBeLessThan(initialRunTop - 50)
+  await page.mouse.wheel(0, 600)
+  await expect(run).toBeInViewport()
+  expect(await page.evaluate(() => window.scrollY)).toBe(initialPageTop)
+})
+
 test('real HTTP routes reject foreign sessions and out-of-scope files', async ({ request }) => {
   const fixture = await (await request.post(`${backend}/__test__/fixture`)).json()
   const payload = { component_key: 'browser_component', session_id: fixture.session_id, profile_id: 'local', inputs: { files: [fixture.path] }, async_execution: true, request_id: crypto.randomUUID() }

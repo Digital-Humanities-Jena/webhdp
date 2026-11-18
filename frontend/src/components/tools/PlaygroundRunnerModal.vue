@@ -2,7 +2,7 @@
   <Teleport to="body">
     <div
       v-if="show && component"
-      class="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/70 px-4 py-6"
+      class="fixed inset-0 z-[120] flex items-center justify-center overflow-hidden overscroll-contain bg-slate-950/70 px-4 py-6"
       @click.self="close"
     >
       <div
@@ -12,7 +12,7 @@
         :aria-labelledby="titleId"
         class="flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
       >
-        <div class="border-b border-slate-200 px-6 py-5">
+        <div class="shrink-0 border-b border-slate-200 px-6 py-5">
           <div class="flex items-start justify-between gap-4">
             <div class="min-w-0">
               <div class="flex flex-wrap items-center gap-2">
@@ -50,8 +50,13 @@
           </div>
         </div>
 
-        <div class="grid min-h-0 flex-1 grid-cols-1 gap-0 lg:grid-cols-[minmax(0,1fr)_22rem]">
-          <div class="min-h-0 overflow-y-auto px-6 py-5">
+        <div
+          role="region"
+          aria-label="Playground form and results"
+          tabindex="0"
+          class="grid min-h-0 flex-auto auto-rows-max grid-cols-1 overflow-y-auto overscroll-contain focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-indigo-500 lg:grid-cols-[minmax(0,1fr)_22rem]"
+        >
+          <div class="min-w-0 px-6 py-5">
             <fieldset :disabled="running || persistentRun.submitting.value" class="min-w-0">
             <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
               <div>
@@ -216,9 +221,9 @@
             </fieldset>
           </div>
 
-          <aside class="min-h-0 border-t border-slate-200 bg-slate-50 px-6 py-5 lg:border-l lg:border-t-0">
-            <div class="flex h-full min-h-0 flex-col">
-              <div class="flex items-center justify-between gap-3">
+          <aside class="min-w-0 border-t border-slate-200 bg-slate-50 px-6 pb-5 lg:border-l lg:border-t-0">
+            <div class="h-full">
+              <div class="sticky top-0 z-10 flex items-center justify-between gap-3 bg-slate-50 py-5">
                 <div>
                   <h3 class="text-lg font-semibold text-slate-950">Run</h3>
                   <p class="mt-1 text-sm text-slate-500">Execute this component with the manifest-backed form.</p>
@@ -233,7 +238,7 @@
                 </button>
               </div>
 
-              <div class="mt-5 grid grid-cols-1 gap-3">
+              <div class="grid grid-cols-1 gap-3">
                 <div class="rounded-2xl border border-slate-200 bg-white px-4 py-3">
                   <div class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Component</div>
                   <div class="mt-2 text-sm font-medium text-slate-900">{{ component.key }}</div>
@@ -256,7 +261,7 @@
                 <button v-if="persistentRun.trackingUnavailable.value" type="button" class="ml-3 text-sm text-indigo-700 underline" @click="persistentRun.dismiss">Dismiss tracking</button>
               </div>
 
-              <div v-if="result" class="mt-5 min-h-0 flex-1 overflow-y-auto space-y-4">
+              <div v-if="result" class="mt-5 space-y-4">
                 <div class="rounded-2xl border border-slate-200 bg-white px-4 py-4">
                   <div class="flex flex-wrap items-center gap-2">
                     <span class="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-700">
