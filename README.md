@@ -52,6 +52,11 @@ corresponding HPC capability. One session can claim it at a time, and detaching
 returns it to the demonstration pool for the remainder of the allocation.
 See the [reserved GPU guide](docs/guides/prereserved_gpu_demo.md).
 
+The guided CPU workflow checks a single model package, maps its metadata, and
+creates a Zenodo Sandbox draft. It includes a public sample library and a
+time-limited account for group demonstrations. See the
+[3D model publication guide](docs/guides/model_publication.md).
+
 Models whose dependencies span directories include a `<model>.sources.zip` in
 their Zenodo draft. Extract that archive to restore the original paths before
 opening the model locally. It preserves parent-directory references and files

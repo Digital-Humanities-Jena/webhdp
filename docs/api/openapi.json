@@ -7386,6 +7386,343 @@
         ]
       }
     },
+    "/api/v1/model-publication/availability": {
+      "get": {
+        "operationId": "get_model_publication_availability",
+        "responses": {
+          "200": {
+            "description": "Successful response. WebHDP API responses generally use {success, data, message, metadata}."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "model_publication availability",
+        "tags": [
+          "model-publication"
+        ]
+      }
+    },
+    "/api/v1/model-publication/jobs": {
+      "get": {
+        "operationId": "get_model_publication_jobs",
+        "responses": {
+          "200": {
+            "description": "Successful response. WebHDP API responses generally use {success, data, message, metadata}."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "model_publication jobs",
+        "tags": [
+          "model-publication"
+        ]
+      },
+      "post": {
+        "operationId": "post_model_publication_submit_job",
+        "responses": {
+          "200": {
+            "description": "Successful response. WebHDP API responses generally use {success, data, message, metadata}."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "model_publication submit_job",
+        "tags": [
+          "model-publication"
+        ]
+      }
+    },
+    "/api/v1/model-publication/jobs/{job_id}": {
+      "get": {
+        "operationId": "get_model_publication_job_status",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response. WebHDP API responses generally use {success, data, message, metadata}."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "model_publication job_status",
+        "tags": [
+          "model-publication"
+        ]
+      }
+    },
+    "/api/v1/model-publication/jobs/{job_id}/files/{filename}": {
+      "get": {
+        "operationId": "get_model_publication_job_file",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "filename",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response. WebHDP API responses generally use {success, data, message, metadata}."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "model_publication job_file",
+        "tags": [
+          "model-publication"
+        ]
+      }
+    },
+    "/api/v1/model-publication/queue": {
+      "get": {
+        "operationId": "get_model_publication_queue_status",
+        "responses": {
+          "200": {
+            "description": "Successful response. WebHDP API responses generally use {success, data, message, metadata}."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "model_publication queue_status",
+        "tags": [
+          "model-publication"
+        ]
+      }
+    },
+    "/api/v1/model-publication/samples": {
+      "get": {
+        "operationId": "get_model_publication_samples",
+        "responses": {
+          "200": {
+            "description": "Successful response. WebHDP API responses generally use {success, data, message, metadata}."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "summary": "model_publication samples",
+        "tags": [
+          "model-publication"
+        ]
+      }
+    },
+    "/api/v1/model-publication/samples/{sample_id}": {
+      "get": {
+        "operationId": "get_model_publication_sample_download",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sample_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response. WebHDP API responses generally use {success, data, message, metadata}."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "summary": "model_publication sample_download",
+        "tags": [
+          "model-publication"
+        ]
+      }
+    },
+    "/api/v1/model-publication/samples/{sample_id}/preview": {
+      "get": {
+        "operationId": "get_model_publication_sample_preview",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sample_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response. WebHDP API responses generally use {success, data, message, metadata}."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "summary": "model_publication sample_preview",
+        "tags": [
+          "model-publication"
+        ]
+      }
+    },
     "/api/v1/msf/default-mapping": {
       "get": {
         "operationId": "get_msf_get_default_mapping",

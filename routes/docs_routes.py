@@ -226,6 +226,14 @@ DOCS_CATALOG: List[DocEntry] = [
         rel_path="guides/webhdp_link.md",
     ),
     DocEntry(
+        doc_id="model-publication",
+        title="Prepare a 3D Model for Zenodo Sandbox",
+        category="workflows",
+        audience="all",
+        description="Prepare a sample or upload a 3D model, follow the CPU queue, and review its Sandbox draft.",
+        rel_path="guides/model_publication.md",
+    ),
+    DocEntry(
         doc_id="zenodo-community-components",
         title="Published Zenodo Community Components",
         category="workflows",

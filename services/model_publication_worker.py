@@ -19,7 +19,6 @@ from external_code.webhdp_link_zenodo.runner import API, SANDBOX, SandboxClient,
 from services import model_publication_queue as queue
 from services.model_publication_accounts import sandbox_token
 
-WORKERS = 4
 _rate_limit_lock = threading.Lock()
 _retry_after = 0.0
 
@@ -240,7 +239,7 @@ def run_worker(app, base, *, stop):
         queue.recover(base)
         beat = base / ".heartbeat"
         try:
-            with ThreadPoolExecutor(max_workers=WORKERS) as executor:
+            with ThreadPoolExecutor(max_workers=queue.WORKER_CAPACITY) as executor:
                 running = set()
                 cleanup_at = 0
                 while not stop.is_set():
@@ -252,7 +251,7 @@ def run_worker(app, base, *, stop):
                         if future.done():
                             future.result()
                             running.remove(future)
-                    while len(running) < WORKERS and (job := queue.claim(base)):
+                    while len(running) < queue.WORKER_CAPACITY and (job := queue.claim(base)):
                         running.add(executor.submit(process, app, base, job))
                     stop.wait(0.5)
         finally:

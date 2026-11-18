@@ -76,6 +76,12 @@ def availability():
                                 "credential_ready": bool(sandbox_token(user.id, demo)), "demo": demo})
 
 
+@model_publication_bp.route("/queue")
+@jwt_required()
+def queue_status():
+    return APIResponse.success(queue.snapshot(queue.root()))
+
+
 def _owned_jobs(job_id=None):
     user = db.session.get(User, int(get_jwt_identity()))
     return queue.get_jobs(queue.root(), user_id=user.id, job_id=job_id,

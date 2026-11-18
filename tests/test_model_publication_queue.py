@@ -1,10 +1,12 @@
 from concurrent.futures import ThreadPoolExecutor
 import io
 import time
+from types import SimpleNamespace
 from uuid import uuid4
 
 from flask import Flask
 from flask_jwt_extended import JWTManager, create_access_token
+import pytest
 
 from database.database import db
 from database.models import SystemConfig, User
@@ -12,6 +14,35 @@ from middleware import setup_error_handlers
 from routes.model_publication_routes import LIBRARY, model_publication_bp, sample_catalog
 from services import model_publication_queue as queue
 from services.model_publication_accounts import DEMO_CAPABILITY, demo_config_key
+
+
+def test_queue_counts_and_reserves_demo_capacity(tmp_path, monkeypatch):
+    app = Flask(__name__)
+    app.config["MODEL_PUBLICATION_ENABLED"] = True
+    (tmp_path / ".heartbeat").touch()
+    monkeypatch.setattr(queue.shutil, "disk_usage", lambda _: SimpleNamespace(free=4 * 1024**3))
+    with app.app_context():
+        status = queue.snapshot(tmp_path)
+        assert (status["queued"], status["running"], status["capacity"], status["ready"]) == (0, 0, 4, True)
+        assert abs(status["updated"] - time.time()) < 2
+        limit = queue.MAX_ACTIVE - queue.DEMO_QUEUE_RESERVE
+        for index in range(limit):
+            identity, _ = queue.reserve(tmp_path, user_id=index + 10, sign_in="regular", request_key="first",
+                                        demo_window=0, parameters={"sample_id": "bronze-seal"})
+            queue.enqueue(tmp_path, identity)
+        with pytest.raises(queue.QueueError) as full:
+            queue.reserve(tmp_path, user_id=999, sign_in="regular", request_key="first",
+                          demo_window=0, parameters={"sample_id": "bronze-seal"})
+        assert full.value.status == 429
+        for index in range(queue.DEMO_QUEUE_RESERVE):
+            identity, _ = queue.reserve(tmp_path, user_id=1, sign_in=str(index), request_key="first",
+                                        demo_window=900, parameters={"sample_id": "bronze-seal"})
+            queue.enqueue(tmp_path, identity)
+        queue.claim(tmp_path)
+        status = queue.snapshot(tmp_path)
+        assert status["queued"] == queue.MAX_ACTIVE - 1
+        assert status["running"] == 1
+        assert set(status) == {"queued", "running", "capacity", "ready", "updated"}
 
 
 def test_concurrent_submissions_are_fifo_and_recover_after_interruption(tmp_path):
@@ -72,6 +103,12 @@ def test_shared_demo_only_accepts_official_samples_and_isolates_results(tmp_path
     assert retry.status_code == 200 and retry.get_json()["data"]["job"]["id"] == job["id"]
     assert client.get(f"{url}/{job['id']}", headers=second).status_code == 404
     assert client.get(url, headers=second).get_json()["data"]["jobs"] == []
+    status_url = "/api/v1/model-publication/queue"
+    assert client.get(status_url).status_code == 401
+    aggregate = client.get(status_url, headers=second)
+    assert aggregate.get_json()["data"]["queued"] == 1
+    assert "no-store" in aggregate.headers["Cache-Control"]
+    assert job["id"].encode() not in aggregate.data
     assert b"sample-linked-secret" not in client.get("/api/v1/model-publication/availability", headers=first).data
 
 

@@ -15,9 +15,12 @@ from flask import current_app
 MAX_ARCHIVE_BYTES = 24 * 1024**2
 MAX_MSF_BYTES = 1024**2
 MAX_ACTIVE = 40
+DEMO_QUEUE_RESERVE = 20
+WORKER_CAPACITY = 4
 WORKSPACE_FLOOR = 768 * 1024**2
 WORKSPACE_BUDGET = 768 * 1024**2
 RUN_RESERVATION = 128 * 1024**2
+SAMPLE_RESERVATION = 4 * 1024**2
 RETENTION_SECONDS = 48 * 3600
 
 SCHEMA = """
@@ -76,6 +79,21 @@ def sign_in_key(jti):
     return hashlib.sha256(jti.encode("ascii")).hexdigest()
 
 
+def snapshot(base):
+    """Report only overall load. Each run's position is available to its owner."""
+    ready = enabled() and worker_ready(base)
+    waiting = running = 0
+    if (base / "queue.sqlite3").is_file():
+        with connection(base) as conn:
+            counts = dict(conn.execute(
+                "SELECT status, count(*) FROM jobs WHERE status IN ('queued', 'running') GROUP BY status"
+            ).fetchall())
+        waiting = counts.get("queued", 0)
+        running = counts.get("running", 0)
+    return {"queued": waiting, "running": running, "capacity": WORKER_CAPACITY,
+            "ready": ready, "updated": int(time.time())}
+
+
 def reserve(base, *, user_id, sign_in, request_key, demo_window, parameters):
     now = time.time()
     with connection(base, write=True) as conn:
@@ -87,8 +105,11 @@ def reserve(base, *, user_id, sign_in, request_key, demo_window, parameters):
             if existing["status"] == "staging":
                 raise QueueError("This upload is still being saved. Try again in a moment.", 409)
             return existing["id"], False
-        active = conn.execute("SELECT count(*) FROM jobs WHERE status IN ('staging','queued','running')").fetchone()[0]
-        if active >= MAX_ACTIVE:
+        active, regular_active, pending_storage = conn.execute(
+            """SELECT count(*), count(CASE WHEN demo_window=0 THEN 1 END), coalesce(sum(reserved), 0)
+               FROM jobs WHERE status IN ('staging','queued','running')"""
+        ).fetchone()
+        if active >= MAX_ACTIVE or (not demo_window and regular_active >= MAX_ACTIVE - DEMO_QUEUE_RESERVE):
             raise QueueError("The queue is full. Please try again in a moment.", 429)
         if demo_window:
             total, own = conn.execute(
@@ -106,9 +127,14 @@ def reserve(base, *, user_id, sign_in, request_key, demo_window, parameters):
             ).fetchone()
             if own >= 3 or recent >= 10:
                 raise QueueError("Your processing limit has been reached. Please try again later.", 429)
-        budget = RUN_RESERVATION if not parameters.get("sample_id") else 4 * 1024**2
-        allocated = conn.execute("SELECT coalesce(sum(reserved), 0) FROM jobs").fetchone()[0]
-        if allocated + budget > WORKSPACE_BUDGET or shutil.disk_usage(base).free < WORKSPACE_FLOOR + allocated + budget:
+        budget = SAMPLE_RESERVATION if parameters.get("sample_id") else RUN_RESERVATION
+        allocated, regular_storage = conn.execute(
+            "SELECT coalesce(sum(reserved), 0), coalesce(sum(CASE WHEN demo_window=0 THEN reserved END), 0) FROM jobs"
+        ).fetchone()
+        regular_limit = WORKSPACE_BUDGET - DEMO_QUEUE_RESERVE * SAMPLE_RESERVATION
+        if (allocated + budget > WORKSPACE_BUDGET
+                or (not demo_window and regular_storage + budget > regular_limit)
+                or shutil.disk_usage(base).free < WORKSPACE_FLOOR + pending_storage + budget):
             raise QueueError("Processing storage is temporarily full. Please try again later.", 507)
         job_id = uuid4().hex
         conn.execute(

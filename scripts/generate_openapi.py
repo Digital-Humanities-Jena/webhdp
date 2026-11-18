@@ -25,10 +25,12 @@ PUBLIC_PATH_PREFIXES = (
     "/api/v1/oembed",
     "/api/v1/profiles/",
     "/api/v1/p/records/",
+    "/api/v1/model-publication/samples/",
 )
 PUBLIC_EXACT_PATHS = {
     "/api/v1/health",
     "/api/v1/docs/index",
+    "/api/v1/model-publication/samples",
     "/api/v1/link/discovery",
     "/api/v1/link/openapi.json",
     "/api/v1/link/oauth/request",
