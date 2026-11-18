@@ -25,11 +25,11 @@ Choose a sample in the workflow or download its ZIP and upload it unchanged. The
 
 See [the MSF and upload workflow](../workflows/publication-upload-msf.md) for the wider batch pipeline, custom mappings and production repository workflows.
 
-## Run a 15-minute demonstration
+## Run a live demonstration
 
-Prepare a dedicated account before the event. Keep its generated credentials in a private file and share them with participants as they begin. The account accepts the three example packages and their original metadata. Participants sharing this WebHDP account each have a separate result history bound to their sign-in.
+Prepare a dedicated account before the event. Keep its generated credentials in a private file and share them with participants as they begin. The account accepts the approved sample packages and their original metadata. Participants sharing this WebHDP account each have a separate result history bound to their sign-in.
 
-Open the account window at the start of the presentation. Have attendees start in the first few minutes so the queue has time to drain. Four CPU jobs run concurrently, and subsequent jobs advance in arrival order. Queue and workspace capacity for 20 demo submissions is reserved from regular traffic. The account stops accepting sign-ins and its tokens expire 15 minutes after opening. Work already accepted can finish in the queue. Visitors can use the public library at any time.
+Open the account window at the start of the presentation. Have attendees start in the first few minutes so the queue has time to drain. Four CPU jobs run concurrently, and subsequent jobs advance in arrival order. Queue and workspace capacity for 20 demo submissions is reserved from regular traffic. The account stops accepting sign-ins and its tokens expire when the window ends. Use the default 15 minutes or specify a longer window at activation to give attendees time to finish after the talk. Work already accepted can finish in the queue. Visitors can use the public library at any time.
 
 Attendees can see and download their confirmed draft attachments in WebHDP and open a read-only preview of their own sample draft in Sandbox. The preview link belongs to that run and expires the next day. The public Sandbox example in the sample library shows what the same files look like on a published record.
 
@@ -39,7 +39,7 @@ Run the commands below inside the deployed backend container, in `/app`. Choose 
 
 ```sh
 python -m scripts.model_publication prepare-demo --output /app/instance/demo-credentials.json
-python -m scripts.model_publication open-demo <demo-email>
+python -m scripts.model_publication open-demo <demo-email> --minutes 45
 python -m scripts.model_publication close-demo <demo-email>
 ```
 

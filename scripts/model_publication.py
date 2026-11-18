@@ -38,7 +38,9 @@ def prepare_demo(output):
     print(json.dumps({"email": email, "sign_in_seconds": DEMO_SECONDS}))
 
 
-def set_window(email, *, close=False):
+def set_window(email, *, close=False, minutes=DEMO_SECONDS // 60):
+    if minutes <= 0:
+        raise SystemExit("The demonstration duration must be a positive number of minutes.")
     user = User.query.filter_by(email=email, role=UserRole.USER).one_or_none()
     if not user or not is_demo(user):
         raise SystemExit("No demonstration account has that address.")
@@ -51,7 +53,7 @@ def set_window(email, *, close=False):
         raise SystemExit("Start the publication worker and configure the Sandbox credential before opening the demonstration.")
     key = demo_config_key(user.id)
     setting = db.session.get(SystemConfig, key) or SystemConfig(key=key)
-    setting.value = str(now if close else now + DEMO_SECONDS)
+    setting.value = str(now if close else now + minutes * 60)
     user.token_version += 1
     db.session.add(setting)
     db.session.commit()
@@ -100,8 +102,11 @@ def main():
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("worker")
     commands.add_parser("prepare-demo").add_argument("--output", required=True, type=Path)
-    for name in ("open-demo", "close-demo"):
-        commands.add_parser(name).add_argument("email")
+    opening = commands.add_parser("open-demo")
+    opening.add_argument("email")
+    opening.add_argument("--minutes", type=int, default=DEMO_SECONDS // 60,
+                         help="sign-in window in minutes (default: %(default)s)")
+    commands.add_parser("close-demo").add_argument("email")
     publish = commands.add_parser("publish-sample")
     publish.add_argument("job_id")
     publish.add_argument("--confirm-sandbox", required=True, choices=("publish",))
@@ -120,8 +125,10 @@ def main():
             prepare_demo(options.output)
         elif options.command == "publish-sample":
             publish_sample(options.job_id)
+        elif options.command == "open-demo":
+            set_window(options.email, minutes=options.minutes)
         else:
-            set_window(options.email, close=options.command == "close-demo")
+            set_window(options.email, close=True)
 
 
 if __name__ == "__main__":

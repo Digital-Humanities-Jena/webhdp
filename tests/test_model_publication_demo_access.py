@@ -127,6 +127,26 @@ def test_demo_scope_limits_routes_and_returns_minimal_user_context(api):
     assert client.post(AUTH + "/logout", headers=headers).status_code == 200
 
 
+def test_operator_can_open_a_45_minute_demo_window(api):
+    from scripts.model_publication import set_window
+
+    db.session.delete(db.session.get(SystemConfig, api["policy_key"]))
+    db.session.commit()
+
+    with pytest.raises(SystemExit, match="positive number"):
+        set_window(DEMO_EMAIL, minutes=0)
+
+    now = int(time.time())
+    set_window(DEMO_EMAIL, minutes=45)
+    session = demo_login(api).json["data"]
+    expiry = session["user"]["model_publication_expires_at"]
+    assert now + 45 * 60 <= expiry <= int(time.time()) + 45 * 60
+    assert abs(decode_token(session["access_token"])["exp"] - expiry) <= 1
+
+    with pytest.raises(SystemExit, match="already had"):
+        set_window(DEMO_EMAIL, minutes=45)
+
+
 def test_demo_cannot_read_other_sign_ins_or_accounts_results(api):
     client = api["client"]
     base = api["queue_root"]
