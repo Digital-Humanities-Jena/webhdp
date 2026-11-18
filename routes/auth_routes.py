@@ -17,6 +17,7 @@ from database.models import User, UserMfaChallenge, UserZenodoActiveCredential
 from exceptions import ValidationError
 from services.audit_service import record_audit_event
 from services.institution_service import InstitutionService
+from services.model_publication_accounts import demo_expiry, demo_open, is_demo
 from services.recovery_code_service import (
     find_valid_recovery_code,
     mark_recovery_code_used,
@@ -245,6 +246,7 @@ def _serialize_user_context(user: User) -> dict:
 
     return {
         **user.to_dict(),
+        "model_publication_only": is_demo(user),
         "memberships": [_serialize_membership(membership) for membership in memberships],
         "institutions": institutions,
         "default_institution": user.default_institution.to_dict() if getattr(user, "default_institution", None) else None,
@@ -256,6 +258,7 @@ def _serialize_user_context(user: User) -> dict:
 def _create_access_token_for_user(user: User) -> str:
     return create_access_token(
         identity=str(user.id),
+        expires_delta=timedelta(seconds=max(1, demo_expiry(user.id) - time.time())) if is_demo(user) else None,
         additional_claims={
             "token_version": int(user.token_version or 0),
             "force_password_change": bool(user.force_password_change),
@@ -457,6 +460,9 @@ def login():
     if not user:
         _record_rate_limit_event("login", email, failed=True)
         raise ValidationError("Invalid email or password")
+
+    if is_demo(user) and not demo_open(user.id):
+        return APIResponse.error("DEMO_CLOSED", "The live demonstration is currently closed.", 403)
 
     if not user.is_verified:
         _record_rate_limit_event("login", email, failed=True)

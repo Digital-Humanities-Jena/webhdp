@@ -27,6 +27,7 @@ def register_routes(app):
     from .public_routes import public_bp
     from .profile_routes import profile_bp
     from .webhdp_link_routes import webhdp_link_bp
+    from .model_publication_routes import model_publication_bp
 
     app.register_blueprint(auth_bp, url_prefix="/api/v1/auth")
     app.register_blueprint(institution_bp, url_prefix="/api/v1/institutions")
@@ -51,6 +52,7 @@ def register_routes(app):
     app.register_blueprint(profile_bp, url_prefix="/api/v1/profiles")
     app.register_blueprint(pipeline_v2_bp, url_prefix="/api/v2")
     app.register_blueprint(webhdp_link_bp, url_prefix="/api/v1/link")
+    app.register_blueprint(model_publication_bp, url_prefix="/api/v1/model-publication")
 
     from .template_routes import template_bp
     app.register_blueprint(template_bp, url_prefix="/api/v1/templates")

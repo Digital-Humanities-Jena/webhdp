@@ -1,0 +1,35 @@
+services:
+  backend:
+    environment:
+      WEBHDP_MODEL_PUBLICATION_ENABLED: "true"
+      WEBHDP_MODEL_PUBLICATION_PUBLISHED_EXAMPLE: ${WEBHDP_MODEL_PUBLICATION_PUBLISHED_EXAMPLE:-}
+
+  model-publication-worker:
+    image: webhdp-backend:${WEBHDP_IMAGE_TAG:-plesk}
+    command: ["python", "-m", "scripts.model_publication", "worker"]
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 5m
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-sqlite:////app/instance/hdp_web.db}
+      FLASK_ENV: ${FLASK_ENV:-production}
+      RUN_DB_BOOTSTRAP: "0"
+      WEBHDP_MODEL_PUBLICATION_ENABLED: "true"
+      LOCAL_EDM_VALIDATOR_URL: ${LOCAL_EDM_VALIDATOR_URL:-http://host.docker.internal:18080}
+      ENABLE_LOCAL_EDM_VALIDATION: ${ENABLE_LOCAL_EDM_VALIDATION:-true}
+      LOCAL_EDM_VALIDATOR_REQUIRED: ${LOCAL_EDM_VALIDATOR_REQUIRED:-true}
+    volumes:
+      - ${WEBHDP_INSTANCE_PATH:-./instance}:/app/instance
+    networks:
+      - hdp-network
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    cpus: 1.5
+    mem_limit: 768m
+    pids_limit: 128
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL

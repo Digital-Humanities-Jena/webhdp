@@ -2009,6 +2009,7 @@ dependencies = [
     { name = "lxml" },
     { name = "openpyxl" },
     { name = "pandas" },
+    { name = "pillow" },
     { name = "pydantic", extra = ["email"] },
     { name = "python-dotenv" },
     { name = "pyyaml" },
@@ -2023,7 +2024,6 @@ dependencies = [
 dev = [
     { name = "ftfy" },
     { name = "mutagen" },
-    { name = "pillow" },
     { name = "pygltflib" },
     { name = "pypdf" },
     { name = "pytest" },
@@ -2051,6 +2051,7 @@ requires-dist = [
     { name = "lxml", specifier = ">=6.1.0" },
     { name = "openpyxl", specifier = ">=3.1.0" },
     { name = "pandas", specifier = ">=2.0.0" },
+    { name = "pillow", specifier = ">=12.3.0" },
     { name = "pydantic", extras = ["email"], specifier = ">=2.12.5" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
     { name = "pyyaml", specifier = ">=6.0" },
@@ -2065,7 +2066,6 @@ requires-dist = [
 dev = [
     { name = "ftfy", specifier = ">=6.3.1" },
     { name = "mutagen", specifier = ">=1.48.1" },
-    { name = "pillow", specifier = ">=12.3.0" },
     { name = "pygltflib", specifier = ">=1.16.5" },
     { name = "pypdf", specifier = ">=6.12.0" },
     { name = "pytest", specifier = ">=9.0.0" },

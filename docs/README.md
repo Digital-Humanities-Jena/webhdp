@@ -14,6 +14,7 @@ This documentation is organized by audience and task:
 ## Start Here
 
 - [Workflow guide](guides/workflows.md)
+- [Prepare a 3D model for Zenodo Sandbox and run a live demonstration](guides/model_publication.md)
 - [Docker quickstart](guides/docker_quickstart.md)
 - [Complete workflow inventory](workflows/README.md)
 - [End-to-end workflow guide](guides/end_to_end_user_guide.md)

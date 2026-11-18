@@ -36,7 +36,7 @@ def _upload_disk_roots(app) -> list[str]:
 
 
 def _ensure_upload_capacity(app):
-    if request.path.startswith("/api/v1/link/"):
+    if request.path.startswith("/api/v1/link/") or request.path == "/api/v1/model-publication/jobs":
         return None  # Link streams and enforces its own per-client upload/storage quotas.
     content_length = request.content_length
     if request.method not in {"POST", "PUT", "PATCH"} or not content_length:
@@ -87,8 +87,6 @@ def _enforce_required_password_change():
         return None
     if not request.path.startswith("/api/"):
         return None
-    if request.path in PASSWORD_CHANGE_ALLOWED_PATHS:
-        return None
     auth_header = request.headers.get("Authorization", "")
     if request.path.startswith("/api/v1/link/") and auth_header.startswith("Bearer whl_"):
         return None  # Link checks account state and token-version revocation itself.
@@ -110,7 +108,18 @@ def _enforce_required_password_change():
         return None
     user = db.session.get(User, int(user_id))
 
-    if user and user.force_password_change:
+    from services.model_publication_accounts import is_demo
+    if user and is_demo(user) and not (
+        request.blueprint == "model_publication" or
+        request.endpoint in {"auth.get_current_user", "auth.logout"}
+    ):
+        return error_response(
+            "DEMO_WORKFLOW_ONLY",
+            "This account is limited to the model publication demonstration.",
+            403,
+            request_id=g.get("request_id"),
+        )
+    if user and user.force_password_change and request.path not in PASSWORD_CHANGE_ALLOWED_PATHS:
         return error_response(
             "PASSWORD_CHANGE_REQUIRED",
             "Password change required before continuing.",

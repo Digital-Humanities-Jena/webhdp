@@ -178,6 +178,7 @@ CORS(
         "X-Requested-With",
         "X-Setup-Token",
         "X-Bootstrap-Token",
+        "Idempotency-Key",
     ],
     methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     expose_headers=["Content-Type", "Authorization"],
@@ -228,6 +229,10 @@ def check_if_token_revoked(jwt_header, jwt_payload):
 
     user = db.session.get(User, user_id)
     if not user:
+        return True
+
+    from services.model_publication_accounts import demo_open, is_demo
+    if is_demo(user) and not demo_open(user.id):
         return True
 
     token_version = int(jwt_payload.get("token_version", 0) or 0)
