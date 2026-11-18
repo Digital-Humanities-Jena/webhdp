@@ -35,6 +35,18 @@
       "preview": "bronze-seal.png",
       "creator": "Digital Humanities Jena",
       "license": "cc0-1.0"
+    },
+    {
+      "id": "glazed-bowl",
+      "title": "Glazed Bowl",
+      "description": "A shallow ceramic bowl with a moved glaze image and a damaged detail texture. WebHDP reconnects the glaze and omits the damaged map.",
+      "layout": "OBJ and MTL with separate surface assets",
+      "texture_status": "Moved glaze image and damaged detail map",
+      "filename": "glazed-bowl.zip",
+      "format": "obj",
+      "preview": "glazed-bowl.png",
+      "creator": "Digital Humanities Jena",
+      "license": "cc0-1.0"
     }
   ]
 }

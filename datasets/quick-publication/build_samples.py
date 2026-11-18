@@ -30,6 +30,16 @@ def material_texture(style):
                 color = (105, 50, 37) if 33 < wave < 46 or 115 < wave < 124 else (189, 95, 60)
                 if 59 < y < 102 and math.sin(x * math.tau / 20) + math.cos(y * math.tau / 27) > .9:
                     color = (220, 147, 87)
+            elif style == "glaze":
+                wave = y + 2 * math.sin(x * math.tau / 40)
+                if 17 < wave < 32 or 113 < wave < 126:
+                    color = (42, 70, 103)
+                elif 34 < wave < 43 or 106 < wave < 111:
+                    color = (177, 132, 65)
+                elif 55 < wave < 100 and math.sin(x * math.tau / 20 + y / 15) > .55:
+                    color = (228, 222, 190)
+                else:
+                    color = (73, 136, 139)
             else:
                 u, v = x / size - .5, y / size - .5
                 radius, angle = math.hypot(u, v), math.atan2(v, u)
@@ -228,6 +238,10 @@ def build():
                     (.68, .83), (.70, .67), (.68, .50), (.61, .31), (.37, .14), (.035, .13)])
     tile = tile_mesh()
     seal = seal_mesh()
+    glaze = material_texture("glaze")
+    bowl = lathe([(.04, 0), (.38, 0), (.42, .035), (.41, .075), (.47, .13), (.65, .22), (.82, .34),
+                  (.96, .45), (1.02, .51), (1.03, .54), (1.005, .57), (.975, .55), (.93, .49),
+                  (.82, .38), (.66, .27), (.48, .17), (.32, .135), (.04, .125)])
     gltf_document, geometry = gltf(tile)
     datasets = [
         sample(
@@ -252,6 +266,17 @@ def build():
              "seal.mtl": b"newmtl Surface\nKd 0.59 0.42 0.23\nKs 0.3 0.27 0.14\nNs 36\nmap_Kd maps/seal-patina.png\n"
                          b"newmtl Inlay\nKd 0.77 0.58 0.33\nKs 0.4 0.3 0.15\nNs 40\n"},
             thumbnail(seal, None, (215, 223, 230), (143, 101, 60), camera=(.47, .80)),
+        ),
+        sample(
+            "glazed-bowl", "Glazed Bowl",
+            "A shallow ceramic bowl with a moved glaze image and a damaged detail texture. WebHDP reconnects the glaze and omits the damaged map.",
+            "OBJ and MTL with separate surface assets", "Moved glaze image and damaged detail map", "bowl.obj",
+            {"bowl.obj": obj(bowl, "bowl.mtl", "GlazedBowl"),
+             "bowl.mtl": b"newmtl Surface\nKd 0.39 0.62 0.63\nKs 0.23 0.27 0.28\nNs 35\n"
+                         b"map_Kd original/bowl-glaze.png\nbump detail/bowl-detail.png\n",
+             "surface/bowl-glaze.png": png(glaze),
+             "detail/bowl-detail.png": png(Image.new("RGB", (16, 16), (128, 128, 128)))[:45]},
+            thumbnail(bowl, (glaze, "glaze"), (220, 229, 229), (73, 136, 139), camera=(.47, .70)),
         ),
     ]
     (DIRECTORY / "manifest.json").write_text(json.dumps({"datasets": datasets}, indent=2) + "\n", encoding="utf-8")

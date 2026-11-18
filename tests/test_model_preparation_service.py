@@ -39,14 +39,17 @@ def png():
 
 
 @pytest.mark.parametrize(
-    ("sample", "expected_kind"),
-    [("terracotta-vessel", None), ("painted-floor-tile", "relinked"), ("bronze-seal", "material_fallback")],
+    ("sample", "expected_kinds"),
+    [
+        ("terracotta-vessel", []), ("painted-floor-tile", ["relinked"]),
+        ("bronze-seal", ["material_fallback"]), ("glazed-bowl", ["relinked", "material_fallback"]),
+    ],
 )
-def test_prepare_public_samples_and_match_metadata_row(tmp_path, sample, expected_kind):
+def test_prepare_public_samples_and_match_metadata_row(tmp_path, sample, expected_kinds):
     result = prepare_model(SAMPLES / f"{sample}.zip", tmp_path)
     assert result["model"] in result["files"]
     assert all((tmp_path / name).is_file() for name in result["files"])
-    assert [item["kind"] for item in result["repairs"]] == ([expected_kind] if expected_kind else [])
+    assert [item["kind"] for item in result["repairs"]] == expected_kinds
     with (tmp_path / result["msf"]).open(encoding="utf-8") as stream:
         metadata = next(csv.DictReader(stream))
     assert metadata["filename"] == result["model"]
@@ -59,6 +62,13 @@ def test_prepare_public_samples_and_match_metadata_row(tmp_path, sample, expecte
         material = (tmp_path / "seal.mtl").read_text()
         assert "map_Kd" not in material
         assert "Kd 0.59 0.42 0.23" in material
+    elif sample == "glazed-bowl":
+        material = (tmp_path / "bowl.mtl").read_text()
+        assert "map_Kd surface/bowl-glaze.png" in material
+        assert "bump" not in material
+        assert result["repairs"][1]["reason"] == "unreadable_texture"
+        assert result["files"] == ["bowl.mtl", "bowl.obj", "surface/bowl-glaze.png"]
+        assert not (tmp_path / "detail" / "bowl-detail.png").exists()
 
 
 def test_relink_moved_texture_with_case_difference_and_preserve_map_options(tmp_path):
@@ -98,6 +108,39 @@ def test_invalid_images_fail_instead_of_becoming_draft_artifacts(tmp_path):
     files = basic_obj("clay.png") | {"clay.png": b"<script></script>"}
     with pytest.raises(ValueError, match="readable PNG or JPEG"):
         prepare_model(archive(tmp_path, files), tmp_path / "result")
+
+
+def test_corrupt_relocated_texture_reports_only_the_fallback(tmp_path):
+    files = basic_obj("missing/glaze.png") | {"moved/glaze.png": png()[:45]}
+    result = prepare_model(archive(tmp_path, files), tmp_path / "result")
+    assert [item["kind"] for item in result["repairs"]] == ["material_fallback"]
+    assert result["repairs"][0]["reason"] == "unreadable_texture"
+    assert result["files"] == ["scan.mtl", "scan.obj"]
+
+
+def test_truncated_archive_does_not_write_any_artifacts(tmp_path):
+    source = archive(tmp_path, basic_obj("missing/glaze.png"))
+    source.write_bytes(source.read_bytes()[:-16])
+    output = tmp_path / "result"
+    with pytest.raises(ValueError, match="not a readable, unencrypted ZIP"):
+        prepare_model(source, output)
+    assert not output.exists()
+
+
+@pytest.mark.parametrize(
+    ("path", "contents", "message"),
+    [
+        ("scan.gltf", '{"asset": {"version": "2.0"},', "glTF document is damaged or incomplete"),
+        ("scan.obj", TRIANGLE.replace("f 1 2 3", "f 1 2 9"), "vertex that is missing"),
+        ("scan.obj", TRIANGLE.replace("f 1 2 3", "f 1 2 no"), "invalid vertex index"),
+    ],
+)
+def test_corrupt_geometry_does_not_write_any_artifacts(tmp_path, path, contents, message):
+    source = archive(tmp_path, {path: contents})
+    output = tmp_path / "result"
+    with pytest.raises(ValueError, match=message):
+        prepare_model(source, output)
+    assert not output.exists()
 
 
 def glb(document, binary):

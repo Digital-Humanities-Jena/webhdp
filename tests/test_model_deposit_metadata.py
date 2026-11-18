@@ -1,5 +1,6 @@
 import csv
 import json
+from pathlib import Path
 from unittest.mock import Mock
 from urllib.parse import quote
 
@@ -16,6 +17,7 @@ from services.iiif_service import IiifService
 from services.linked_data_service import CRM
 from services.mets_service import MetsService
 from services.model_deposit_metadata import generate_deposit_metadata, read_deposit_metadata
+from services.model_preparation_service import prepare_model
 from test_edm_service_minimum_viable import _build_generation_app
 
 SOURCE = 'collection/Maßstab.obj'
@@ -133,3 +135,33 @@ def test_all_exports_use_actual_sandbox_files_and_validate(tmp_path, extension):
     assert set(rdf_xml.objects(dataset, CRM.P106_is_composed_of)) == {
         URIRef(f'{base}/files/{quote(asset, safe="")}') for asset in (name, linked_name)
     }
+
+
+SAMPLE_LIBRARY = Path(__file__).resolve().parents[1] / "datasets" / "quick-publication"
+SAMPLES = json.loads((SAMPLE_LIBRARY / "manifest.json").read_text(encoding="utf-8"))["datasets"]
+
+
+@pytest.mark.parametrize("sample", SAMPLES, ids=lambda sample: sample["id"])
+def test_public_model_msf_produces_all_valid_metadata_files(tmp_path, sample):
+    prepared = prepare_model(SAMPLE_LIBRARY / sample["filename"], tmp_path / "model")
+    metadata = read_deposit_metadata(prepared["model"], msf_path=tmp_path / "model" / prepared["msf"])
+    assert metadata["zenodo"]["title"] == sample["title"]
+    assert metadata["zenodo"]["creators"] == [{"name": sample["creator"]}]
+    assert metadata["zenodo"]["license"] == sample["license"]
+    assert metadata["zenodo"]["description"] == sample["description"]
+
+    app = _build_generation_app(tmp_path)
+    app.edm_service = EdmService()
+    app.iiif_service = IiifService()
+    app.mets_service = MetsService()
+    target = tmp_path / "metadata"
+    target.mkdir()
+    with app.app_context():
+        db.create_all()
+        outputs = generate_deposit_metadata(
+            target, draft={"id": 6789}, metadata=metadata, main_file_key="model.zip",
+            additional_files=[{"key": "preview.png", "size": (SAMPLE_LIBRARY / sample["preview"]).stat().st_size}],
+        )
+    assert set(outputs.values()) == {"edm.xml", "iiif.json", "mets.xml", "cidoc-crm.xml", "metadata.jsonld"}
+    report = json.loads((target / "lod-generation.json").read_text())
+    assert all(entry["validation"]["valid"] for entry in report["formats"].values())

@@ -15,6 +15,7 @@ import stat
 import struct
 from urllib.parse import quote, unquote
 import zipfile
+import zlib
 
 from PIL import Image, UnidentifiedImageError
 
@@ -113,6 +114,10 @@ def _single_typo(expected: str, candidate: str) -> bool:
     return shorter[first:] == longer[first + 1:]
 
 
+class UnreadableTexture(ValueError):
+    """A recognizable PNG or JPEG whose contents could not be decoded."""
+
+
 def _image_mime(raw: bytes) -> str:
     if len(raw) > MAX_IMAGE_BYTES:
         raise ValueError("A texture exceeds 8 MiB.")
@@ -120,10 +125,17 @@ def _image_mime(raw: bytes) -> str:
         with Image.open(io.BytesIO(raw), formats=tuple(MIME_BY_FORMAT)) as image:
             if image.width * image.height > 8_000_000 or getattr(image, "n_frames", 1) != 1:
                 raise ValueError("A texture must be a still image with at most 8 million pixels.")
+            mime = MIME_BY_FORMAT[image.format]
+            image.verify()
+        with Image.open(io.BytesIO(raw), formats=tuple(MIME_BY_FORMAT)) as image:
             image.load()
-            return MIME_BY_FORMAT[image.format]
-    except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as error:
+    except Image.DecompressionBombError as error:
+        raise ValueError("A texture exceeds the supported pixel limit.") from error
+    except (UnidentifiedImageError, OSError, SyntaxError) as error:
+        if raw.startswith((b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff")):
+            raise UnreadableTexture("A PNG or JPEG texture is damaged.") from error
         raise ValueError("A texture must be a readable PNG or JPEG image.") from error
+    return mime
 
 
 class _Bundle:
@@ -158,7 +170,6 @@ class _Bundle:
                 ]
             if len(candidates) == 1:
                 actual = str(candidates[0])
-                self.repairs.append({"kind": "relinked", "source": base, "reference": reference, "replacement": actual})
             else:
                 reason = "Several possible matches" if candidates else "No matching file"
                 self.warnings.append(f"{reason} for {reference}. A fallback material is used.")
@@ -166,11 +177,19 @@ class _Bundle:
                 return None, None
         raw = self.files[actual]
         if actual not in self.image_mimes:
-            mime = _image_mime(raw)
+            try:
+                mime = _image_mime(raw)
+            except UnreadableTexture:
+                self.warnings.append(f"{actual} could not be decoded. The damaged map was omitted.")
+                self.repairs.append({"kind": "material_fallback", "source": base, "reference": reference,
+                                     "replacement": None, "reason": "unreadable_texture"})
+                return None, None
             expected_mime = "image/png" if PurePosixPath(actual).suffix.lower() == ".png" else "image/jpeg"
             if mime != expected_mime:
                 raise ValueError("A texture's contents do not match its filename extension.")
             self.image_mimes[actual] = mime
+        if actual != requested:
+            self.repairs.append({"kind": "relinked", "source": base, "reference": reference, "replacement": actual})
         self.output[actual] = raw
         return actual, self.image_mimes[actual]
 
@@ -260,19 +279,28 @@ def _prepare_obj(model: str, bundle: _Bundle) -> None:
                 if library not in bundle.output:
                     _prepare_mtl(library, bundle)
         elif directive == "v":
-            if len(stripped) < 4 or not all(math.isfinite(float(value)) for value in stripped[1:4]):
+            try:
+                coordinates = [float(value) for value in stripped[1:4]]
+            except ValueError as error:
+                raise ValueError("The OBJ has an invalid vertex position.") from error
+            if len(coordinates) != 3 or not all(math.isfinite(value) for value in coordinates):
                 raise ValueError("The OBJ has an invalid vertex position.")
             vertices += 1
         elif directive == "f":
             if len(stripped) < 4:
                 raise ValueError("The OBJ has a face with fewer than three vertices.")
             for corner in stripped[1:]:
-                index = int(corner.partition("/")[0])
+                try:
+                    index = int(corner.partition("/")[0])
+                except ValueError as error:
+                    raise ValueError("The OBJ face has an invalid vertex index.") from error
                 if not index or index < -vertices:
-                    raise ValueError("The OBJ has an invalid vertex index.")
+                    raise ValueError("The OBJ face has an invalid vertex index.")
                 highest_index = max(highest_index, index)
             faces += 1
-    if not 3 <= vertices <= MAX_VERTICES or not faces or highest_index > vertices:
+    if highest_index > vertices:
+        raise ValueError("An OBJ face references a vertex that is missing.")
+    if not 3 <= vertices <= MAX_VERTICES or not faces:
         raise ValueError("Use an OBJ with polygon faces and at most two million vertices.")
     bundle.output[model] = bundle.files[model]
 
@@ -481,7 +509,7 @@ def _read_bundle(archive: Path) -> dict[str, bytes]:
                 if not name.startswith("__MACOSX/") and not PurePosixPath(name).name.startswith("._")
                 and PurePosixPath(name).suffix.lower() in MODEL_SUFFIXES | IMAGE_SUFFIXES | MSF_SUFFIXES | {".bin", ".mtl"}
             }
-    except (zipfile.BadZipFile, NotImplementedError, RuntimeError) as error:
+    except (zipfile.BadZipFile, NotImplementedError, RuntimeError, EOFError, OSError, zlib.error) as error:
         raise ValueError("The upload is not a readable, unencrypted ZIP.") from error
 
 
@@ -498,8 +526,10 @@ def prepare_model(archive: Path, output_dir: Path) -> dict:
             _prepare_obj(model, bundle)
         else:
             _prepare_gltf(model, bundle, glb=model_format == "glb")
-    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as error:
+    except UnicodeDecodeError as error:
         raise ValueError("Model and material documents must contain valid UTF-8 text.") from error
+    except (json.JSONDecodeError, RecursionError) as error:
+        raise ValueError("The glTF document is damaged or incomplete. Export the model again.") from error
     msf_files = [
         name for name in bundle.files if PurePosixPath(name).stem.lower() in MSF_NAMES
         and PurePosixPath(name).suffix.lower() in MSF_SUFFIXES
