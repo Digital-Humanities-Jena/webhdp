@@ -1,6 +1,7 @@
 * text=auto eol=lf
 
 *.glb binary
+datasets/quick-publication/*.zip binary
 *.jpg binary
 *.png binary
 *.xlsx binary

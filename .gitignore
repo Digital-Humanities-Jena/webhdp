@@ -32,6 +32,7 @@ instance/*
 *.db-*
 *.db-journal
 *.zip
+!datasets/quick-publication/*.zip
 *.tar
 *.tar.gz
 *.tgz

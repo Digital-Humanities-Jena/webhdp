@@ -1,0 +1,40 @@
+{
+  "datasets": [
+    {
+      "id": "terracotta-vessel",
+      "title": "Terracotta Vessel",
+      "description": "A hand-built vessel model with ochre bands and a complete set of material files.",
+      "layout": "Deeply nested OBJ and MTL with a texture subfolder",
+      "texture_status": "Complete texture paths",
+      "filename": "terracotta-vessel.zip",
+      "format": "obj",
+      "preview": "terracotta-vessel.png",
+      "creator": "Digital Humanities Jena",
+      "license": "cc0-1.0"
+    },
+    {
+      "id": "painted-floor-tile",
+      "title": "Painted Floor Tile",
+      "description": "A glazed tile model with a transposed letter in its texture reference. WebHDP reconnects the correct image.",
+      "layout": "glTF with separate binary and image folders",
+      "texture_status": "One misspelled texture name",
+      "filename": "painted-floor-tile.zip",
+      "format": "gltf",
+      "preview": "painted-floor-tile.png",
+      "creator": "Digital Humanities Jena",
+      "license": "cc0-1.0"
+    },
+    {
+      "id": "bronze-seal",
+      "title": "Bronze Seal",
+      "description": "A stamped seal model without its surface texture. WebHDP keeps the geometry and uses the bronze material colour.",
+      "layout": "Root-level OBJ and MTL, with optional texture absent",
+      "texture_status": "One missing texture",
+      "filename": "bronze-seal.zip",
+      "format": "obj",
+      "preview": "bronze-seal.png",
+      "creator": "Digital Humanities Jena",
+      "license": "cc0-1.0"
+    }
+  ]
+}

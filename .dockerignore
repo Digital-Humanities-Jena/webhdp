@@ -33,6 +33,7 @@ test_data/
 *.hdpc.pipeline.lock
 *.log
 *.zip
+!datasets/quick-publication/*.zip
 *.tar
 *.tar.gz
 *.tgz
