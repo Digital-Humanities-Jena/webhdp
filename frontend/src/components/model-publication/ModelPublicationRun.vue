@@ -73,7 +73,7 @@
             <code>{{ repair.reference }}</code> now points to <code>{{ repair.replacement }}</code>.
           </p>
           <p v-else class="mt-1 text-slate-700">
-            <code>{{ repair.reference }}</code> was missing. The prepared model uses a solid material color in its place.
+            WebHDP could not find a unique image for <code>{{ repair.reference }}</code>. The prepared model uses a solid material color in its place.
           </p>
         </li>
       </ul>
