@@ -42,6 +42,31 @@
       </ol>
     </section>
 
+    <section v-if="job.draft" aria-labelledby="draft-heading" class="rounded-xl border border-teal-200 bg-teal-50 p-4 text-teal-950 sm:p-6">
+      <h3 id="draft-heading" class="text-lg font-semibold">Zenodo Sandbox draft</h3>
+      <p class="mt-1 text-sm">
+        Draft {{ job.draft.id }} · {{ draftFileCount }} {{ draftFileCount === 1 ? 'file' : 'files' }} uploaded
+      </p>
+      <a v-if="demoAccount && previewUrl" :href="previewUrl" target="_blank" rel="noopener noreferrer"
+        class="mt-2 inline-flex items-center gap-1 rounded-md bg-white px-3 py-2 text-sm font-semibold text-teal-900 hover:underline">
+        Preview this draft in Zenodo Sandbox
+        <ArrowTopRightOnSquareIcon aria-hidden="true" class="h-4 w-4" />
+      </a>
+      <p v-else-if="demoAccount" class="mt-2 text-sm leading-6">The Sandbox owner can open this draft. Your files and repairs are available here in WebHDP.</p>
+      <a v-else-if="draftUrl" :href="draftUrl" target="_blank" rel="noopener noreferrer"
+        class="mt-2 inline-flex items-center gap-1 rounded-md bg-white px-3 py-2 text-sm font-semibold text-teal-900 hover:underline">
+        Open private draft in Zenodo Sandbox
+        <ArrowTopRightOnSquareIcon aria-hidden="true" class="h-4 w-4" />
+      </a>
+      <p v-if="!demoAccount && draftUrl" class="mt-2 text-xs text-teal-900">Sign in to Sandbox with the account that owns the draft.</p>
+      <p v-if="publishedExample" class="mt-2">
+        <a :href="publishedExample" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 text-sm font-semibold underline underline-offset-4">
+          View a published Sandbox example
+          <ArrowTopRightOnSquareIcon aria-hidden="true" class="h-4 w-4" />
+        </a>
+      </p>
+    </section>
+
     <section v-if="job.metadata" aria-labelledby="mapped-metadata-heading" class="rounded-xl border border-slate-200 bg-white p-4 sm:p-6">
       <h3 id="mapped-metadata-heading" class="text-lg font-semibold">Metadata used in this draft</h3>
       <dl class="mt-3 grid gap-3 text-sm sm:grid-cols-2">
@@ -77,31 +102,6 @@
           </p>
         </li>
       </ul>
-    </section>
-
-    <section v-if="job.draft" aria-labelledby="draft-heading" class="rounded-xl border border-teal-200 bg-teal-50 p-4 text-teal-950 sm:p-6">
-      <h3 id="draft-heading" class="text-lg font-semibold">Zenodo Sandbox draft</h3>
-      <p class="mt-1 text-sm">
-        Draft {{ job.draft.id }} · {{ draftFileCount }} {{ draftFileCount === 1 ? 'file' : 'files' }} uploaded
-      </p>
-      <a v-if="demoAccount && previewUrl" :href="previewUrl" target="_blank" rel="noopener noreferrer"
-        class="mt-2 inline-flex items-center gap-1 rounded-md bg-white px-3 py-2 text-sm font-semibold text-teal-900 hover:underline">
-        Preview this draft in Zenodo Sandbox
-        <ArrowTopRightOnSquareIcon aria-hidden="true" class="h-4 w-4" />
-      </a>
-      <p v-else-if="demoAccount" class="mt-2 text-sm leading-6">The Sandbox owner can open this draft. Your files and repairs are available here in WebHDP.</p>
-      <a v-else-if="draftUrl" :href="draftUrl" target="_blank" rel="noopener noreferrer"
-        class="mt-2 inline-flex items-center gap-1 rounded-md bg-white px-3 py-2 text-sm font-semibold text-teal-900 hover:underline">
-        Open private draft in Zenodo Sandbox
-        <ArrowTopRightOnSquareIcon aria-hidden="true" class="h-4 w-4" />
-      </a>
-      <p v-if="!demoAccount && draftUrl" class="mt-2 text-xs text-teal-900">Sign in to Sandbox with the account that owns the draft.</p>
-      <p v-if="publishedExample" class="mt-2">
-        <a :href="publishedExample" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 text-sm font-semibold underline underline-offset-4">
-          View a published Sandbox example
-          <ArrowTopRightOnSquareIcon aria-hidden="true" class="h-4 w-4" />
-        </a>
-      </p>
     </section>
 
     <section v-if="job.files?.length" aria-labelledby="files-heading" class="rounded-xl border border-slate-200 bg-white p-4 sm:p-6">

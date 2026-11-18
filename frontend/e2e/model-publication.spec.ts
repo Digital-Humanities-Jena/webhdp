@@ -93,6 +93,7 @@ test('shows queue, texture repair, private draft, and downloads, then restores o
   }))
   await page.goto('/model-publication')
   await page.getByRole('button', { name: 'Use Painted floor tile' }).click()
+  await expect(page.getByRole('region', { name: 'Selected sample' })).toBeFocused()
   await page.getByRole('button', { name: 'Prepare Sandbox draft' }).click()
   await expect(page.getByText('3 requests are ahead of yours.', { exact: false })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Prepare another model' })).toHaveCount(0)

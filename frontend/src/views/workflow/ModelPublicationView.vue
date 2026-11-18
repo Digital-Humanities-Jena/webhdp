@@ -102,7 +102,8 @@
           </div>
         </section>
 
-        <section v-if="selectedSample && mode === 'sample'" class="rounded-xl border border-teal-100 bg-teal-50 p-4 text-sm text-teal-950">
+        <section v-if="selectedSample && mode === 'sample'" ref="selectedSampleSummary" aria-label="Selected sample" tabindex="-1"
+          class="rounded-xl border border-teal-100 bg-teal-50 p-4 text-sm text-teal-950 focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal-600">
           <p class="font-semibold">Using the spreadsheet supplied with {{ selectedSample.title }}</p>
           <p v-if="selectedSample.creator" class="mt-1">Creator {{ selectedSample.creator }}</p>
         </section>
@@ -181,6 +182,7 @@ const uploadPercent = ref(null)
 const submitError = ref('')
 const refreshError = ref('')
 const sourceHeading = ref(null)
+const selectedSampleSummary = ref(null)
 const jobs = ref([])
 const currentJob = ref(null)
 const showForm = ref(true)
@@ -204,9 +206,10 @@ function changeMode(value) {
   metadataSource.value = 'form'
 }
 
-function chooseSample(sample) {
+function chooseSample(sample, moveFocus = true) {
   mode.value = 'sample'
   selectedSample.value = sample
+  if (moveFocus) nextTick(() => selectedSampleSummary.value?.focus())
 }
 
 function setArchive(event) {
@@ -226,7 +229,7 @@ async function loadSamples() {
     samples.value = payload.datasets
     publishedExample.value = sandboxDraftUrl(payload.published_example)
     const requestedSample = samples.value.find(sample => sample.id === route.query.sample)
-    if (requestedSample) chooseSample(requestedSample)
+    if (requestedSample) chooseSample(requestedSample, false)
   } catch {
     samples.value = []
   } finally {
