@@ -23,11 +23,11 @@ export function linkProgressPhase(run) {
 }
 
 export function linkLoginDestination(value) {
-  // Resume only consent and hosted job pages. Never accept an external URL.
+  // Resume only known workflow pages. Never accept an external URL.
   if (typeof value !== 'string' || /[\\\r\n]/.test(value)) return '/workflow/upload'
   try {
     const destination = new URL(value, 'https://webhdp.invalid')
-    const allowed = (destination.pathname === '/link/authorize' && value.startsWith('/link/authorize?')) || /^\/link\/jobs(?:\/[A-Za-z0-9_-]{1,80})?$/.test(destination.pathname)
+    const allowed = destination.pathname === '/model-publication' || (destination.pathname === '/link/authorize' && value.startsWith('/link/authorize?')) || /^\/link\/jobs(?:\/[A-Za-z0-9_-]{1,80})?$/.test(destination.pathname)
     if (destination.origin === 'https://webhdp.invalid' && value.startsWith('/') && allowed) {
       return destination.pathname + destination.search
     }

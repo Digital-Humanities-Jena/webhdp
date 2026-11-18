@@ -48,6 +48,12 @@ const routes = [
     meta: { publicRoute: true }
   },
   {
+    path: '/model-publication/samples',
+    name: 'ModelPublicationSamples',
+    component: () => import('@/views/public/ModelPublicationSamplesView.vue'),
+    meta: { publicRoute: true }
+  },
+  {
     path: '/impressum',
     name: 'Impressum',
     component: () => import('@/views/legal/ImpressumView.vue'),
@@ -83,6 +89,11 @@ const routes = [
     component: MainLayout,
     meta: { requiresAuth: true },
     children: [
+      {
+        path: 'model-publication',
+        name: 'ModelPublication',
+        component: () => import('@/views/workflow/ModelPublicationView.vue'),
+      },
       {
         path: 'link/jobs',
         name: 'LinkedProcessing',
@@ -504,13 +515,17 @@ router.beforeEach(async (to, from, next) => {
   }
 
   if (to.meta.requiresAuth && !authStore.isAuthenticated) {
-    next(['LinkAuthorize', 'LinkedProcessing', 'LinkedProcessingDetail'].includes(to.name) ? { path: '/login', query: { redirect: to.fullPath } } : '/login')
+    next(['LinkAuthorize', 'LinkedProcessing', 'LinkedProcessingDetail', 'ModelPublication'].includes(to.name) ? { path: '/login', query: { redirect: to.fullPath } } : '/login')
   } else if (to.meta.requiresAuth) {
     if (!authStore.user) {
       await authStore.fetchCurrentUser()
     }
     if (authStore.user?.force_password_change && to.name !== 'AccountConfiguration') {
       next('/account/configuration?passwordChangeRequired=1')
+      return
+    }
+    if (authStore.user?.model_publication_only && !authStore.user?.force_password_change) {
+      next(to.name === 'ModelPublication' ? undefined : '/model-publication')
       return
     }
     if (authStore.user?.onboarding_required && to.name !== 'Onboarding' && to.name !== 'AccountConfiguration' && to.name !== 'HpcResources' && to.name !== 'LinkAuthorize' && to.name !== 'ConnectedApplications' && !['LinkedProcessing', 'LinkedProcessingDetail'].includes(to.name)) {

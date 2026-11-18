@@ -194,6 +194,13 @@ const resending = ref(false)
 const error = ref('')
 const successMessage = ref('')
 
+const finishLogin = () => {
+  const destination = linkLoginDestination(route.query?.redirect)
+  router.push(authStore.user?.model_publication_only && !destination.startsWith('/model-publication')
+    ? '/model-publication'
+    : destination)
+}
+
 const resolveLoginErrorMessage = (err) => {
   if (typeof err?.error === 'string' && err.error.trim()) {
     return err.error
@@ -249,7 +256,7 @@ const handleLogin = async () => {
       step.value = 'mfa'
       return
     }
-    router.push(linkLoginDestination(route.query?.redirect))
+    finishLogin()
   } catch (err) {
     error.value = resolveLoginErrorMessage(err)
   } finally {
@@ -268,7 +275,7 @@ const handleVerifyCode = async () => {
     } else {
       await authStore.verifyLoginCode(mfaChallenge.value.token, code.value)
     }
-    router.push(linkLoginDestination(route.query?.redirect))
+    finishLogin()
   } catch (err) {
     error.value = resolveLoginErrorMessage(err)
     if (shouldReturnToCredentials(err)) {

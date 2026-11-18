@@ -1,7 +1,22 @@
 <template>
   <div class="min-h-screen bg-gray-50">
     <a href="#main-content" class="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:rounded-md focus:bg-white focus:p-3 focus:text-indigo-700">Skip to content</a>
-    <nav aria-label="Main navigation" class="sticky top-0 z-40 border-b border-gray-200 bg-white/95 backdrop-blur">
+    <nav v-if="publicationOnly" aria-label="Main navigation" class="border-b border-gray-200 bg-white">
+      <div class="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3 px-4 py-4 sm:px-6">
+        <router-link to="/model-publication" class="text-lg font-semibold text-gray-900 hover:text-indigo-700">
+          WebHDP
+        </router-link>
+        <div class="flex items-center gap-4">
+          <router-link to="/model-publication/samples" class="text-sm font-medium text-indigo-700 hover:underline">
+            Sample downloads
+          </router-link>
+          <button type="button" class="rounded-md border border-gray-200 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50" @click="handleLogout">
+            Sign out
+          </button>
+        </div>
+      </div>
+    </nav>
+    <nav v-else aria-label="Main navigation" class="sticky top-0 z-40 border-b border-gray-200 bg-white/95 backdrop-blur">
       <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div class="flex min-h-[64px] flex-wrap items-center justify-between gap-3 py-3">
           <div class="flex items-center gap-3 min-w-0">
@@ -109,6 +124,7 @@ const authStore = useAuthStore()
 const systemStore = useSystemStore()
 const notificationStore = useNotificationStore()
 const versionInfo = ref(null)
+const publicationOnly = computed(() => Boolean(authStore.user?.model_publication_only))
 
 const API_URL = import.meta.env.VITE_API_URL || '/api/v1'
 
@@ -155,6 +171,7 @@ const roleLabel = computed(() => {
 const navigationItems = computed(() => {
   const items = [
     ...(authStore.user?.onboarding_required ? [{ label: 'First Steps', to: '/onboarding' }] : []),
+    { label: 'Publish a 3D model', to: '/model-publication' },
     { label: 'Dashboard', to: '/dashboard' },
     { label: 'Uploads', to: '/uploads' },
     { label: 'Submissions', to: '/submissions' },
@@ -194,7 +211,7 @@ const navigationItems = computed(() => {
     items.push({ label: 'Developer', to: '/developer' })
   }
   if (systemStore.coreOnly) {
-    const corePaths = new Set(["/onboarding", "/dashboard", "/uploads", "/submissions", "/records/explorer", "/hpc-resources", "/tools", "/docs", "/admin/dashboard", "/account/connected-apps", "/admin/webhdp-link", "/link/jobs"])
+    const corePaths = new Set(["/onboarding", "/model-publication", "/dashboard", "/uploads", "/submissions", "/records/explorer", "/hpc-resources", "/tools", "/docs", "/admin/dashboard", "/account/connected-apps", "/admin/webhdp-link", "/link/jobs"])
     return items.filter((item) => corePaths.has(item.to))
   }
   return items
@@ -215,7 +232,7 @@ onMounted(() => {
   if (authStore.user?.role === 'admin') {
     fetchVersion()
   }
-  if (authStore.token) {
+  if (authStore.token && !publicationOnly.value) {
     notificationStore.startPolling()
   }
 })
@@ -236,7 +253,7 @@ watch(
 watch(
   () => authStore.token,
   (nextToken) => {
-    if (nextToken) {
+    if (nextToken && !publicationOnly.value) {
       notificationStore.startPolling()
     } else {
       notificationStore.reset()

@@ -19,6 +19,7 @@ onMounted(() => {
     window.location.pathname.startsWith('/p/records/')
     || window.location.pathname.startsWith('/embed/records/')
     || window.location.pathname === '/'
+    || window.location.pathname === '/model-publication/samples'
     || ['/credits', '/impressum', '/privacy', '/cookies'].includes(window.location.pathname)
   )
   if (publicPath) {

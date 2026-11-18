@@ -6,6 +6,9 @@
         <p class="mt-2 max-w-3xl text-gray-600">
           Upload one self-contained file, or use a batch for datasets and models with separate textures.
         </p>
+        <router-link to="/model-publication" class="mt-3 inline-flex text-sm font-semibold text-indigo-700 underline underline-offset-4 hover:text-indigo-900">
+          Prepare a 3D model and create a Zenodo Sandbox draft
+        </router-link>
       </div>
 
       <StepIndicator

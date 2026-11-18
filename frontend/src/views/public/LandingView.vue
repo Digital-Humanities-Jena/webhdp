@@ -15,6 +15,12 @@
         </router-link>
         <div class="flex items-center gap-2">
           <router-link
+            to="/model-publication/samples"
+            class="rounded-md px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-white/70 hover:text-slate-950"
+          >
+            Sample models
+          </router-link>
+          <router-link
             to="/docs"
             class="hidden rounded-md px-3 py-2 text-sm font-semibold text-slate-700 transition-colors hover:bg-white/70 hover:text-slate-950 sm:inline-flex"
           >
