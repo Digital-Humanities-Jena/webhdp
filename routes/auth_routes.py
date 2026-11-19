@@ -17,7 +17,10 @@ from database.models import User, UserMfaChallenge, UserZenodoActiveCredential
 from exceptions import ValidationError
 from services.audit_service import record_audit_event
 from services.institution_service import InstitutionService
-from services.model_publication_accounts import DEMO_CLAIM, demo_expiry, demo_sign_in_allowed, is_demo, is_generated_demo_email
+from services.model_publication_accounts import (
+    DEMO_CLAIM, DEMO_USERNAME, demo_expiry, demo_sign_in_allowed, demo_username_email, is_demo,
+    is_generated_demo_email,
+)
 from services.recovery_code_service import (
     find_valid_recovery_code,
     mark_recovery_code_used,
@@ -464,30 +467,32 @@ def login():
     """Authenticate with a password, followed by email verification when enabled by the user."""
     data = request.get_json() or {}
 
-    email = (data.get("email") or "").strip()
+    identifier = (data.get("email") or "").strip()
     password = data.get("password")
-    action = "demo_login" if is_generated_demo_email(email) else "login"
-    limited_response = _check_rate_limit(action, email)
+    uses_demo_username = identifier.casefold() == DEMO_USERNAME
+    action = "demo_login" if uses_demo_username or is_generated_demo_email(identifier) else "login"
+    limited_response = _check_rate_limit(action, identifier)
     if limited_response:
         return limited_response
 
-    if not email or not password:
+    if not identifier or not password:
         raise ValidationError("Email and password are required")
 
-    user = user_service.authenticate(email=email, password=password)
+    email = demo_username_email() if uses_demo_username else identifier
+    user = user_service.authenticate(email=email, password=password) if email else None
     if not user:
-        _record_rate_limit_event(action, email, failed=True)
+        _record_rate_limit_event(action, identifier, failed=True)
         raise ValidationError("Invalid email or password")
 
     if is_demo(user) and not demo_sign_in_allowed(user):
         return APIResponse.error("DEMO_CLOSED", "The live demonstration is currently closed.", 403)
 
     if not user.is_verified:
-        _record_rate_limit_event(action, email, failed=True)
+        _record_rate_limit_event(action, identifier, failed=True)
         return APIResponse.error("EMAIL_NOT_VERIFIED", "Please verify your email address before logging in", 403)
 
     if not user.mfa_enabled:
-        _clear_rate_limit(action, email)
+        _clear_rate_limit(action, identifier)
         return APIResponse.success(
             data={"user": _serialize_user_context(user), "access_token": _create_access_token_for_user(user)},
             message="Login successful",
@@ -499,7 +504,7 @@ def login():
         db.session.rollback()
         return APIResponse.error("MFA_EMAIL_FAILED", "Unable to send the verification code email. Please try again later.", 500)
     db.session.commit()
-    _clear_rate_limit(action, email)
+    _clear_rate_limit(action, identifier)
     payload = _attach_development_mfa_code(_mfa_response_payload(challenge, token, user), code, delivery_mode)
 
     return APIResponse.success(

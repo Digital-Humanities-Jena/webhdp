@@ -16,6 +16,7 @@ from services.model_publication_accounts import (
     DEMO_CAPABILITY,
     DEMO_CLAIM,
     DEMO_SECONDS,
+    DEMO_USERNAME_KEY,
     demo_config_key,
     register_demo_jwt_scope,
 )
@@ -145,6 +146,25 @@ def test_operator_can_open_a_45_minute_demo_window(api):
 
     with pytest.raises(SystemExit, match="already had"):
         set_window(DEMO_EMAIL, minutes=45)
+
+
+def test_demo_username_uses_only_the_designated_account(api):
+    client = api["client"]
+    credentials = {"email": "Demo", "password": DEMO_PASSWORD}
+    assert client.post(AUTH + "/login", json=credentials).status_code == 400
+    setting = SystemConfig(key=DEMO_USERNAME_KEY, value="admin@example.test")
+    db.session.add(setting)
+    db.session.commit()
+    assert client.post(AUTH + "/login", json=credentials).status_code == 400
+
+    setting.value = DEMO_EMAIL
+    db.session.commit()
+    session = client.post(AUTH + "/login", json=credentials)
+    assert session.status_code == 200
+    assert session.json["data"]["user"]["email"] == DEMO_EMAIL
+    token = session.json["data"]["access_token"]
+    assert client.get(PUBLICATION + "/queue", headers=bearer(token)).status_code == 200
+    assert client.get(AUTH + "/me/zenodo-credentials", headers=bearer(token)).status_code == 403
 
 
 def test_demo_cannot_read_other_sign_ins_or_accounts_results(api):

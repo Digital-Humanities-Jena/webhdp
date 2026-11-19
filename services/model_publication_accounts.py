@@ -14,6 +14,8 @@ from services.zenodo_credential_service import ZenodoCredentialService
 DEMO_CAPABILITY = "model_publication_demo"
 DEMO_SECONDS = 15 * 60
 DEMO_EMAIL = re.compile(r"model-demo-[a-f0-9]{8}@webhdp\.invalid", re.IGNORECASE)
+DEMO_USERNAME = "demo"
+DEMO_USERNAME_KEY = "model_publication_demo_username"
 DEMO_CLAIM = "model_publication_only"
 
 _READ = frozenset({"GET", "HEAD"})
@@ -35,6 +37,11 @@ def is_generated_demo_email(email):
 
 def is_demo(user):
     return DEMO_CAPABILITY in user.capabilities or is_generated_demo_email(user.email)
+
+
+def demo_username_email():
+    setting = db.session.get(SystemConfig, DEMO_USERNAME_KEY)
+    return setting.value if setting and is_generated_demo_email(setting.value) else None
 
 
 def demo_config_key(user_id):
