@@ -1,12 +1,13 @@
 services:
   backend:
-    image: ${WEBHDP_BACKEND_IMAGE:-webhdp-backend:${WEBHDP_IMAGE_TAG:-0.1.0-alpha.3}}
+    image: ${WEBHDP_BACKEND_IMAGE:-webhdp-backend:${WEBHDP_IMAGE_TAG:-0.1.0-alpha.4}}
     restart: unless-stopped
     env_file:
       - .env
     environment:
       - DATABASE_URL=${DATABASE_URL:-sqlite:////app/instance/hdp_web.db}
       - FLASK_ENV=production
+      - AUTH_TRUSTED_PROXY_HOPS=${AUTH_TRUSTED_PROXY_HOPS:-1}
       - SHARED_SESSION_PATH=/shared/sessions
       - FAST_RENDERER_URL=http://fast-renderer:5002
       - ANY_TO_USDZ_URL=http://any-to-usdz:5003
@@ -55,7 +56,7 @@ services:
       start_period: 40s
 
   frontend:
-    image: ${WEBHDP_FRONTEND_IMAGE:-webhdp-frontend:${WEBHDP_IMAGE_TAG:-0.1.0-alpha.3}}
+    image: ${WEBHDP_FRONTEND_IMAGE:-webhdp-frontend:${WEBHDP_IMAGE_TAG:-0.1.0-alpha.4}}
     restart: unless-stopped
     environment:
       - OEMBED_FRAME_ANCESTORS=${OEMBED_FRAME_ANCESTORS:-'self'}
@@ -78,7 +79,7 @@ services:
   fast-renderer:
     profiles:
       - local-hdp-components
-    image: ${WEBHDP_FAST_RENDERER_IMAGE:-webhdp-fast-renderer:${WEBHDP_IMAGE_TAG:-0.1.0-alpha.3}}
+    image: ${WEBHDP_FAST_RENDERER_IMAGE:-webhdp-fast-renderer:${WEBHDP_IMAGE_TAG:-0.1.0-alpha.4}}
     restart: unless-stopped
     volumes:
       - ${WEBHDP_SESSIONS_PATH:-/srv/webhdp/sessions}:/shared/sessions
@@ -101,7 +102,7 @@ services:
   any-to-usdz:
     profiles:
       - local-hdp-components
-    image: ${WEBHDP_ANY_TO_USDZ_IMAGE:-webhdp-any-to-usdz:${WEBHDP_IMAGE_TAG:-0.1.0-alpha.3}}
+    image: ${WEBHDP_ANY_TO_USDZ_IMAGE:-webhdp-any-to-usdz:${WEBHDP_IMAGE_TAG:-0.1.0-alpha.4}}
     platform: ${ANY_TO_USDZ_PLATFORM:-linux/amd64}
     restart: unless-stopped
     volumes:
@@ -135,7 +136,7 @@ services:
       start_period: 5s
 
   worker:
-    image: ${WEBHDP_BACKEND_IMAGE:-webhdp-backend:${WEBHDP_IMAGE_TAG:-0.1.0-alpha.3}}
+    image: ${WEBHDP_BACKEND_IMAGE:-webhdp-backend:${WEBHDP_IMAGE_TAG:-0.1.0-alpha.4}}
     command: celery -A celery_app.celery worker --loglevel=info --time-limit=${CELERY_TASK_TIME_LIMIT:-3600} --soft-time-limit=${CELERY_TASK_SOFT_TIME_LIMIT:-3300}
     restart: unless-stopped
     stop_grace_period: 10m
@@ -180,6 +181,28 @@ services:
       backend:
         condition: service_healthy
       redis:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - hdp-network
+
+  hpc-queue:
+    image: ${WEBHDP_BACKEND_IMAGE:-webhdp-backend:${WEBHDP_IMAGE_TAG:-0.1.0-alpha.4}}
+    command: [python, -m, flask, --app, app, hpc-queue]
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-sqlite:////app/instance/hdp_web.db}
+      - FLASK_ENV=production
+      - RUN_DB_BOOTSTRAP=0
+      - MAINTENANCE_FLAG_PATH=/app/instance/maintenance.json
+    volumes:
+      - ${WEBHDP_INSTANCE_PATH:-/srv/webhdp/instance}:/app/instance
+      - hdp_logs:/app/logs
+    depends_on:
+      backend:
         condition: service_healthy
     extra_hosts:
       - "host.docker.internal:host-gateway"

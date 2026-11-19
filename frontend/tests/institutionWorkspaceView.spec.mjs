@@ -3,11 +3,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocked = vi.hoisted(() => ({
   institutionService: {
+    listInstitutions: vi.fn(),
     getInstitution: vi.fn(),
     listAuditEvents: vi.fn(),
     createInstitution: vi.fn(),
     updateInstitution: vi.fn(),
-    createMembership: vi.fn(),
+    listInvitations: vi.fn(),
+    sendInvitation: vi.fn(),
+    revokeInvitation: vi.fn(),
+    listWorkspaceRequests: vi.fn(),
     updateMembership: vi.fn(),
     deleteMembership: vi.fn(),
     createCommunity: vi.fn(),
@@ -32,11 +36,18 @@ const mocked = vi.hoisted(() => ({
     success: vi.fn(),
     error: vi.fn(),
   },
+  route: { query: {} },
+  router: { replace: vi.fn() },
 }))
 
 vi.mock('@/services/institution.service', () => ({ default: mocked.institutionService }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => mocked.authStore }))
 vi.mock('@/composables/useToast', () => ({ useToast: () => mocked.toast }))
+vi.mock('vue-router', async importOriginal => ({
+  ...await importOriginal(),
+  useRoute: () => mocked.route,
+  useRouter: () => mocked.router,
+}))
 
 import InstitutionWorkspaceView from '../src/views/account/InstitutionWorkspaceView.vue'
 
@@ -63,6 +74,11 @@ describe('InstitutionWorkspaceView credentials', () => {
     Object.values(mocked.institutionService).forEach((fn) => fn.mockReset())
     Object.values(mocked.toast).forEach((fn) => fn.mockReset())
     mocked.authStore.fetchCurrentUser.mockReset()
+    mocked.authStore.user = { id: 9, role: 'user', default_institution_id: 3 }
+    mocked.authStore.institutions = [{ id: 3, name: 'Museum Network', role: 'manager' }]
+    mocked.route.query = {}
+    mocked.institutionService.listInvitations.mockResolvedValue({ data: { invitations: [] } })
+    mocked.institutionService.listWorkspaceRequests.mockResolvedValue({ data: { requests: [] } })
   })
 
   it('renders manager-visible institution live credential details', async () => {
@@ -103,5 +119,60 @@ describe('InstitutionWorkspaceView credentials', () => {
     expect(wrapper.text()).toContain('rejected test draft creation')
     expect(wrapper.text()).toContain('Test draft create')
     expect(wrapper.text()).toContain('invalid')
+  })
+
+  it('lets site admins select a workspace where they are not members', async () => {
+    mocked.authStore.user = { id: 9, role: 'admin' }
+    mocked.route.query = { workspace: '4' }
+    mocked.institutionService.listInstitutions.mockResolvedValue({ data: { institutions: [{ id: 4, name: 'Library' }] } })
+    mocked.institutionService.getInstitution.mockResolvedValue({ data: { institution: { id: 4, name: 'Library' } } })
+    mocked.institutionService.listAuditEvents.mockResolvedValue({ data: { audit_events: [] } })
+
+    const wrapper = mount(InstitutionWorkspaceView)
+    await flushPromises()
+
+    expect(mocked.institutionService.listInstitutions).toHaveBeenCalledWith({ all: true })
+    expect(mocked.institutionService.getInstitution).toHaveBeenCalledWith(4)
+    expect(mocked.institutionService.listWorkspaceRequests).toHaveBeenLastCalledWith(expect.objectContaining({ all: true, status: 'pending' }))
+    expect(wrapper.text()).toContain('Site administration')
+  })
+
+  it('opens a manager’s invitation controls and saves changed directory visibility', async () => {
+    mocked.route.query = { workspace: '3', section: 'members' }
+    const institution = { id: 3, name: 'Museum Network', profile_visibility: 'private' }
+    mocked.institutionService.getInstitution.mockResolvedValue({ data: { institution } })
+    mocked.institutionService.listAuditEvents.mockResolvedValue({ data: { audit_events: [] } })
+    mocked.institutionService.updateInstitution.mockResolvedValue({
+      data: { institution: { ...institution, profile_visibility: 'internal' } },
+    })
+    const wrapper = mount(InstitutionWorkspaceView, { attachTo: document.body })
+    await flushPromises()
+
+    expect(document.activeElement.textContent).toBe('Members')
+    expect(wrapper.text()).toContain('Send invitation')
+    const visibility = wrapper.get('#workspace-visibility')
+    expect(visibility.element.value).toBe('private')
+    await visibility.setValue('internal')
+    await wrapper.findAll('button').find(button => button.text() === 'Save institution').trigger('click')
+    await flushPromises()
+
+    expect(mocked.institutionService.updateInstitution).toHaveBeenCalledWith(3, {
+      description: '',
+      profile_visibility: 'internal',
+    })
+    wrapper.unmount()
+  })
+
+  it('keeps invitation and directory controls unavailable for a reader', async () => {
+    mocked.route.query = { workspace: '3', section: 'members' }
+    mocked.authStore.institutions = [{ id: 3, name: 'Museum Network', role: 'reader' }]
+    mocked.institutionService.getInstitution.mockResolvedValue({ data: { institution: { id: 3, name: 'Museum Network' } } })
+    const wrapper = mount(InstitutionWorkspaceView)
+    await flushPromises()
+
+    expect(wrapper.find('#workspace-visibility').exists()).toBe(false)
+    expect(wrapper.get('#workspace-description').attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).not.toContain('Send invitation')
+    wrapper.unmount()
   })
 })

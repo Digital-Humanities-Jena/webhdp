@@ -7,7 +7,10 @@ DEFAULT_REF="b1ba67802ae1581c88ba8ea0ae9740cf663a0176"
 TARGET_DIR="${LOCAL_EDM_VALIDATOR_REPO:-$ROOT_DIR/external_code/local-edm-validator}"
 REPO_URL="${LOCAL_EDM_VALIDATOR_SOURCE_REPOSITORY:-$DEFAULT_REPO_URL}"
 PINNED_REF="${LOCAL_EDM_VALIDATOR_SOURCE_REF:-$DEFAULT_REF}"
-PATCH_FILE="$ROOT_DIR/patches/local-edm-validator/webhdp-dockerfile-local.patch"
+PATCH_FILES=(
+  "$ROOT_DIR/patches/local-edm-validator/webhdp-dockerfile-local.patch"
+  "$ROOT_DIR/patches/local-edm-validator/webhdp-edm-resources.patch"
+)
 VERIFY_ONLY=false
 FORCE=false
 
@@ -59,22 +62,23 @@ short_ref() {
 }
 
 ensure_patch_state() {
-  if git -C "$TARGET_DIR" apply --unidiff-zero --reverse --check "$PATCH_FILE" >/dev/null 2>&1; then
+  local patch_file="$1"
+  if git -C "$TARGET_DIR" apply --unidiff-zero --reverse --check "$patch_file" >/dev/null 2>&1; then
     return 0
   fi
   if [[ "$VERIFY_ONLY" == "true" ]]; then
-    fail "WebHDP local-edm-validator patch is not applied in $TARGET_DIR"
+    fail "WebHDP local-edm-validator patch is not applied in $TARGET_DIR: $patch_file"
   fi
-  if git -C "$TARGET_DIR" apply --unidiff-zero --check "$PATCH_FILE" >/dev/null 2>&1; then
-    git -C "$TARGET_DIR" apply --unidiff-zero "$PATCH_FILE"
+  if git -C "$TARGET_DIR" apply --unidiff-zero --check "$patch_file" >/dev/null 2>&1; then
+    git -C "$TARGET_DIR" apply --unidiff-zero "$patch_file"
     return 0
   fi
-  fail "Cannot apply WebHDP patch cleanly: $PATCH_FILE"
+  fail "Cannot apply WebHDP patch cleanly: $patch_file"
 }
 
-if [[ ! -f "$PATCH_FILE" ]]; then
-  fail "Missing WebHDP patch file: $PATCH_FILE"
-fi
+for patch_file in "${PATCH_FILES[@]}"; do
+  [[ -f "$patch_file" ]] || fail "Missing WebHDP patch file: $patch_file"
+done
 
 if [[ ! -d "$TARGET_DIR/.git" ]]; then
   if [[ "$VERIFY_ONLY" == "true" ]]; then
@@ -106,7 +110,9 @@ elif [[ "$FORCE" == "true" && "$VERIFY_ONLY" != "true" ]]; then
   git -C "$TARGET_DIR" fetch --tags origin "$PINNED_REF" || true
 fi
 
-ensure_patch_state
+for patch_file in "${PATCH_FILES[@]}"; do
+  ensure_patch_state "$patch_file"
+done
 
 for required_path in \
   metis-sandbox-rest/Dockerfile.local \
@@ -120,15 +126,11 @@ if [[ "$actual_ref" != "$PINNED_REF" ]]; then
   fail "local-edm-validator is at $actual_ref, expected $PINNED_REF"
 fi
 
-if ! git -C "$TARGET_DIR" apply --unidiff-zero --reverse --check "$PATCH_FILE" >/dev/null 2>&1; then
-  fail "WebHDP local-edm-validator patch verification failed"
-fi
-
 echo "local-edm-validator checkout ready"
 echo "  path:       $TARGET_DIR"
 echo "  upstream:   $REPO_URL"
 echo "  source ref: $PINNED_REF"
-echo "  patch:      $PATCH_FILE"
+printf '  patch:      %s\n' "${PATCH_FILES[@]}"
 echo
 echo "Use this source ref when building:"
 echo "  export LOCAL_EDM_VALIDATOR_SOURCE_REF=$PINNED_REF"

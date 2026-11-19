@@ -4,7 +4,7 @@ This document explains the multi-architecture Docker setup and the tiered Docker
 
 ## 0. Deployment Prerequisites
 
-Before running any deployment commands, ensure the following files are available on the server and configured correctly. For an existing installation, follow the [alpha.3 upgrade checklist](guides/upgrade_alpha3.md) for backup, migration and staging.
+Before running any deployment commands, ensure the following files are available on the server and configured correctly. For an existing installation, follow the [alpha.4 upgrade checklist](guides/upgrade_alpha4.md) for backup, migration and staging.
 
 ### Files to Transfer
 Transfer the **entire project directory** to your server. The Docker build process requires the full source code context.
@@ -215,6 +215,15 @@ frontend root and build context.
 
 SQLite is the default database for the first low-user deployment. The application enables foreign keys, a 30 second busy timeout, and WAL mode for file-backed SQLite databases. This is appropriate for one backend container and one worker container with modest write concurrency.
 
+Registered accounts and their verification state are stored in the application
+database. During an upgrade, keep the existing instance directory mounted at
+`/app/instance` and use the same `DATABASE_URL` across the backend and workers.
+Set `WEBHDP_INSTANCE_PATH` to the existing absolute host path when moving the
+Compose files to a new release directory. Confirm the resolved mount in the
+Compose configuration and running containers.
+Use the [account continuity check](guides/upgrade_alpha4.md#verify-account-continuity)
+before and after recreating the containers.
+
 Use the operational backup tooling before every update. It creates an online SQLite backup copy, archives the configured persistent paths, writes manifest/checksum metadata, and can upload an encrypted archive to Dropbox:
 
 ```bash
@@ -261,8 +270,12 @@ BACKUP_PROVIDER=dropbox ./scripts/pre_update.sh
 
 The helper runs release checks before touching live data, enables maintenance
 mode, waits for Celery work to drain, creates an encrypted pre-update backup,
-performs an isolated restore drill, applies migrations, and then runs a
-readiness check. Production image variables should use immutable version or Git
+performs an isolated restore drill, applies migrations, verifies that existing
+accounts and their verification state survived, and runs a readiness check.
+Maintenance mode stays enabled if a migration or post-migration check fails.
+When running this helper on the host, use a host-side `DATABASE_URL` and
+`MAINTENANCE_FLAG_PATH` pointing to the same files the containers use.
+Production image variables should use immutable version or Git
 SHA tags rather than `latest`; `scripts/check_release_images.py` enforces this
 when `CHECK_RELEASE_IMAGES=true`.
 

@@ -21,7 +21,7 @@
         <div class="flex min-h-[64px] flex-wrap items-center justify-between gap-3 py-3">
           <div class="flex items-center gap-3 min-w-0">
             <router-link
-              to="/workflow/upload"
+              to="/dashboard"
               class="text-lg font-semibold tracking-tight text-gray-900 hover:text-indigo-700 transition-colors"
             >
               WebHDP
@@ -170,9 +170,9 @@ const roleLabel = computed(() => {
 
 const navigationItems = computed(() => {
   const items = [
-    ...(authStore.user?.onboarding_required ? [{ label: 'First Steps', to: '/onboarding' }] : []),
-    { label: 'Publish a 3D model', to: '/model-publication' },
     { label: 'Dashboard', to: '/dashboard' },
+    ...(role.value === 'user' || authStore.user?.onboarding_required ? [{ label: 'Getting started', to: '/onboarding' }] : []),
+    { label: 'Publish a 3D model', to: '/model-publication' },
     { label: 'Uploads', to: '/uploads' },
     { label: 'Submissions', to: '/submissions' },
     { label: 'Issues', to: '/issues' },

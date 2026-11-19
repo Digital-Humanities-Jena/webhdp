@@ -38,6 +38,8 @@ or changing executable surfaces so the macro workflow docs stay complete.
 | `/embed/records/:environment/:zenodoRecordId` | `EmbedRecord` | [Public, Docs, And Profiles](public-docs-profiles.md) |
 | `/dashboard` | `Dashboard` | [Sessions, Records, And Provenance](sessions-records-provenance.md) |
 | `/onboarding` | `Onboarding` | [Access, Setup, And Identity](access-setup-identity.md) |
+| `/tutorial/3d` | `ModelPublicationTutorial` | [3D model workflow](../guides/model_publication.md#practise-with-the-3d-tutorial) |
+| `/account/usage` | `AccountUsage` | [Account access, usage and limits](../guides/account_usage.md) |
 | `/hpc-resources` | `HpcResources` | [HPC, Cloud, And Storage](hpc-cloud-storage.md) |
 | `/notifications` | `Notifications` | [Issues And Notifications](issues-notifications.md) |
 | `/developer` | `DeveloperMode` | [Developer And Operator Scripts](developer-operator-scripts.md) |
@@ -154,7 +156,7 @@ or changing executable surfaces so the macro workflow docs stay complete.
 | Script Or Script Group | Workflow Document |
 |---|---|
 | `scripts/backup.py`, `scripts/backup_status.py`, `scripts/list_backups.py`, `scripts/prune_backups.py`, `scripts/restore_backup.py`, `scripts/restore_drill.py`, `scripts/scheduled_backup.sh` | [Admin Operations And Observability](admin-operations-observability.md) |
-| `scripts/build_images.sh`, `scripts/bump_version.py`, `scripts/check_release_images.py`, `scripts/pre_update.sh`, `scripts/readiness_check.py`, `scripts/release_check.sh`, `scripts/wait_for_celery_drain.py`, `scripts/maintenance.py` | [Developer And Operator Scripts](developer-operator-scripts.md) |
+| `scripts/build_images.sh`, `scripts/bump_version.py`, `scripts/check_release_images.py`, `scripts/check_account_continuity.py`, `scripts/pre_update.sh`, `scripts/readiness_check.py`, `scripts/release_check.sh`, `scripts/wait_for_celery_drain.py`, `scripts/maintenance.py` | [Developer And Operator Scripts](developer-operator-scripts.md) |
 | `scripts/check_developer_docs.py`, `scripts/check_openapi_fresh.py`, `scripts/generate_openapi.py`, `scripts/doctor.py`, `scripts/run_golden_workflow.py`, `scripts/render_pipeline_smoke.py`, `scripts/validate_hdp_components.py`, `scripts/webhdp_agent_cli.py` | [Developer And Operator Scripts](developer-operator-scripts.md), [3D HDP Component Lifecycle](3d-hdp-component-lifecycle.md) |
 | `scripts/cleanup_legacy_workflow_state.py`, `scripts/prepare_subset_msf.py` | [Publication, Upload, And MSF](publication-upload-msf.md) |
 | `scripts/execute_zenodo_community_append_from_csv.py`, `scripts/launch_zenodo_historical_backfill.py`, `scripts/monitor_zenodo_historical_backfill.py` | [Zenodo Retrieval And Communities](zenodo-retrieval-communities.md) |

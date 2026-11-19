@@ -1424,7 +1424,9 @@ def reset_modality_config():
 @jwt_required()
 def get_storage_status():
     """Get current cloud storage availability status for authenticated users."""
-    from services.cloud_upload_service import CloudUploadService
+    from routes.access_helpers import get_current_user_from_jwt
+    from services.cloud_upload_service import CloudUploadService, STORAGE_MODE_LOCAL, STORAGE_MODE_SERVER_ONLY, STORAGE_SERVER
+    from services.session_access_service import can_use_mounted_inputs
 
     dropbox_available, dropbox_msg = CloudUploadService.check_dropbox_available()
     gdrive_available, gdrive_msg = CloudUploadService.check_gdrive_available()
@@ -1433,6 +1435,9 @@ def get_storage_status():
 
     # Ensure the reported mode reflects environment overrides
     config["storage_mode"] = CloudUploadService.get_storage_mode()
+    if config["storage_mode"] == STORAGE_MODE_LOCAL and not can_use_mounted_inputs(get_current_user_from_jwt()):
+        config["storage_mode"] = STORAGE_MODE_SERVER_ONLY
+        active_storage, active_msg = STORAGE_SERVER, "Server storage is available"
 
     return APIResponse.success(data={
         "config": config,

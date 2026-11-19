@@ -42,6 +42,11 @@ Validation reports record status, messages, scope recommendations, HTTP status c
 
 WebHDP stores account passwords as password hashes, not readable passwords.
 
+The account profile displays the verified sign-in email as read-only. Contact
+the WebHDP operator when the sign-in address needs to change. Profile fields
+such as display name and affiliation can be edited independently of the
+account's verified address and workspace membership.
+
 User recovery codes are generated once, displayed once, and then stored as HMAC hashes. WebHDP tracks whether a recovery code is available, used, expired, or invalidated. The raw recovery code is not redisplayed after generation.
 
 Administrators can issue temporary recovery access for a user. That flow creates a temporary password and one-time recovery code for out-of-band handoff, then requires the user to change the password before continuing.

@@ -190,6 +190,7 @@ class TestUploadIdempotency(unittest.TestCase):
 
     def test_list_sessions_includes_msf_repair_hint(self):
         with self.app.app_context():
+            db.session.get(User, self.user_id).set_capabilities(["mounted_input_access"])
             repair_session = DBSession(
                 user_id=self.user_id,
                 session_dir="/tmp/hdp_session_repair",
@@ -228,6 +229,8 @@ class TestUploadIdempotency(unittest.TestCase):
 
     def test_local_msf_lists_nested_subdirectories(self):
         with self.app.app_context():
+            db.session.get(User, self.user_id).set_capabilities(["mounted_input_access"])
+            db.session.commit()
             local_input = self.app.config.get("LOCAL_INPUT_PATH")
             self.assertIsNotNone(local_input)
 

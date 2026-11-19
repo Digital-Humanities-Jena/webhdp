@@ -222,11 +222,16 @@ HPC behavior:
 
 | Method | Path | Auth | Access | Purpose |
 |---|---|---|---|---|
-| POST | `/register` | No | Public | Register a user |
-| GET | `/verify-email/<token>` | No | Public | Verify email token |
-| POST | `/login` | No | Public | Authenticate and return JWT |
+| POST | `/register` | No | Public | Request a registration link with an email address |
+| POST | `/resend-verification` | No | Public | Request a fresh verification email |
+| POST | `/verify-email` | No | Public | Confirm email ownership and set the account password |
+| GET | `/verify-email/<token>` | No | Public | Retired path for old links, returns HTTP 410 |
+| POST | `/login` | No | Public | Return a JWT or an optional MFA challenge |
+| POST | `/login/verify-code` | No | Public | Complete sign-in with the emailed MFA code |
+| POST | `/login/resend-code` | No | Public | Request a new login MFA code |
+| POST | `/login/verify-recovery-code` | No | Public | Complete an active sign-in challenge with a recovery code |
 | GET | `/me` | Yes | Any authenticated | Get current user profile |
-| PUT | `/me` | Yes | Any authenticated | Update current user email |
+| PUT | `/me` | Yes | Any authenticated | Update profile fields. The verified sign-in email is read-only |
 | PUT | `/me/password` | Yes | Any authenticated | Change current user password |
 | POST | `/logout` | Yes | Any authenticated | Revoke current token |
 | GET | `/me/zenodo-credentials` | Yes | Any authenticated | List available named Zenodo keys, accepted shares, pending invitations, outgoing shares, and active selections |
@@ -244,11 +249,56 @@ HPC behavior:
 | DELETE | `/me/zenodo-credentials/<environment>` | Yes | Any authenticated | Compatibility wrapper to delete a personal credential for one environment |
 | POST | `/me/zenodo-credentials/<environment>/validate` | Yes | Any authenticated | Compatibility wrapper to validate the stored personal credential for one environment |
 
+### Email-first account registration
+
+Submit `{"email":"researcher@example.org"}` to `/register` or
+`/resend-verification`. HTTP 202 returns `data.accepted: true` and a generic
+inbox message. The same reply covers addresses that are already active or
+inside the resend cooldown. An attempted SMTP delivery that fails produces
+`VERIFICATION_EMAIL_UNAVAILABLE` with HTTP 503. A failed send preserves an
+earlier valid registration link.
+
+The emailed browser link opens `/verify-email` with the token in the URL
+fragment. Submit `{"token":"<email-link-token>","password":"<chosen-password>"}`
+to `POST /verify-email`. A successful request creates or activates the
+account, consumes the challenge, and returns HTTP 200. Sign in with the
+chosen password afterwards. Passwords for new accounts contain 8 to 128
+characters. Expired, invalid, or consumed tokens return
+`INVALID_EMAIL_VERIFICATION_LINK`. A successful resend retires earlier links.
+The default link lifetime is 24 hours and the default resend cooldown is
+60 seconds.
+
+These identity endpoints accept JSON request bodies up to 16 KiB. Invalid
+JSON or email fields return a validation error. Authentication throttling is
+shared across API workers, and a rate-limit rejection returns HTTP 429 with
+`retry_after_seconds` and `Retry-After`. A concurrent signup operation can
+return `REGISTRATION_BUSY` with retry guidance. Request a new link for a
+pending account created by an earlier release. Existing verified users retain
+their sign-in credentials.
+
+### Zenodo credentials
+
 `<environment>` is `sandbox` or `production`.
 
 Zenodo credential responses never include cleartext tokens. User and institution tokens are encrypted at rest; API clients receive names, environments, ownership/share metadata, active state, masked previews, and validation reports only. Sharing grants approved use of an encrypted credential record and does not reveal the token to the recipient or administrator.
 
 New validation reports use `validation_mode: "live_write_cleanup"`. A successful report means WebHDP listed depositions, created a temporary draft deposition, and deleted that draft. Reports include capability rows for authentication, deposit read, draft create, and draft cleanup. Authentication or scope failures are reported as invalid; network, rate-limit, and server failures are reported as unreachable; cleanup failures are reported distinctly because a temporary draft may need manual review in Zenodo.
+
+### Own account usage (`/api/v1/account/usage`)
+
+`GET /api/v1/account/usage` returns the signed-in account's own resource usage. It requires an authenticated account and uses `Cache-Control: private, no-store`. Shared demonstration accounts use their separate demonstration allowance.
+
+| Group | Fields |
+|---|---|
+| `uploads` | `used_bytes`, `limit_bytes`, `active`, `active_limit`, `request_limit_bytes`, `stream_bytes_last_24_hours`, `stream_limit_bytes` |
+| `native_processing` | `queued`, `running`, `active`, `active_limit` |
+| `model_publication` | `active`, `active_limit`, `accepted_last_24_hours`, `daily_limit`, `daily_reset_at`, `stored_bytes`, `storage_limit_bytes`, `retention_seconds` |
+
+`daily_reset_at` is a Unix timestamp in seconds when the model run limit is reached. A `null` local upload limit indicates that the account is exempt from that limit. Source usage includes reservations for uploads in progress. A request to upload beyond the account source or cloud transfer limit returns `UPLOAD_STORAGE_QUOTA` or `UPLOAD_STREAM_QUOTA` with HTTP 413. `UPLOAD_CONCURRENCY_QUOTA` has HTTP 429. Account limit errors include `error.details.usage` when a usage snapshot is available.
+
+Model publishing and tutorial runs share the account allowances. `MODEL_PUBLICATION_ACTIVE_QUOTA` and `MODEL_PUBLICATION_DAILY_QUOTA` return HTTP 429. The daily response includes `Retry-After`. `MODEL_PUBLICATION_STORAGE_QUOTA` returns HTTP 413 when the account's model workspace is full. Shared queue or storage exhaustion produces `MODEL_PUBLICATION_QUEUE_FULL` with HTTP 429 or `MODEL_PUBLICATION_STORAGE_FULL` with HTTP 507.
+
+`NATIVE_PROCESSING_QUOTA` returns HTTP 429 from native pipeline and Playground execution when the initiating account reaches its combined queued and running limit. The legacy submission endpoint uses the same reservation and limit. The response includes the caller's current counts. Administrators have a `null` native account limit.
 
 ## 7. Setup API (`/api/v1/setup`)
 
@@ -537,6 +587,33 @@ The credential environment comes from the local record. An unresolved outcome re
 | GET | `/<submission_id>` | Yes | Submission owner | Submission detail |
 | GET | `/<submission_id>/progress` | Yes | Submission owner | Lightweight live progress payload |
 
+### Guided 3D runs (`/api/v1/model-publication`)
+
+| Method | Path | Access | Purpose |
+|---|---|---|---|
+| GET | `/availability` | Signed-in account | Worker health, Sandbox credential readiness, and `practice_ready` for tutorial access |
+| GET | `/queue` | Signed-in account | Aggregate worker and queue status |
+| GET | `/samples` | Public | Built-in model packages with spreadsheet summaries |
+| POST | `/jobs` | Signed-in account | Queue a direct model run and return `202`, or return the same run with `200` after an idempotent retry |
+| GET | `/jobs` | Run owner | List recent runs, optionally filtered by `run_mode=practice` or `run_mode=sandbox` |
+| GET | `/jobs/<job_id>` | Run owner | Get processing stage, mapped metadata, repair details and available results |
+| GET | `/jobs/<job_id>/files/<filename>` | Run owner | Download a prepared file |
+
+To practise, send form fields `run_mode=practice`, `sample_id=glazed-bowl`
+or another built-in single model ID, and `metadata_source=archive` to `/jobs`.
+A verified personal account can use this mode without a Sandbox credential. It
+uses the normal CPU queue and returns `run_mode=practice` on the run. A finished
+practice run offers `model.glb`, `preview.png`, `metadata.csv`, and
+`metadata.json` for 48 hours and makes no external deposit. This mode rejects
+custom uploads, metadata overrides and batch samples. Use a new
+`Idempotency-Key` for a new run.
+
+The default `run_mode=sandbox` requires an active Sandbox credential and
+retains the existing model and metadata inputs. Shared demonstration accounts
+continue to use their managed Sandbox credential and see only runs from their
+current sign-in. Personal accounts can reopen their own runs after signing in
+again.
+
 ## 15. Dataset API (`/api/v1/datasets`)
 
 | Method | Path | Auth | Access | Purpose |
@@ -552,15 +629,25 @@ The credential environment comes from the local record. An unresolved outcome re
 
 | Method | Path | Auth | Access | Purpose |
 |---|---|---|---|---|
-| GET | `/` | Yes | Any authenticated | List institutions visible to the user |
-| POST | `/` | Yes | Any authenticated | Create institution |
-| GET | `/<institution_id>` | Yes | Institution member | Get institution detail |
-| PUT | `/<institution_id>` | Yes | Institution manager | Update institution |
-| GET | `/<institution_id>/memberships` | Yes | Institution member | List memberships |
-| POST | `/<institution_id>/memberships` | Yes | Institution manager | Add membership |
-| PUT | `/<institution_id>/memberships/<member_user_id>` | Yes | Institution manager | Update membership role |
-| DELETE | `/<institution_id>/memberships/<member_user_id>` | Yes | Institution manager | Remove membership |
-| GET | `/<institution_id>/audit-events` | Yes | Institution member | Paginated institution audit log |
+| GET | `/` | Yes | Any authenticated | List the caller's workspaces. Site administrators and moderators can request the institution inventory with `all=true` |
+| POST | `/` | Yes | Site administrator | Create an official workspace |
+| GET | `/suggestions` | Yes | Any authenticated | Find visible institution labels for profile affiliation |
+| POST | `/affiliation` | Yes | Any authenticated | Save an affiliation label or select a visible institution |
+| GET | `/workspace-requests` | Yes | Verified requester or site administrator | List the caller's requests. Administrators can request all pending or reviewed requests |
+| POST | `/workspace-requests` | Yes | Verified account | Submit a new workspace for review |
+| PATCH | `/workspace-requests/<request_id>/decision` | Yes | Site administrator | Approve or reject a pending request |
+| GET | `/<institution_id>` | Yes | Institution member or site administrator | Get institution detail |
+| PUT | `/<institution_id>` | Yes | Institution manager or site administrator | Update working settings. Only site administrators can change the official name |
+| GET | `/<institution_id>/memberships` | Yes | Institution member or site administrator | List memberships with profile-aware member fields |
+| POST | `/<institution_id>/memberships` | Yes | Institution manager or site administrator | Retired direct grant, returns HTTP 409 with `INSTITUTION_INVITATION_REQUIRED` |
+| PUT | `/<institution_id>/memberships/<member_user_id>` | Yes | Institution manager or site administrator | Change the role of an existing member |
+| DELETE | `/<institution_id>/memberships/<member_user_id>` | Yes | Institution manager or site administrator | Remove membership |
+| GET | `/<institution_id>/invitations` | Yes | Institution manager or site administrator | List scoped invitations and delivery state |
+| POST | `/<institution_id>/invitations` | Yes | Institution manager or site administrator | Send an invitation or resend an outstanding one |
+| DELETE | `/<institution_id>/invitations/<invitation_id>` | Yes | Institution manager or site administrator | Revoke an invitation using its UUID |
+| POST | `/invitations/preview` | Yes | Verified recipient | Check an invitation and show the workspace and offered role |
+| POST | `/invitations/accept` | Yes | Verified recipient | Consume an invitation and open the membership |
+| GET | `/<institution_id>/audit-events` | Yes | Institution manager or site administrator | View paginated audit records within the caller's scope |
 | GET | `/<institution_id>/communities` | Yes | Institution member | List institution-managed default communities |
 | POST | `/<institution_id>/communities` | Yes | Institution manager | Create institution community |
 | PUT | `/<institution_id>/communities/<community_id>` | Yes | Institution manager | Update institution community |
@@ -569,6 +656,52 @@ The credential environment comes from the local record. An unresolved outcome re
 | PUT | `/<institution_id>/zenodo-credentials/<environment>` | Yes | Institution manager | Save or replace institution Zenodo credential |
 | DELETE | `/<institution_id>/zenodo-credentials/<environment>` | Yes | Institution manager | Delete institution Zenodo credential |
 | POST | `/<institution_id>/zenodo-credentials/<environment>/validate` | Yes | Institution manager | Validate stored institution Zenodo credential |
+
+### Workspace requests and membership
+
+Submit `{"name":"Institution name","reason":"Optional purpose"}` to
+`POST /workspace-requests`. HTTP 201 returns `data.request` with status
+`pending`. The requester can track `pending`, `approved`, and `rejected`
+states through `GET /workspace-requests`. Administrators can add `all=true`,
+and the list accepts `status`, `page`, and `per_page`. A decision uses
+`{"decision":"approve","note":"Optional review note"}` or `"reject"` as the
+decision value. Approval returns the institution ID and creates the initial
+Owner membership for the requester.
+
+Valid membership roles are `reader`, `curator`, `manager`, and `owner`.
+Only an institution owner or site administrator can change Owner assignments,
+and each institution must retain an owner. The roster limits profile fields
+using the viewer's access and member visibility preferences. Workspace audit
+records follow session visibility. An affiliation update changes the profile
+label and can select a default for an existing membership.
+
+### Invitations
+
+Send `{"email":"researcher@example.org","role":"reader"}` to
+`POST /<institution_id>/invitations`. HTTP 200 returns `data.invitation`
+and `data.delivery`. A saved invitation with `delivery: "failed"` can be
+retried. A successful resend for the same pending email replaces its link
+after the cooldown. A failed resend preserves the previous valid link.
+Invitations expire after seven days. The resend
+cooldown is one minute and the institution delivery limit is 60 attempts per
+rolling hour. Rate limits return HTTP 429 with `Retry-After`.
+
+The management list accepts `offset` and `limit` and returns
+`data.invitations` and `data.total`. An invitation row describes its role,
+recipient, state, delivery result, and timing. Managers can manage invitations
+for ordinary roles. Owner invitations are visible to institution owners and
+site administrators.
+
+The recipient submits `{"token":"<email-link-token>"}` to the preview or
+accept endpoint. Preview returns the workspace, offered role, expiry, and
+current role if the recipient already belongs to that workspace. Acceptance
+atomically consumes the hash-matched invitation and returns the workspace,
+membership role, and `already_member`. Existing roles remain in effect.
+An expired, withdrawn, consumed, or otherwise unavailable token returns
+`INVITATION_INVALID` with HTTP 404. A verified account with another
+address returns `INVITATION_EMAIL_MISMATCH` with HTTP 403. A legacy address
+ambiguity returns `EMAIL_IDENTITY_AMBIGUOUS` with HTTP 409. The token itself
+is absent from API responses, the roster, and the audit log.
 
 Institution credential responses are masked and never expose cleartext tokens. Validation uses the same `live_write_cleanup` mode as user credentials: read depositions, create a temporary draft, and delete the draft in cleanup.
 
@@ -754,15 +887,47 @@ Operators should use this endpoint as the API equivalent of the Settings -> EDM 
 | GET | `/test/gdrive` | Yes | Admin | Test Google Drive connectivity |
 | GET | `/test/dropbox` | Yes | Admin | Test Dropbox connectivity |
 
-## 20. Reserved GPUs (`/api/v1/hpc-link`)
+## 20. HPC Allocations and Reserved GPUs (`/api/v1/hpc-link`)
 
 | Method | Path | Access | Purpose |
 |---|---|---|---|
+| GET | `/status` | Authenticated account | Read allocation availability, the caller’s quota, and session status |
+| GET | `/allocations` | Authenticated account | List the caller’s current allocation requests |
+| POST | `/allocations` | Verified account with HPC Access, or an authorized operator | Request resources for an owned session |
 | GET | `/reservations` | Verified account with HPC Access; explicit grant | List reservations granted to the account |
 | POST | `/reservations/<reservation_id>/claim` | Same; owner of the specified session | Claim a reservation and return its ordinary allocation handle |
 | GET | `/allocations/<allocation_id>` | Allocation access | Poll the claim and live scheduler status |
-| POST | `/allocations/<allocation_id>/preflight` | Allocation access | Check components and resources for the selected runtime |
-| POST | `/allocations/<allocation_id>/release` | Allocation access | Detach access to a reserved job after active work finishes |
+| POST | `/allocations/<allocation_id>/preflight` | Current compute access | Check components and resources on a running allocation |
+| POST | `/allocations/<allocation_id>/stage/cloud-references` | Current compute access | Stage cloud files using the caller's upload receipts |
+| POST | `/allocations/<allocation_id>/release` | Allocation owner or administrator | Cancel a request or release idle resources |
+
+Use `session_id` and `purpose` on `/status` to see the relevant request. The
+`available` flag means HPC-Link is configured and enabled. The `active_hpc_allocation`
+flag requires a running allocation with an unexpired deadline when one is known.
+`active_hpc_gpu_count` is the GPU count of that usable allocation, when present.
+A value of `0` means the running allocation is CPU-only.
+For the caller's own allocation, `gpu_allocation_status` distinguishes a request
+queued in WebHDP, a request awaiting scheduler assignment (`allocating`), a
+running allocation, or a terminal state such as `failed` or `expired`.
+`gpu_allocation_id`, `gpu_allocation_gpu_count`, and `gpu_allocation_scheduler_reason`
+report the recorded request, when present. Poll that ID for scheduler updates.
+Cluster capacity and start time remain unknown until the scheduler responds.
+The `quota` object reports the caller’s `active`, `active_limit`, `queued`,
+`queued_limit`, `max_gpu_count`, and `max_duration_minutes`. Active includes
+pending scheduler requests and reservation claims. Queued requests count
+towards the waiting limit until they start, expire, or are cancelled. A full
+queue or excessive resource request returns `HPC_QUOTA_EXCEEDED` with HTTP 429.
+GPU counts are whole numbers from zero to the configured maximum; a zero count
+requests CPU resources. Walltime requests begin at five minutes. The gateway and
+Slurm can impose tighter limits.
+
+The caller can only list, inspect or release their own allocations through the
+regular workflow interface. Normal responses omit gateway credentials, internal
+paths and raw diagnostics. An authorized editor can use a shared session's
+ordinary ready allocation through its pipeline. Its owner retains control of the
+allocation handle. A reserved GPU claim remains exclusive to its grantee.
+Normal owners can still cancel their queued work or release idle resources after
+their HPC grant is removed. Release waits until active processing has finished.
 
 For a claim supply integer `session_id` and `purpose` of `workflow` or
 `playground`. Use the WebHDP reservation ID, which is distinct from the gateway

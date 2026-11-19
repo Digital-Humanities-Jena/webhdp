@@ -3,16 +3,15 @@ import logging
 from datetime import datetime
 
 from flask import Blueprint, request, current_app
-from flask_jwt_extended import jwt_required
+from flask_jwt_extended import get_jwt_identity, jwt_required
 
 from api_utils import APIResponse
 from routes.access_helpers import get_session_with_permission
-from exceptions import FileProcessingError
-from exceptions import ResourceNotFoundError
+from exceptions import FileProcessingError, ResourceNotFoundError
 from services.pipeline_execution_lock import PipelineAlreadyRunning
 # Services will be accessed via current_app
 from database.database import db
-from database.models import Session as DBSession, Submission, SystemConfig
+from database.models import PipelineRun, Session as DBSession, Submission
 from workflow_status import normalize_session_state
 
 logger = logging.getLogger(__name__)
@@ -73,6 +72,8 @@ def get_pipeline(identifier):
 @pipeline_bp.route("/<identifier>/execute_on_local_files", methods=["POST"])
 @jwt_required()
 def execute_pipeline(identifier):
+    from routes.pipeline_v2_routes import _enqueue_submission_pipeline_task
+    from services.pipeline_run_recovery import resolve_dispatch_failure
     from services.submission_pipeline_service import execute_submission_pipeline
 
     data = request.get_json() or {}
@@ -96,45 +97,56 @@ def execute_pipeline(identifier):
         return error_response
     if not db_session.hdpc_path:
         return APIResponse.validation_error("Session has no .hdpc file path")
-    from flask_jwt_extended import get_jwt_identity
-    readiness_payload = {'local_file_paths': local_file_paths, 'record_ids': [], 'execution_items': [],
-                         'is_sandbox': is_sandbox, 'abort_on_critical_error': abort_on_critical_error,
-                         'expected_version': data.get('expected_version'), 'readiness_token': data.get('readiness_token')}
-    current_app.native_pipeline_service.require_submission_readiness(
-        identifier, db_session_id, readiness_payload, int(get_jwt_identity()),
+    readiness_payload = {
+        'pipeline_identifier': identifier, 'session_id': db_session_id,
+        'local_file_paths': local_file_paths, 'record_ids': [], 'execution_items': [],
+        'is_sandbox': is_sandbox, 'abort_on_critical_error': abort_on_critical_error,
+        'async_execution': async_execution, 'expected_version': data.get('expected_version'),
+        'readiness_token': data.get('readiness_token'),
+    }
+    pending_run = current_app.native_pipeline_service.create_pending_run(
+        identifier, session_id=db_session_id, initiated_by_user_id=int(get_jwt_identity()),
+        request_payload=readiness_payload,
     )
+    run_id = pending_run['run_id']
 
-    submission = Submission(session_id=db_session_id, pipeline_id=identifier, status="processing")
-    db.session.add(submission)
-    db.session.flush()
-    submission.result = json.dumps(
-        {
-            "status": "processing",
-            "progress": {
-                "current_stage": "queued",
-                "status_message": "Pipeline job queued",
-                "current_index": 0,
-                "total_files": len(local_file_paths),
-                "processed_count": 0,
-                "failed_count": 0,
-                "abort_on_critical_error": abort_on_critical_error,
-            },
-        }
-    )
-    db_session.status = normalize_session_state("submitting")
-    db.session.commit()
+    try:
+        submission = Submission(session_id=db_session_id, pipeline_id=identifier, status="processing")
+        db.session.add(submission)
+        db.session.flush()
+        submission.result = json.dumps(
+            {
+                "status": "processing",
+                "progress": {
+                    "current_stage": "queued",
+                    "status_message": "Pipeline job queued",
+                    "current_index": 0,
+                    "total_files": len(local_file_paths),
+                    "processed_count": 0,
+                    "failed_count": 0,
+                    "abort_on_critical_error": abort_on_critical_error,
+                },
+            }
+        )
+        run = PipelineRun.query.filter_by(public_id=run_id).first()
+        if run:
+            run.submission_id = submission.id
+        db_session.status = normalize_session_state("submitting")
+        db.session.commit()
+    except Exception:
+        resolve_dispatch_failure(run_id)
+        raise
 
     if async_execution:
-        from tasks import execute_submission_pipeline_task
-
         try:
-            task = execute_submission_pipeline_task.delay(
+            task = _enqueue_submission_pipeline_task(
                 submission.id,
                 identifier,
                 local_file_paths,
                 db_session_id,
                 is_sandbox,
                 abort_on_critical_error,
+                [], [], run_id,
             )
             return APIResponse.accepted(
                 data={
@@ -146,6 +158,10 @@ def execute_pipeline(identifier):
             )
         except Exception as exc:
             logger.error(f"Failed to queue async pipeline submission {submission.id}: {exc}", exc_info=True)
+            resolve_dispatch_failure(run_id)
+            if run and run.status.value in {'running', 'completed'}:
+                return APIResponse.accepted(data={"submission_id": submission.id, "status": submission.status},
+                                            message="Check this submission's status before retrying")
             submission.status = "failed"
             submission.result = json.dumps(
                 {
@@ -166,8 +182,7 @@ def execute_pipeline(identifier):
             db_session_id=db_session_id,
             is_sandbox=is_sandbox,
             abort_on_critical_error=abort_on_critical_error,
-            readiness_payload=readiness_payload,
-            readiness_user_id=int(get_jwt_identity()),
+            precreated_run_public_id=run_id,
         )
         result_success = bool(execution_output.get("result", {}).get("success", True))
         submission.status = "completed" if result_success else "failed"
@@ -188,6 +203,8 @@ def execute_pipeline(identifier):
         )
     except PipelineAlreadyRunning as exc:
         db.session.rollback()
+        if run:
+            resolve_dispatch_failure(run_id)
         duplicate = db.session.get(Submission, submission.id)
         if duplicate:
             db.session.delete(duplicate)
@@ -196,6 +213,8 @@ def execute_pipeline(identifier):
     except FileProcessingError as exc:
         logger.error(f"Pipeline failed: {exc}", exc_info=True)
         db.session.rollback()
+        if run:
+            resolve_dispatch_failure(run_id)
         submission_to_update = db.session.get(Submission, submission.id)
         if submission_to_update:
             submission_to_update.status = "failed"
@@ -212,6 +231,8 @@ def execute_pipeline(identifier):
     except Exception as exc:
         logger.error(f"Pipeline execution failed: {exc}", exc_info=True)
         db.session.rollback()
+        if run:
+            resolve_dispatch_failure(run_id)
 
         submission_to_update = db.session.get(Submission, submission.id)
         if submission_to_update:
@@ -233,7 +254,7 @@ def execute_pipeline(identifier):
 def get_execution_status(execution_uuid):
     """Compatibility wrapper for native pipeline run status."""
     try:
-        native_run = current_app.native_pipeline_service.get_pipeline_run(execution_uuid)
+        native_run = current_app.native_pipeline_service.get_pipeline_run(execution_uuid, int(get_jwt_identity()))
         return APIResponse.success(data=native_run)
     except ResourceNotFoundError:
         return APIResponse.not_found("Pipeline run not found")

@@ -2764,10 +2764,12 @@ def launch_zenodo_batch_community_operation():
 
         from tasks import execute_zenodo_batch_community_operation
 
+        requester_id = get_jwt_identity()
         task = execute_zenodo_batch_community_operation.delay(
             operation=operation,
             remove_mode=remove_mode or None,
             community_identifier=community_identifier or None,
+            requested_by_user_id=int(requester_id),
             selected_records=[
                 {
                     "session_id": int(record.get("session_id") or 0),
@@ -2782,7 +2784,6 @@ def launch_zenodo_batch_community_operation():
                 for record in selected_records
             ],
         )
-        requester_id = get_jwt_identity()
         requester = db.session.get(User, int(requester_id)) if requester_id is not None else None
         record_task_launch(
             task_id=task.id,

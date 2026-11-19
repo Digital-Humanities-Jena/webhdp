@@ -19,10 +19,15 @@ export function pipelineGuidance(pipeline) {
   const conditional = risks.some(value => value.conditional)
   const createsDraft = keys.includes('zenodo_draft')
   const hpc = keys.some(key => ['fast_renderer', 'any_to_usdz', 'mesh_optimizer', 'georeferencer'].includes(key))
-  return { creates_draft: createsDraft, uploads, publishes, requires_hpc: hpc,
+  return { creates_draft: createsDraft, uploads, publishes, requires_hpc: hpc, requires_gpu: keys.includes('fast_renderer'),
     outcome: publishes ? (conditional ? 'May publish on Zenodo; review publication conditions' : 'Publishes on Zenodo') : uploads ? 'Uploads files to a Zenodo draft; publication is a separate action' : createsDraft ? 'Creates or reuses a Zenodo draft' : 'Produces local results',
     requirements: [hpc ? 'Active HPC allocation' : '', createsDraft || uploads || publishes ? 'Zenodo credential for the selected environment' : ''].filter(Boolean),
     source_extensions: pipeline.identifier === 'mesh_optimization' ? ['.glb'] : null, outputs: steps.map(step => step.name) }
+}
+
+export function pipelineGpuCount(pipeline) {
+  const guide = pipelineGuidance(pipeline)
+  return guide.largest_step_resources?.gpu_count || Number(Boolean(guide.requires_gpu))
 }
 
 export function pipelineInputError(pipeline, files) {

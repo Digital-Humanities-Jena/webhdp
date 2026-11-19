@@ -34,7 +34,7 @@ from services.hdpc_local_service import (
     get_hdpc_file_id_map,
     inspect_hdpc_project,
 )
-from services.publishing_context_service import PublishingContextService
+from services.publishing_context_service import PublishingContextService, pipeline_needs_zenodo
 from services.zenodo_metadata_normalizer import normalize_zenodo_metadata
 from services.zenodo_config_service import ZenodoConfigService
 from services.historic_reconstruction_templates import HISTORIC_COMPONENT_KEYS
@@ -1095,9 +1095,22 @@ def execute_submission_pipeline(
             },
         )
     zenodo_environment = "sandbox" if effective_is_sandbox else "production"
-    token_context = publishing_context_service.resolve_token_for_session(db_session, zenodo_environment)
+    if queued_run:
+        pipeline_config = json.loads(db.session.get(PipelineVersion, queued_run.pipeline_version_id).config_json)
+    else:
+        pipeline_config = current_app.native_pipeline_service.get_pipeline(identifier).get("config", {})
+    requires_remote_credential = pipeline_needs_zenodo(pipeline_config.get("steps", [])) or any(
+        item.get("action") == "create_version" for item in execution_items
+    )
+    actor_id = queued_run.initiated_by_user_id if queued_run else readiness_user_id
+    token_context = publishing_context_service.resolve_token_for_session(
+        db_session,
+        zenodo_environment,
+        actor_user_id=actor_id,
+        require_credential=True,
+    ) if requires_remote_credential else {}
     access_token = token_context.get("token")
-    session_description = publishing_context_service.describe_session(db_session)
+    session_description = publishing_context_service.describe_session(db_session, actor_user_id=actor_id)
     publishing_context = {
         "environment": token_context.get("environment") or zenodo_environment,
         "credential_source": token_context.get("source") or session_description.get("effective_credential_source"),
@@ -1138,10 +1151,6 @@ def execute_submission_pipeline(
         },
     )
 
-    if queued_run:
-        pipeline_config = json.loads(db.session.get(PipelineVersion, queued_run.pipeline_version_id).config_json)
-    else:
-        pipeline_config = current_app.native_pipeline_service.get_pipeline(identifier).get("config", {})
     require_metadata = pipeline_requires_record_metadata(pipeline_config.get('steps', []))
     load_start = time.time()
     sources = prepare_submission_sources(db_session, local_file_paths, execution_items, record_ids,

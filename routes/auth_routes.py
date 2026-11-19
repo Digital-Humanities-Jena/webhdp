@@ -4,18 +4,20 @@ import hmac
 import logging
 import os
 import secrets
-import threading
 import time
 from datetime import datetime, timedelta
 
-from flask import Blueprint, request, current_app
+from flask import Blueprint, request, current_app, json
 from flask_jwt_extended import create_access_token, get_jwt_identity, jwt_required, get_jwt, verify_jwt_in_request
 from flask_jwt_extended.exceptions import JWTExtendedException
+from sqlalchemy.exc import IntegrityError
 
 from api_utils import APIResponse
 from database.models import User, UserMfaChallenge, UserZenodoActiveCredential
-from exceptions import ValidationError
+from exceptions import AppException, ValidationError
 from services.audit_service import record_audit_event
+from services.auth_throttle import check_auth_limit, clear_account_auth_limit, record_auth_attempt
+from services.email_identity import normalize_email
 from services.institution_service import InstitutionService
 from services.model_publication_accounts import (
     DEMO_CLAIM, DEMO_USERNAME, demo_expiry, demo_sign_in_allowed, demo_username_email, is_demo,
@@ -28,6 +30,8 @@ from services.recovery_code_service import (
     regenerate_user_recovery_codes,
 )
 from services.hpc_resource_request_service import HpcResourceRequestService
+from services.registration_service import confirm_signup, send_signup_link
+from services.registry_lock import OperationConflict
 from services.user_service import UserService
 from services.zenodo_credential_service import ZenodoCredentialService
 from database.database import db
@@ -39,11 +43,6 @@ user_service = UserService()
 institution_service = InstitutionService()
 credential_service = ZenodoCredentialService()
 hpc_request_service = HpcResourceRequestService()
-_rate_limit_lock = threading.Lock()
-_rate_limit_events: dict[str, list[float]] = {}
-_rate_limit_lockouts: dict[str, float] = {}
-_recovery_rate_limit_events: dict[str, list[float]] = {}
-_recovery_rate_limit_lockouts: dict[str, float] = {}
 
 PASSWORD_CHANGE_ALLOWED_PATHS = {
     "/api/v1/auth/me",
@@ -79,161 +78,45 @@ def enforce_auth_password_change_required():
     return None
 
 
-def _remote_ip() -> str:
-    forwarded_for = request.headers.get("X-Forwarded-For", "")
-    if forwarded_for:
-        return forwarded_for.split(",", 1)[0].strip() or "unknown"
-    return request.remote_addr or "unknown"
+def _auth_limit_response(retry_after, *, recovery=False):
+    if not retry_after:
+        return None
+    code, message = (
+        ("MFA_RECOVERY_RATE_LIMITED", "Too many recovery code attempts. Try again later.")
+        if recovery else ("RATE_LIMITED", "Too many authentication attempts. Try again later.")
+    )
+    response, status = APIResponse.error(code, message, 429, details={"retry_after_seconds": retry_after})
+    response.headers["Retry-After"] = str(retry_after)
+    return response, status
 
 
-def _rate_limit_value(name: str, default: int) -> int:
-    try:
-        return max(1, int(os.environ.get(name, default)))
-    except (TypeError, ValueError):
-        return default
+def _check_rate_limit(action, identifier=None):
+    return _auth_limit_response(check_auth_limit(action, identifier))
 
 
-def _prune_rate_limit_state(now: float, window_seconds: int) -> None:
-    for key, events in list(_rate_limit_events.items()):
-        kept = [event for event in events if now - event <= window_seconds]
-        if kept:
-            _rate_limit_events[key] = kept
-        else:
-            _rate_limit_events.pop(key, None)
-    for key, locked_until in list(_rate_limit_lockouts.items()):
-        if locked_until <= now:
-            _rate_limit_lockouts.pop(key, None)
+def _consume_rate_limit(action, identifier=None):
+    return _auth_limit_response(record_auth_attempt(action, identifier, consume=True))
 
 
-def _rate_limit_keys(action: str, identifier: str | None = None) -> list[str]:
-    keys = [f"{action}:ip:{_remote_ip()}"]
-    normalized_identifier = str(identifier or "").strip().lower()
-    if normalized_identifier and action != "demo_login":
-        keys.append(f"{action}:id:{normalized_identifier}")
-    return keys
+def _record_rate_limit_event(action, identifier=None, *, failed=True):
+    if failed:
+        record_auth_attempt(action, identifier)
 
 
-def _check_rate_limit(action: str, identifier: str | None = None) -> None:
-    window = _rate_limit_value("AUTH_RATE_LIMIT_WINDOW_SECONDS", 300)
-    now = time.monotonic()
-    keys = _rate_limit_keys(action, identifier)
-    with _rate_limit_lock:
-        _prune_rate_limit_state(now, window)
-        active_lockouts = [
-            _rate_limit_lockouts[key]
-            for key in keys
-            if key in _rate_limit_lockouts and _rate_limit_lockouts[key] > now
-        ]
-    if active_lockouts:
-        retry_after = int(max(active_lockouts) - now) + 1
-        return APIResponse.error(
-            "RATE_LIMITED",
-            "Too many authentication attempts. Try again later.",
-            429,
-            details={"retry_after_seconds": max(1, retry_after)},
-        )
-    return None
+def _clear_rate_limit(action, identifier=None):
+    clear_account_auth_limit(action, identifier)
 
 
-def _record_rate_limit_event(action: str, identifier: str | None = None, *, failed: bool = True) -> None:
-    if not failed:
-        return
-    window = _rate_limit_value("AUTH_RATE_LIMIT_WINDOW_SECONDS", 300)
-    if action == "demo_login":
-        # A single high-entropy system account is shared by the cohort. Failed
-        # attempts pause their source briefly without blocking everyone else.
-        max_attempts, lockout = 20, 30
-    else:
-        lockout = _rate_limit_value("AUTH_RATE_LIMIT_LOCKOUT_SECONDS", 900)
-        max_attempts = _rate_limit_value(
-            "REGISTER_RATE_LIMIT_ATTEMPTS" if action == "register" else "LOGIN_RATE_LIMIT_ATTEMPTS",
-            10 if action == "register" else 5,
-        )
-    now = time.monotonic()
-    keys = _rate_limit_keys(action, identifier)
-    with _rate_limit_lock:
-        _prune_rate_limit_state(now, window)
-        for key in keys:
-            events = _rate_limit_events.get(key, [])
-            events.append(now)
-            _rate_limit_events[key] = events
-            if len(events) >= max_attempts:
-                _rate_limit_lockouts[key] = now + lockout
-                _rate_limit_events.pop(key, None)
+def _check_recovery_rate_limit(identifier=None):
+    return _auth_limit_response(check_auth_limit("mfa_recovery", identifier), recovery=True)
 
 
-def _clear_rate_limit(action: str, identifier: str | None = None) -> None:
-    keys = _rate_limit_keys(action, identifier)
-    with _rate_limit_lock:
-        for key in keys:
-            _rate_limit_events.pop(key, None)
-            _rate_limit_lockouts.pop(key, None)
+def _record_recovery_rate_limit_failure(identifier=None):
+    record_auth_attempt("mfa_recovery", identifier)
 
 
-def _recovery_rate_limit_value(name: str, default: int) -> int:
-    try:
-        return max(1, int(current_app.config.get(name, os.environ.get(name, default)) or default))
-    except (TypeError, ValueError):
-        return default
-
-
-def _prune_recovery_rate_limit_state(now: float, window_seconds: int) -> None:
-    for key, events in list(_recovery_rate_limit_events.items()):
-        kept = [event for event in events if now - event <= window_seconds]
-        if kept:
-            _recovery_rate_limit_events[key] = kept
-        else:
-            _recovery_rate_limit_events.pop(key, None)
-    for key, locked_until in list(_recovery_rate_limit_lockouts.items()):
-        if locked_until <= now:
-            _recovery_rate_limit_lockouts.pop(key, None)
-
-
-def _check_recovery_rate_limit(identifier: str | None = None):
-    window = _recovery_rate_limit_value("MFA_RECOVERY_RATE_LIMIT_WINDOW_SECONDS", 300)
-    now = time.monotonic()
-    keys = _rate_limit_keys("mfa_recovery", identifier)
-    with _rate_limit_lock:
-        _prune_recovery_rate_limit_state(now, window)
-        active_lockouts = [
-            _recovery_rate_limit_lockouts[key]
-            for key in keys
-            if key in _recovery_rate_limit_lockouts and _recovery_rate_limit_lockouts[key] > now
-        ]
-    if active_lockouts:
-        retry_after = int(max(active_lockouts) - now) + 1
-        return APIResponse.error(
-            "MFA_RECOVERY_RATE_LIMITED",
-            "Too many recovery code attempts. Try again later.",
-            429,
-            details={"retry_after_seconds": max(1, retry_after)},
-        )
-    return None
-
-
-def _record_recovery_rate_limit_failure(identifier: str | None = None) -> None:
-    window = _recovery_rate_limit_value("MFA_RECOVERY_RATE_LIMIT_WINDOW_SECONDS", 300)
-    lockout = _recovery_rate_limit_value("MFA_RECOVERY_RATE_LIMIT_LOCKOUT_SECONDS", 900)
-    max_attempts = _recovery_rate_limit_value("MFA_RECOVERY_RATE_LIMIT_ATTEMPTS", 5)
-    now = time.monotonic()
-    keys = _rate_limit_keys("mfa_recovery", identifier)
-    with _rate_limit_lock:
-        _prune_recovery_rate_limit_state(now, window)
-        for key in keys:
-            events = _recovery_rate_limit_events.get(key, [])
-            events.append(now)
-            _recovery_rate_limit_events[key] = events
-            if len(events) >= max_attempts:
-                _recovery_rate_limit_lockouts[key] = now + lockout
-                _recovery_rate_limit_events.pop(key, None)
-
-
-def _clear_recovery_rate_limit(identifier: str | None = None) -> None:
-    keys = _rate_limit_keys("mfa_recovery", identifier)
-    with _rate_limit_lock:
-        for key in keys:
-            _recovery_rate_limit_events.pop(key, None)
-            _recovery_rate_limit_lockouts.pop(key, None)
+def _clear_recovery_rate_limit(identifier=None):
+    clear_account_auth_limit("mfa_recovery", identifier)
 
 
 def _serialize_membership(membership):
@@ -422,77 +305,143 @@ def _validate_mfa_challenge(challenge: UserMfaChallenge | None) -> tuple[UserMfa
     return challenge, None
 
 
-@auth_bp.route("/register", methods=["POST"])
-def register():
-    """Register a new user"""
-    data = request.get_json() or {}
+class IdentityPayloadTooLarge(AppException):
+    status_code = 413
+    error_code = "AUTH_PAYLOAD_TOO_LARGE"
+    user_message = "Authentication requests must be 16 KiB or smaller."
 
-    email = (data.get("email") or "").strip()
-    password = data.get("password")
-    limited_response = _check_rate_limit("register", email)
-    if limited_response:
-        return limited_response
-    _record_rate_limit_event("register", email, failed=True)
 
-    if not email or not password:
-        raise ValidationError("Email and password are required")
+def _identity_payload():
+    if not request.is_json:
+        raise ValidationError("Provide a JSON object.")
+    maximum_bytes = 16 * 1024
+    body = request.stream.read(maximum_bytes + 1)
+    if len(body) > maximum_bytes:
+        raise IdentityPayloadTooLarge()
+    try:
+        data = json.loads(body)
+    except (ValueError, RecursionError) as exc:
+        raise ValidationError("Provide a valid JSON object.") from exc
+    if not isinstance(data, dict):
+        raise ValidationError("Provide a JSON object.")
+    return data
 
-    if len(password) < 8:
-        raise ValidationError("Password must be at least 8 characters")
 
-    user = user_service.create_user(email=email, password=password)
-
-    # Send verification email
-    if hasattr(current_app, "email_service"):
-        current_app.email_service.send_verification_email(user.email, user.verification_token)
-
-    return APIResponse.success(
-        data={"user": _serialize_user_context(user)},
-        message="User registered successfully. Please check your email for a verification link."
+def _registration_busy():
+    return APIResponse.error(
+        "REGISTRATION_BUSY", "This request is already being processed. Try again in a moment.",
+        429, details={"retry_after_seconds": 3},
     )
 
 
-@auth_bp.route("/verify-email/<token>", methods=["GET"])
-def verify_email(token):
-    """Verify user's email address"""
-    user = user_service.verify_user(token)
+def _request_signup_link():
+    email = _identity_payload().get("email")
+    key = normalize_email(email)
+    limited_response = _consume_rate_limit("register", key)
+    if limited_response:
+        return limited_response
+    try:
+        delivered = send_signup_link(email)
+    except OperationConflict:
+        return _registration_busy()
+    if not delivered:
+        return APIResponse.error(
+            "VERIFICATION_EMAIL_UNAVAILABLE",
+            "WebHDP could not send the verification email. Try requesting a new link later.",
+            503,
+        )
+    return APIResponse.accepted(
+        data={"accepted": True},
+        message="If you can register with this address, you’ll receive an email with a link to continue.",
+    )
+
+
+@auth_bp.post("/register")
+def register():
+    """Start registration for a WebHDP account."""
+    return _request_signup_link()
+
+
+@auth_bp.post("/resend-verification")
+def resend_verification():
+    """Request another registration verification link."""
+    return _request_signup_link()
+
+
+@auth_bp.post("/verify-email")
+def verify_email():
+    """Confirm email ownership and set the new account's password."""
+    limited_response = _consume_rate_limit("verify_email")
+    if limited_response:
+        return limited_response
+    data = _identity_payload()
+    try:
+        user = confirm_signup(data.get("token"), data.get("password"))
+    except (OperationConflict, IntegrityError):
+        return _registration_busy()
     if not user:
-        return APIResponse.error("Invalid or expired verification token", 400)
+        return APIResponse.error(
+            "INVALID_EMAIL_VERIFICATION_LINK",
+            "This verification link is invalid, expired or already used. Request a new link to continue.",
+            400,
+        )
 
     return APIResponse.success(message="Email verified successfully. You can now log in.")
+
+
+@auth_bp.get("/verify-email/<token>")
+def legacy_email_verification(token):
+    """Retire historical verification links without activating an account."""
+    return APIResponse.error(
+        "INVALID_EMAIL_VERIFICATION_LINK",
+        "This verification link has been retired. Request a new link to continue.",
+        410,
+    )
 
 
 @auth_bp.route("/login", methods=["POST"])
 def login():
     """Authenticate with a password, followed by email verification when enabled by the user."""
-    data = request.get_json() or {}
+    data = _identity_payload()
 
-    identifier = (data.get("email") or "").strip()
+    raw_identifier = data.get("email")
     password = data.get("password")
+    if not isinstance(raw_identifier, str) or not isinstance(password, str):
+        raise ValidationError("Email and password are required")
+    identifier = raw_identifier.strip()
     uses_demo_username = identifier.casefold() == DEMO_USERNAME
     action = "demo_login" if uses_demo_username or is_generated_demo_email(identifier) else "login"
-    limited_response = _check_rate_limit(action, identifier)
+    try:
+        account_limit_key = normalize_email(identifier) if action == "login" else None
+    except ValidationError:
+        # Keep sign-in available to legacy accounts with a nonstandard stored address.
+        account_limit_key = identifier
+    limited_response = _check_rate_limit(action, account_limit_key)
     if limited_response:
         return limited_response
 
     if not identifier or not password:
         raise ValidationError("Email and password are required")
+    try:
+        password.encode("utf-8")
+    except UnicodeError as exc:
+        raise ValidationError("Invalid email or password") from exc
 
     email = demo_username_email() if uses_demo_username else identifier
     user = user_service.authenticate(email=email, password=password) if email else None
     if not user:
-        _record_rate_limit_event(action, identifier, failed=True)
+        _record_rate_limit_event(action, account_limit_key, failed=True)
         raise ValidationError("Invalid email or password")
 
     if is_demo(user) and not demo_sign_in_allowed(user):
         return APIResponse.error("DEMO_CLOSED", "The live demonstration is currently closed.", 403)
 
     if not user.is_verified:
-        _record_rate_limit_event(action, identifier, failed=True)
+        _record_rate_limit_event(action, account_limit_key, failed=True)
         return APIResponse.error("EMAIL_NOT_VERIFIED", "Please verify your email address before logging in", 403)
 
     if not user.mfa_enabled:
-        _clear_rate_limit(action, identifier)
+        _clear_rate_limit(action, account_limit_key)
         return APIResponse.success(
             data={"user": _serialize_user_context(user), "access_token": _create_access_token_for_user(user)},
             message="Login successful",
@@ -504,7 +453,7 @@ def login():
         db.session.rollback()
         return APIResponse.error("MFA_EMAIL_FAILED", "Unable to send the verification code email. Please try again later.", 500)
     db.session.commit()
-    _clear_rate_limit(action, identifier)
+    _clear_rate_limit(action, account_limit_key)
     payload = _attach_development_mfa_code(_mfa_response_payload(challenge, token, user), code, delivery_mode)
 
     return APIResponse.success(

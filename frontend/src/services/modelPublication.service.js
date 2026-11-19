@@ -45,8 +45,8 @@ export default {
     const response = await api.get(`${prefix}/queue`, { ...quiet, signal, timeout: 10000 })
     return response.data
   },
-  async jobs(signal) {
-    const response = await api.get(`${prefix}/jobs`, { ...quiet, signal, timeout: 10000 })
+  async jobs(signal, runMode) {
+    const response = await api.get(`${prefix}/jobs`, { ...quiet, signal, timeout: 10000, params: { run_mode: runMode } })
     return response.data
   },
   async start(form, requestId, onUploadProgress) {

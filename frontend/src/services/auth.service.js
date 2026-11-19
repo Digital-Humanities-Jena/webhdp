@@ -17,8 +17,16 @@ export default {
     return api.post('/auth/login/resend-code', { mfa_token: mfaToken })
   },
 
-  register(email, password) {
-    return api.post('/auth/register', { email, password })
+  register(email) {
+    return api.post('/auth/register', { email }, { suppressGlobalError: true })
+  },
+
+  resendVerification(email) {
+    return api.post('/auth/resend-verification', { email }, { suppressGlobalError: true })
+  },
+
+  verifyEmail(token, password) {
+    return api.post('/auth/verify-email', { token, password }, { suppressGlobalError: true })
   },
 
   logout() {
@@ -77,8 +85,8 @@ export default {
     return api.post(`/auth/me/zenodo-credentials/${environment}/validate`, {})
   },
 
-  listZenodoCredentials() {
-    return api.get('/auth/me/zenodo-credentials')
+  listZenodoCredentials(options = {}) {
+    return api.get('/auth/me/zenodo-credentials', options)
   },
 
   createZenodoCredential(payload) {

@@ -47,14 +47,17 @@ def _stream_receipts():
                                   signer_kwargs={'digest_method': hashlib.sha256})
 
 
-def issue_stream_receipt(user_id: int, filename: str, result: dict) -> str:
+def issue_stream_receipt(user_id: int, filename: str, result: dict, *, size_bytes: int | None = None) -> str:
     provider = result.get('storage_type')
     path = result.get('remote_path') if provider == STORAGE_DROPBOX else result.get('file_id')
     if (provider not in {STORAGE_DROPBOX, STORAGE_GDRIVE} or not isinstance(path, str) or not path
             or (provider == STORAGE_DROPBOX and not path.startswith('/hdp_uploads/'))
             or (provider == STORAGE_GDRIVE and not re.fullmatch(r'[A-Za-z0-9_-]+', path))):
         raise ValueError('Streaming provider did not return a managed cloud object reference')
-    return _stream_receipts().dumps({'user': user_id, 'path': path, 'provider': provider, 'name': filename})
+    payload = {'user': user_id, 'path': path, 'provider': provider, 'name': filename}
+    if size_bytes is not None:
+        payload['size_bytes'] = size_bytes
+    return _stream_receipts().dumps(payload)
 
 
 def read_stream_receipt(value: str, user_id: int) -> dict:

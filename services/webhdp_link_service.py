@@ -27,6 +27,7 @@ from werkzeug.utils import secure_filename
 from database.database import db
 from database.models import ComponentVersion, PipelineDefinition, PipelineVersion, PipelineVersionStatus, User
 from database.webhdp_link_models import LinkArtifact, LinkClient, LinkCode, LinkPublication, LinkRun, LinkToken, LinkUpload
+from services.model_publication_accounts import is_demo
 from services.registry_lock import registry_lock
 
 SCOPES = ('pipelines:read', 'uploads:write', 'runs:write', 'runs:read', 'artifacts:read')
@@ -135,20 +136,37 @@ def scopes(value=None):
     return ' '.join(scope for scope in SCOPES if scope in selected)
 
 
+def user_can_link(user):
+    return user is not None and user.is_verified and not user.force_password_change and not is_demo(user)
+
+
 def require_user(user):
-    fail(user is None or not user.is_verified or user.force_password_change, 'access_denied', 'This WebHDP account is not eligible to authorize an application.', 403)
+    fail(not user_can_link(user), 'access_denied', 'This WebHDP account is not eligible to authorize an application.', 403)
 
 
 def client_config(client):
     return loads(client.config_json)
 
 
+def client_account_limits(config):
+    queued_limit = config.get('max_queued_runs', 20)
+    storage_limit = config.get('max_storage_bytes', 1024**3)
+    default_storage = storage_limit if queued_limit == 1 else max(config.get('max_upload_bytes', 0), storage_limit // 2)
+    return {
+        'max_queued_runs': min(queued_limit, config.get('max_queued_runs_per_user', 5)),
+        'max_storage_bytes': min(storage_limit, config.get('max_storage_bytes_per_user', default_storage)),
+    }
+
+
 def serialize_client(client):
-    return {'id': client.id, 'name': client.name, 'enabled': client.enabled, **client_config(client), 'created_at': iso(client.created_at)}
+    config = client_config(client)
+    return {'id': client.id, 'name': client.name, 'enabled': client.enabled, **config,
+            'account_limits': client_account_limits(config), 'created_at': iso(client.created_at)}
 
 
 def save_client(data, existing=None):
-    allowed = {'id', 'name', 'enabled', 'origins', 'redirect_uris', 'pipeline_ids', 'max_queued_runs', 'max_concurrent_runs', 'max_upload_bytes', 'max_storage_bytes'}
+    allowed = {'id', 'name', 'enabled', 'origins', 'redirect_uris', 'pipeline_ids', 'max_queued_runs', 'max_concurrent_runs', 'max_upload_bytes', 'max_storage_bytes',
+               'max_queued_runs_per_user', 'max_storage_bytes_per_user'}
     object_payload(data, allowed)
     old = serialize_client(existing) if existing else {}
     merged = {**old, **data}
@@ -171,6 +189,10 @@ def save_client(data, existing=None):
         ('max_upload_bytes', 100 * 1024**2, 1, 20 * 1024**3), ('max_storage_bytes', 1024**3, 1, 1024**4),
     ):
         config[key] = bounded_int(merged.get(key, default), key, lo, hi)
+    for key, parent in (('max_queued_runs_per_user', 'max_queued_runs'), ('max_storage_bytes_per_user', 'max_storage_bytes')):
+        value = merged.get(key)
+        if value is not None:
+            config[key] = bounded_int(value, key, 1, config[parent])
     fail(type(merged.get('enabled', True)) is not bool, 'invalid_request', 'enabled must be a boolean.')
     row = existing or LinkClient(id=cid)
     row.name = text_field(merged.get('name'), 'name')
@@ -479,6 +501,7 @@ def authenticate(required=None):
     client = db.session.get(LinkClient, token.client_id)
     user = db.session.get(User, token.user_id)
     fail(client is None or not client.enabled or user is None or not user.is_verified or user.force_password_change or (user.token_version or 0) != token.user_token_version, 'invalid_token', 'This application authorization is no longer valid.', 401)
+    fail(is_demo(user), 'access_denied', 'This account is limited to the model publication demonstration.', 403)
     origin = request.headers.get('Origin')
     if origin is not None:
         fail(token.service or origin not in client_config(client)['origins'] or (token.origin is not None and token.origin != origin), 'origin_denied', 'This bearer token cannot be used by this origin.', 403)
@@ -507,10 +530,15 @@ def tree_bytes(root):
     return total
 
 
-def storage_used(client_id):
-    uploaded = db.session.query(func.coalesce(func.sum(LinkUpload.size), 0)).filter(LinkUpload.client_id == client_id).scalar()
+def storage_used(client_id, user_id=None):
+    uploads = db.session.query(func.coalesce(func.sum(LinkUpload.size), 0)).filter(LinkUpload.client_id == client_id)
+    runs = LinkRun.query.filter_by(client_id=client_id)
+    if user_id is not None:
+        uploads = uploads.filter(LinkUpload.user_id == user_id)
+        runs = runs.filter(LinkRun.user_id == user_id)
+    uploaded = uploads.scalar()
     retained = 0
-    for row in LinkRun.query.filter_by(client_id=client_id).all():
+    for row in runs:
         payload = loads(row.request_json)
         reserved = payload.get('input_bytes', 0) if row.status in {'queued', 'running'} and not payload.get('data_purged') else 0
         retained += max(reserved, tree_bytes(storage_root() / 'runs' / row.id))
@@ -531,6 +559,8 @@ def accept_upload(file, token, client):
     with registry_lock('link-storage:' + client.id):
         available = config['max_storage_bytes'] - storage_used(client.id)
         fail(available <= 0, 'storage_quota_exceeded', 'The application storage quota is exhausted.', 413)
+        allowance = client_account_limits(config)['max_storage_bytes'] - storage_used(client.id, token.user_id)
+        fail(allowance <= 0, 'account_storage_quota_exceeded', 'Your storage limit for this application is full.', 413)
         row = LinkUpload(id=str(uuid4()), client_id=client.id, user_id=token.user_id, name=name,
                          media_type=mimetypes.guess_type(name)[0] or 'application/octet-stream')
         path = upload_path(row)
@@ -542,6 +572,7 @@ def accept_upload(file, token, client):
                 while chunk := file.stream.read(1024**2):
                     size += len(chunk)
                     fail(size > min(config['max_upload_bytes'], available), 'upload_too_large', 'The upload exceeds the file or storage quota.', 413)
+                    fail(size > allowance, 'account_storage_quota_exceeded', 'This upload exceeds your storage limit for this application.', 413)
                     checksum.update(chunk)
                     handle.write(chunk)
             fail(size == 0, 'invalid_upload', 'Empty uploads cannot be processed.')
@@ -586,10 +617,13 @@ def submit_run(data, token, client, key):
             validate_schema({k: v for k, v in field.items() if k in SCHEMA_KEYS}, value_marker=True, value=value)
             normalized[name] = value
         quota = client_config(client)
-        queued = LinkRun.query.filter_by(client_id=client.id, status='queued').count()
-        fail(queued >= quota['max_queued_runs'], 'queue_quota_exceeded', 'The application queue is full. Retry after jobs finish.', 429)
+        account_quota = client_account_limits(quota)
+        queued = LinkRun.query.filter_by(client_id=client.id, status='queued')
+        fail(queued.count() >= quota['max_queued_runs'], 'queue_quota_exceeded', 'The application queue is full. Retry after jobs finish.', 429)
+        fail(queued.filter_by(user_id=token.user_id).count() >= account_quota['max_queued_runs'], 'account_queue_quota_exceeded', 'Your queue for this application is full. Wait for a run to start or cancel a queued run.', 429)
         input_bytes = sum(x.size for x in uploads)
         fail(storage_used(client.id) + input_bytes > quota['max_storage_bytes'], 'storage_quota_exceeded', 'There is insufficient application storage for this run.', 413)
+        fail(storage_used(client.id, token.user_id) + input_bytes > account_quota['max_storage_bytes'], 'account_storage_quota_exceeded', 'This run exceeds your storage limit for this application.', 413)
         row = LinkRun(id=str(uuid4()), client_id=client.id, user_id=token.user_id, token_id=token.id,
                       publication_id=publication.id, pipeline_version_id=publication.pipeline_version_id,
                       idempotency_key=key, fingerprint=fingerprint,
@@ -671,7 +705,8 @@ def serialize_run(row, *, admin=False):
     errors = {'execution_failed': 'A pipeline component failed. The WebHDP maintainer can inspect the private execution details.',
               'interrupted': 'The worker stopped before confirming completion. The job was not automatically replayed.',
               'authorization_revoked': 'The application authorization or publication was withdrawn before execution.',
-              'storage_quota_exceeded': 'The output exceeded the application storage quota.'}
+              'storage_quota_exceeded': 'The output exceeded the application storage quota.',
+              'account_storage_quota_exceeded': 'The output exceeded your storage quota for this application.'}
     data = {'id': row.id, 'pipeline_id': row.publication_id, 'pipeline_name': db.session.get(LinkPublication, row.publication_id).name, 'pipeline_version': version.version, 'status': row.status,
             'progress_url': str(current_app.config.get('FRONTEND_URL') or '').rstrip('/') + '/link/jobs/' + row.id,
             'cancel_requested': row.cancel_requested, 'progress': {'completed': complete, 'total': expected,

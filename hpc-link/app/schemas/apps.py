@@ -316,6 +316,7 @@ class MarkerArtifactDownloadResponse(BaseModel):
 
 class WebHdpSessionCreateRequest(BaseModel):
     """Create a reusable WebHDP component execution allocation."""
+    request_id: UUID | None = None
     partition: Optional[str] = None
     gpu_type: Optional[str] = None
     gpu_count: int = Field(default=1, ge=0, le=4)

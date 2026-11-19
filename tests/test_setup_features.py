@@ -54,10 +54,16 @@ class TestSetupFeatures(unittest.TestCase):
 
             # 2. Try creating again (should succeed/update)
             resp = client.post('/setup/create-admin', json={
-                "email": "admin@example.com",
+                "email": "Admin@EXAMPLE.com",
                 "password": "newpassword"
             }, headers=headers)
             self.assertEqual(resp.status_code, 200)
+            with self.app.app_context():
+                user = User.query.one()
+                self.assertEqual(user.email, "admin@example.com")
+                self.assertEqual(user.token_version, 1)
+                self.assertTrue(user.check_password("newpassword"))
+                self.assertFalse(user.check_password("securepassword"))
 
             # 3. Bootstrap token must not authorize setup routes after setup is complete
             with self.app.app_context():

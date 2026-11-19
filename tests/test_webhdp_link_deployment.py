@@ -81,6 +81,23 @@ def test_valid_plan_is_only_static_proof(deployment):
     assert result['live_checks_performed'] == result['mutations_performed'] == []
 
 
+def test_proxy_log_validation_rejects_a_raw_request_uri_or_unredacted_verification_path(deployment):
+    plan, compose, directory = deployment
+    frontend = directory / 'frontend'
+    frontend.mkdir()
+    for template in ('nginx.conf', 'nginx.hpc.singularity.conf.template'):
+        shutil.copyfile(preflight.ROOT / 'frontend' / template, frontend / template)
+    target = frontend / 'nginx.conf'
+    original = target.read_text()
+    for unsafe in (
+        original.replace('map $uri $webhdp_logged_uri', 'map $request_uri $webhdp_logged_uri'),
+        original.replace('/api/v1/auth/verify-email/[redacted];', '$uri;'),
+    ):
+        target.write_text(unsafe)
+        result = preflight.validate(plan, compose, directory, repository=directory)
+        assert 'query_free_access_logs_required' in codes(result)
+
+
 @pytest.mark.parametrize('origin,callback', [
     ('https://*.test', 'https://app.test/callback'),
     ('https://app.test/', 'https://app.test/callback'),
@@ -234,15 +251,17 @@ def test_singularity_wrapper_preserves_boundaries_and_never_sources_secrets(tmp_
     marker = tmp_path / 'must-not-exist'
     env_file = root / 'private.env'
     env_file.write_text(f'SECRET_KEY=private-secret\nEXECUTED=$(touch "{marker}")\n')
-    binary = tmp_path / 'singularity'
-    binary.write_text('#!/bin/bash\nprintf "%s\\n" "$@"\n')
-    binary.chmod(0o700)
-    environment = {'PATH': str(tmp_path) + ':/usr/bin:/bin', 'ROOT': str(root), 'ENV_FILE': str(env_file)}
-    result = subprocess.run(['bash', str(preflight.ROOT / 'scripts/hpc_singularity/remote/run_link_worker.sh')],
-                            env=environment, capture_output=True, text=True)
+    # Record the wrapper's final command inside an isolated Bash process.
+    # This exercises shell expansion without executing a runtime or a PATH stub.
+    wrapper = preflight.ROOT / 'scripts/hpc_singularity/remote/run_link_worker.sh'
+    environment = {'PATH': '/usr/bin:/bin', 'ROOT': str(root), 'ENV_FILE': str(env_file)}
+    result = subprocess.run(
+        ['bash', '-c', 'exec() { printf "%s\\n" "$@"; }; source "$1"', 'bash', str(wrapper)],
+        env=environment, capture_output=True, text=True, timeout=10,
+    )
     assert result.returncode == 0
     arguments = result.stdout.splitlines()
-    assert arguments[:6] == ['exec', '--cleanenv', '--env-file', str(env_file), '--pwd', '/app']
+    assert arguments[:7] == ['singularity', 'exec', '--cleanenv', '--env-file', str(env_file), '--pwd', '/app']
     assert f'{root}/instance:/app/instance' in arguments
     assert f'{root}/hdp-shared/sessions:/shared/sessions' in arguments
     assert arguments[-4:] == ['python', '/app/scripts/webhdp_link_worker.py', '--poll-seconds', '2']

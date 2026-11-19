@@ -7,9 +7,10 @@ from flask import Flask
 from flask_jwt_extended import JWTManager, create_access_token
 
 from database.database import db
-from database.models import File, Institution, InstitutionMembership, InstitutionRole, Session as DBSession, User, UserRole
+from database.models import File, Institution, InstitutionMembership, InstitutionRole, Session as DBSession, Submission, User, UserRole
 from middleware import setup_error_handlers
 from routes.session_routes import session_bp
+from routes.submission_routes import submission_bp
 
 
 @pytest.fixture()
@@ -29,6 +30,7 @@ def session_governance_app():
     db.init_app(app)
     JWTManager(app)
     app.register_blueprint(session_bp, url_prefix="/api/v1/sessions")
+    app.register_blueprint(submission_bp, url_prefix="/api/v1/submissions")
 
     with app.app_context():
         db.create_all()
@@ -126,6 +128,8 @@ def session_governance_app():
 
         owner_token = create_access_token(identity=str(owner.id))
         manager_token = create_access_token(identity=str(manager.id))
+        colleague_token = create_access_token(identity=str(colleague.id))
+        alternate_token = create_access_token(identity=str(alternate.id))
         moderator_token = create_access_token(identity=str(moderator.id))
 
     return {
@@ -141,6 +145,8 @@ def session_governance_app():
         "alternate_id": alternate_id,
         "owner_headers": {"Authorization": f"Bearer {owner_token}"},
         "manager_headers": {"Authorization": f"Bearer {manager_token}"},
+        "colleague_headers": {"Authorization": f"Bearer {colleague_token}"},
+        "alternate_headers": {"Authorization": f"Bearer {alternate_token}"},
         "moderator_headers": {"Authorization": f"Bearer {moderator_token}"},
     }
 
@@ -158,7 +164,7 @@ def test_session_list_and_detail_include_permissions(session_governance_app):
     assert owner_session["permissions"]["can_download_shared_hdpc"] is True
     assert owner_session["file_count"] == 2
     assert owner_session["name"] == "shared-one.obj"
-    assert owner_session["publishing_context"]["effective_credential_source"] == "system"
+    assert owner_session["publishing_context"]["effective_credential_source"] == "none"
 
     manager_detail = client.get(
         f"/api/v1/sessions/{session_id}",
@@ -187,11 +193,12 @@ def test_session_workspace_route_returns_preview_candidates(session_governance_a
     assert owner_payload["hdpc_download_policy"]["scope"] == "owner_only"
     assert owner_payload["shared_hdpc_download_policy"]["scope"] == "institution_reader_plus"
     assert owner_payload["shared_hdpc_download_policy"]["can_download"] is True
-    assert {item["email"] for item in owner_payload["publishing_user_candidates"]} == {
-        "owner@example.com",
-        "manager@example.com",
-        "colleague@example.com",
+    assert {item["id"] for item in owner_payload["publishing_user_candidates"]} == {
+        session_governance_app["owner_id"],
+        session_governance_app["manager_id"],
+        session_governance_app["colleague_id"],
     }
+    assert [item["email"] for item in owner_payload["publishing_user_candidates"] if "email" in item] == ["owner@example.com"]
 
     manager_response = client.get(
         f"/api/v1/sessions/{session_id}/workspace",
@@ -212,10 +219,11 @@ def test_session_workspace_route_returns_preview_candidates(session_governance_a
     assert preview_response.status_code == 200
     preview_payload = preview_response.get_json()["data"]
     assert preview_payload["preview_institution_id"] == other_institution_id
-    assert {item["email"] for item in preview_payload["publishing_user_candidates"]} == {
-        "owner@example.com",
-        "alternate@example.com",
+    assert {item["id"] for item in preview_payload["publishing_user_candidates"]} == {
+        session_governance_app["owner_id"],
+        session_governance_app["alternate_id"],
     }
+    assert [item["email"] for item in preview_payload["publishing_user_candidates"] if "email" in item] == ["owner@example.com"]
 
     moderator_response = client.get(
         f"/api/v1/sessions/{session_id}/workspace",
@@ -227,6 +235,33 @@ def test_session_workspace_route_returns_preview_candidates(session_governance_a
         session_governance_app["institution_id"],
         session_governance_app["other_institution_id"],
     }
+
+
+def test_institution_managers_cannot_read_private_governance_or_change_shared_scope(session_governance_app):
+    fixture = session_governance_app
+    client = fixture["client"]
+    base = f'/api/v1/sessions/{fixture["shared_session_id"]}'
+    manager = fixture["manager_headers"]
+    for payload in ({"institution_id": None}, {"sharing_scope": "private"}):
+        assert client.put(f"{base}/workspace", headers=manager, json=payload).status_code == 403
+    assert client.put(f"{base}/workspace", headers=manager, json={"credential_preference": "institution"}).status_code == 200
+    assert client.put(f"{base}/workspace", headers=fixture["owner_headers"], json={"sharing_scope": "private"}).status_code == 200
+    for path in (base, f"{base}/workspace", f"{base}/audit-events"):
+        assert client.get(path, headers=manager).status_code == 404
+    assert client.put(f"{base}/workspace", headers=manager, json={"sharing_scope": "institution"}).status_code == 404
+    assert client.get(f"{base}/workspace", headers=fixture["owner_headers"]).status_code == 200
+
+
+def test_submission_progress_uses_shared_session_view_permission(session_governance_app):
+    fixture = session_governance_app
+    with fixture["app"].app_context():
+        submission = Submission(session_id=fixture["shared_session_id"], pipeline_id="render", status="processing")
+        db.session.add(submission)
+        db.session.commit()
+        path = f"/api/v1/submissions/{submission.id}/progress"
+    client = fixture["client"]
+    assert client.get(path, headers=fixture["colleague_headers"]).status_code == 200
+    assert client.get(path, headers=fixture["alternate_headers"]).status_code == 404
 
 
 def test_personal_session_rejects_non_owner_publishing_user(session_governance_app):

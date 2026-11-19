@@ -9,7 +9,7 @@ from services.project_service import ProjectService
 from services.msf_service import MSFService
 from services.user_service import UserService
 from database.database import db
-from database.models import Session, UserRole
+from database.models import Session, User, UserRole
 
 
 class _DummyProjectService:
@@ -90,13 +90,8 @@ def test_tools_context_passes_hpc_runtime_state_into_component_report(tmp_path, 
     app = _make_app(tmp_path)
     app.hpc_allocation_service = _DummyHpcAllocationService()
 
-    class _DummyUser:
-        id = 1
-        role = UserRole.ADMIN
-        capabilities = []
-
-    monkeypatch.setattr(db.session, "get", lambda model, key: Session(id=key, user_id=1))
-    monkeypatch.setattr(UserService, "get_by_id", lambda self, _user_id: _DummyUser())
+    admin = User(id=1, role=UserRole.ADMIN, is_verified=True, force_password_change=False)
+    monkeypatch.setattr(db.session, "get", lambda model, key: admin if model is User else Session(id=key, user_id=1))
     monkeypatch.setattr(CloudUploadService, "get_storage_mode", lambda: STORAGE_MODE_LOCAL)
 
     client = app.test_client()

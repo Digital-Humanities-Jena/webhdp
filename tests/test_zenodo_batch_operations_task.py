@@ -38,7 +38,7 @@ def test_session_batch_notification_matches_item_outcomes(monkeypatch, tmp_path,
     monkeypatch.setattr(tasks, 'record_session_batch_task_launch', lambda **kw: None)
     monkeypatch.setattr(tasks, 'update_session_batch_task_entry', lambda *a, **kw: None)
     monkeypatch.setattr(tasks, 'notify_user', lambda **kw: notices.append(kw))
-    monkeypatch.setattr(tasks.publishing_context_service, 'resolve_token_for_session', lambda *a: {'token': 'test-token'})
+    monkeypatch.setattr(tasks.publishing_context_service, 'resolve_token_for_session', lambda *a, **kw: {'token': 'test-token'})
     monkeypatch.setattr(tasks, 'execute_session_batch_operation', lambda **kw: {
         'status': 'completed_with_errors' if failed else 'completed',
         'summary': {'completed': completed, 'failed': failed, 'skipped': skipped},
@@ -91,7 +91,7 @@ def test_zenodo_batch_community_operation_uses_local_hdpc_without_remote_load(mo
     monkeypatch.setattr(
         tasks.publishing_context_service,
         "resolve_token_for_session",
-        lambda session_row, environment: captured["resolved"].append((session_row.id, environment))
+        lambda session_row, environment, **kwargs: captured["resolved"].append((session_row.id, environment, kwargs))
         or {"source": "institution", "token": "resolved-production-token"},
     )
     app.project_service = StubProjectService()
@@ -113,6 +113,7 @@ def test_zenodo_batch_community_operation_uses_local_hdpc_without_remote_load(mo
             operation="append_if_missing",
             remove_mode=None,
             community_identifier="omega",
+            requested_by_user_id=user.id,
             selected_records=[
                 {
                     "session_id": session_row.id,
@@ -134,7 +135,9 @@ def test_zenodo_batch_community_operation_uses_local_hdpc_without_remote_load(mo
         )
 
         assert result["summary"]["succeeded"] == 1
-        assert captured["resolved"] == [(session_row.id, "production")]
+        assert captured["resolved"] == [
+            (session_row.id, "production", {"actor_user_id": user.id, "require_credential": True})
+        ]
         assert captured["calls"] == [
             {
                 "local_record_id": 5,

@@ -10,6 +10,7 @@ from database.database import db
 from database.models import Session, User
 from exceptions import AppException
 from routes.session_routes import session_bp
+from services.account_upload_quota import attach_upload_to_session
 from services.single_upload_recovery import persist_single_upload_identity, single_upload_request
 
 
@@ -34,6 +35,7 @@ def upload_app(tmp_path):
         row = Session(user_id=int(get_jwt_identity()), session_dir=str(tmp_path), status='scanned')
         db.session.add(row)
         persist_single_upload_identity(row)
+        attach_upload_to_session(row)
         db.session.commit()
         scanned()
         return APIResponse.success(data={'session_id': row.id, 'foundFiles': [{'name': 'model.glb'}], 'file_id': 1})
@@ -83,6 +85,19 @@ def test_recovery_is_owner_scoped(upload_app):
     assert client.post('/api/v1/sessions/file/recover', headers=headers[1], json={'submit_token': 'upload-1'}).status_code == 404
     second = send(client, headers[1]).json['data']
     assert second['session_id'] == 2
+
+
+def test_account_quota_rejects_new_payload_without_blocking_last_upload_recovery(upload_app):
+    client, headers, scanned = upload_app
+    client.application.config['ACCOUNT_UPLOAD_STORAGE_BYTES'] = 5
+    assert send(client, headers[0], content=b'model').status_code == 200
+    duplicate = send(client, headers[0], content=b'model')
+    assert duplicate.status_code == 200 and duplicate.json['data']['reused']
+    full = send(client, headers[0], content=b'x', token='upload-2')
+    assert full.status_code == 413
+    assert full.json['error']['code'] == 'UPLOAD_STORAGE_QUOTA'
+    assert Session.query.count() == 1
+    scanned.assert_called_once()
 
 
 @pytest.mark.parametrize('invalid', [{'content': b''}, {'filename': 'model.exe'}, {'content': b'x' * 5000}])

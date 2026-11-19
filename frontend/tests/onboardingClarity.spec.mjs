@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest'
 import { mountWithApp } from './helpers/app.mjs'
 import { activateTestPinia } from './helpers/pinia.mjs'
 import { useAuthStore } from '../src/stores/auth'
-import OnboardingView from '../src/views/onboarding/OnboardingView.vue'
+import AccountSetupView from '../src/views/account/AccountSetupView.vue'
 
-describe('Onboarding readiness', () => {
+describe('Computing access in account setup', () => {
   it.each([
     ['pending', false, 'Awaiting approval'],
     ['rejected', false, 'Not approved'],
@@ -12,11 +12,11 @@ describe('Onboarding readiness', () => {
   ])('describes %s requests without claiming they are ready to render', async (status, hasAccess, label) => {
     const pinia = activateTestPinia()
     useAuthStore().user = { hpc: { has_access: hasAccess, latest_request: { status } } }
-    const { wrapper } = await mountWithApp(OnboardingView, { pinia })
+    const { wrapper } = await mountWithApp(AccountSetupView, { pinia })
     const hpc = wrapper.findAll('article').find(card => card.text().includes('HPC resources'))
     expect(hpc.text()).toContain(label)
     expect(hpc.text()).not.toContain('Done')
-    expect(wrapper.text()).toContain('Continue to upload')
+    expect(hpc.get('a').attributes('href')).toBe('/hpc-resources')
     wrapper.unmount()
   })
 })

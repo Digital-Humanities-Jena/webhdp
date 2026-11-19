@@ -7,7 +7,7 @@ from flask import Flask
 from flask_jwt_extended import JWTManager, create_access_token, get_jwt_identity, jwt_required
 
 from api_utils import APIResponse
-from constants import UPLOAD_PROGRESS_FIELD, UPLOAD_SUBMIT_TOKEN_FIELD, UPLOAD_TASK_ID_FIELD
+from constants import UPLOAD_PROGRESS_FIELD, UPLOAD_STORAGE_MODE_FIELD, UPLOAD_SUBMIT_TOKEN_FIELD, UPLOAD_TASK_ID_FIELD
 from database.database import db
 from database.models import Session, User, UserMetadata
 from exceptions import AppException
@@ -46,7 +46,7 @@ def directory_app(tmp_path):
 
     with app.app_context():
         db.create_all()
-        user = User(email='batch@example.com', password_hash='test-only-hash')
+        user = User(email='batch@example.com', password_hash='test-only-hash', is_verified=True)
         db.session.add(user)
         db.session.commit()
         headers = {'Authorization': f'Bearer {create_access_token(identity=str(user.id))}'}
@@ -163,8 +163,48 @@ def test_task_monitor_accepts_absent_or_non_mapping_worker_metadata(directory_ap
     import sys
     from types import SimpleNamespace
     client, headers, _ = directory_app
+    session_id = send(client, headers).json['data']['session_id']
+    db.session.add(UserMetadata(session_id=session_id, field_name=UPLOAD_TASK_ID_FIELD, field_value='task-started'))
+    outsider = User(email='outsider@example.com', password_hash='test-only-hash', is_verified=True)
+    db.session.add(outsider)
+    db.session.commit()
+    outsider_headers = {'Authorization': f'Bearer {create_access_token(identity=str(outsider.id))}'}
     task = SimpleNamespace(state='STARTED', info=task_info)
     monkeypatch.setitem(sys.modules, 'celery_app', SimpleNamespace(celery=SimpleNamespace(AsyncResult=lambda _: task)))
     result = client.get('/sessions/tasks/task-started', headers=headers)
     assert result.status_code == 200
     assert result.json['data']['state'] == 'STARTED'
+    assert client.get('/sessions/tasks/task-started', headers=outsider_headers).status_code == 404
+    assert client.get('/sessions/tasks/unrelated-task', headers=headers).status_code == 404
+
+
+def test_mounted_input_access_can_be_granted_and_revoked_without_affecting_other_uploads(directory_app, tmp_path):
+    from flask import current_app
+
+    client, headers, _ = directory_app
+    current_app.config.update(STORAGE_MODE='local', LOCAL_INPUT_PATH=str(tmp_path),
+                              WEBHDP_DEPLOYMENT_MODE='workstation-local', WEBHDP_ALLOW_LOCAL_HDP_COMPONENTS=True)
+    (tmp_path / 'metadata.csv').write_text('filename,title\nmodel.glb,Example\n')
+    mounted_id = send(client, headers).json['data']['session_id']
+    db.session.add(UserMetadata(session_id=mounted_id, field_name='msf_profile',
+                                field_value=json.dumps({'storage_mode': 'local'})))
+    own_id = send(client, headers, submit_token='another').json['data']['session_id']
+    db.session.add(UserMetadata(session_id=own_id, field_name=UPLOAD_STORAGE_MODE_FIELD, field_value='local'))
+    db.session.commit()
+
+    assert client.get('/sessions/local-msf', headers=headers).status_code == 403
+    assert {row['id'] for row in client.get('/sessions', headers=headers).json['data']['sessions']} == {own_id}
+    assert client.get(f'/sessions/{mounted_id}', headers=headers).status_code == 404
+
+    user = User.query.filter_by(email='batch@example.com').one()
+    user.set_capabilities(['mounted_input_access'])
+    db.session.commit()
+    available = client.get('/sessions/local-msf', headers=headers)
+    assert available.status_code == 200
+    assert available.json['data']['msf_files'][0]['path'] == 'metadata.csv'
+    assert {row['id'] for row in client.get('/sessions', headers=headers).json['data']['sessions']} == {mounted_id, own_id}
+
+    user.set_capabilities([])
+    db.session.commit()
+    assert client.get('/sessions/local-msf', headers=headers).status_code == 403
+    assert client.get(f'/sessions/{mounted_id}', headers=headers).status_code == 404

@@ -386,7 +386,16 @@ def validate(plan, compose, directory, *, repository=ROOT):
         location = source.split(marker, 1)[-1].split('\n    }', 1)[0] if marker in source else ''
         require(all(text in location for text in ('proxy_http_version 1.1;', 'proxy_set_header Origin $http_origin;', 'proxy_request_buffering off;')) and 'Access-Control-Allow-Origin' not in location and 'return 204' not in location, '/proxy/' + template, 'link_proxy_contract_missing')
         require("frame-ancestors 'none'" in source, '/proxy/' + template, 'consent_frame_protection_missing')
-        require("log_format webhdp_safe '$remote_addr $request_method $uri $status $body_bytes_sent $request_time';" in source and 'access_log /var/log/nginx/access.log webhdp_safe;' in source, '/proxy/' + template, 'query_free_access_logs_required')
+        logged_uri = re.search(r"(?m)^map \$uri \$webhdp_logged_uri\s*\{([^}]+)\}", source)
+        redaction = {
+            "~^/verify-email/ /verify-email/[redacted]",
+            "~^/api/v1/auth/verify-email/ /api/v1/auth/verify-email/[redacted]",
+            "default $uri",
+        }
+        mapped = {" ".join(rule.split()) for rule in logged_uri[1].split(";") if rule.strip()} if logged_uri else set()
+        log_format = "log_format webhdp_safe '$remote_addr $request_method $webhdp_logged_uri $status $body_bytes_sent $request_time';"
+        require(mapped == redaction and log_format in source and 'access_log /var/log/nginx/access.log webhdp_safe;' in source,
+                '/proxy/' + template, 'query_free_access_logs_required')
     warnings.append({'path': '/proxy', 'code': 'verify_tls_headers_authenticated_upload_and_download_through_actual_proxy'})
     return {'ok': not errors, 'scope': 'offline_configuration_only', 'errors': errors, 'warnings': warnings,
             'minimum_stop_grace_seconds': max_runtime, 'live_checks_performed': [],

@@ -6,6 +6,7 @@ def register_routes(app):
     """Register all route blueprints"""
     from .admin_routes import admin_bp
     from .auth_routes import auth_bp
+    from .institution_invitation_routes import institution_invitation_bp
     from .institution_routes import institution_bp
     from .metadata_routes import metadata_bp
     from .pipeline_routes import pipeline_bp
@@ -28,9 +29,12 @@ def register_routes(app):
     from .profile_routes import profile_bp
     from .webhdp_link_routes import webhdp_link_bp
     from .model_publication_routes import model_publication_bp
+    from .account_usage_routes import account_usage_bp
 
     app.register_blueprint(auth_bp, url_prefix="/api/v1/auth")
+    app.register_blueprint(account_usage_bp, url_prefix="/api/v1/account")
     app.register_blueprint(institution_bp, url_prefix="/api/v1/institutions")
+    app.register_blueprint(institution_invitation_bp, url_prefix="/api/v1/institutions")
     app.register_blueprint(session_bp, url_prefix="/api/v1/sessions")
     app.register_blueprint(single_file_bp, url_prefix="/api/v1/sessions")
     app.register_blueprint(metadata_bp, url_prefix="/api/v1/metadata")

@@ -44,6 +44,7 @@ class TestUploadOperationRoutes(unittest.TestCase):
 
             self.user = User(email="uploader@example.com", role=UserRole.USER, is_verified=True)
             self.user.set_password("password123")
+            self.user.set_capabilities(["mounted_input_access"])
             self.other_user = User(email="other@example.com", role=UserRole.USER, is_verified=True)
             self.other_user.set_password("password123")
             self.admin = User(email="admin@example.com", role=UserRole.ADMIN, is_verified=True)

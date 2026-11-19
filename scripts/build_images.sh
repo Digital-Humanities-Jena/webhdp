@@ -11,7 +11,7 @@ else
 import json
 from pathlib import Path
 payload = json.loads(Path("version.json").read_text(encoding="utf-8"))
-print(payload.get("version") or "0.1.0-alpha.3")
+print(payload.get("version") or "0.1.0-alpha.4")
 PY
 )"
 fi

@@ -20,8 +20,8 @@ def _publication_risk(step, manifest):
     return publishes, publishes and conditional
 
 
-def pipeline_guidance(config, manifests):
-    from services.hdp_component_policy import hpc_required_component
+def pipeline_guidance(config, manifests, selected_profiles=None):
+    from services.hdp_component_policy import component_gpu_count, hpc_required_component
     steps = [step for step in config.get('steps', []) if step.get('enabled', True)]
     keys = {step.get('component_ref') or step.get('id') for step in steps}
     uploads = 'zenodo_upload' in keys
@@ -31,18 +31,23 @@ def pipeline_guidance(config, manifests):
     drafts = 'zenodo_draft' in keys
     outputs, requirements, extensions = [], [], None
     resources = {'gpu_count': 0, 'cpus': 0, 'memory_mb': 0}
-    requires_hpc = False
+    hpc_keys = []
     for step in steps:
         key = step.get('component_ref') or step.get('id')
         manifest = manifests.get(step.get('id')) or manifests.get(key) or {}
         profiles = manifest.get('execution', {}).get('profiles', [])
-        profile = next((value for value in profiles if value.get('id') == step.get('execution_profile_ref')), profiles[0] if profiles else {})
+        if selected_profiles is None:
+            requested = step.get('execution_profile_ref')
+            profile = next((value for value in profiles if value.get('id') == requested), {}) if requested else (profiles[0] if profiles else {})
+        else:
+            profile = selected_profiles.get(step.get('id'), {})
         if hpc_required_component(key) or profile.get('adapter') == 'hpc_link' or profile.get('runtime') in ('singularity', 'apptainer'):
-            requires_hpc = True
+            hpc_keys.append(key)
         elif profile.get('runtime') == 'docker':
             requirements.append('Installed local container')
+        limits = profile.get('resources') or {}
         for resource in resources:
-            value = (profile.get('resources') or {}).get(resource) or 0
+            value = component_gpu_count(key, limits) if resource == 'gpu_count' else limits.get(resource, 0)
             if type(value) is not int or value < 0:
                 requirements.append(f"{step.get('name') or key}: review invalid {resource} resource limit")
                 continue
@@ -74,6 +79,8 @@ def pipeline_guidance(config, manifests):
             # Their intersection would disable a valid paired-input workflow.
             requirements.extend(f"{target.replace('_', ' ')}: {', '.join(sorted(accepted))}"
                                 for target, accepted in input_formats)
+    requires_hpc = bool(hpc_keys)
+    requires_gpu = resources['gpu_count'] > 0
     if requires_hpc:
         requirements.insert(0, 'Active HPC allocation')
     if any(resources.values()):
@@ -92,7 +99,8 @@ def pipeline_guidance(config, manifests):
     else:
         outcome = 'Produces local results'
     return {'outcome': outcome, 'creates_draft': drafts, 'uploads': uploads, 'publishes': publishes, 'conditional_publication': conditional_publication,
-            'requires_hpc': requires_hpc, 'requirements': list(dict.fromkeys(requirements)),
+            'requires_hpc': requires_hpc, 'requires_gpu': requires_gpu,
+            'hpc_component_keys': list(dict.fromkeys(hpc_keys)), 'requirements': list(dict.fromkeys(requirements)),
             'outputs': list(dict.fromkeys(value for value in outputs if value)),
             'source_extensions': sorted(extensions) if extensions is not None else None,
             'largest_step_resources': resources}

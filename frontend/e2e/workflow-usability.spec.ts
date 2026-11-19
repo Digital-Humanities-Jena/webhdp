@@ -12,6 +12,7 @@ async function openUpload(page: Page) {
     data: { enabled: true, available: true, can_allocate: true, deployment_class: 'server' },
   }))
   await loginThroughUi(page)
+  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: /new upload/i }).click()
   const notice = page.getByRole('button', { name: 'OK', exact: true })
   if (await notice.isVisible()) await notice.click()
 }

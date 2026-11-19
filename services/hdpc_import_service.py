@@ -117,6 +117,8 @@ def import_hdpc_for_user(user_id: int, uploaded_file, *, actor_user_id: int | No
         )
         db.session.add(db_session)
         db.session.flush()
+        from services.account_upload_quota import attach_upload_to_session
+        attach_upload_to_session(db_session)
 
         if artifact_kind == SHARED_EXPORT_ARTIFACT_KIND:
             record_audit_event(

@@ -2,25 +2,32 @@ import logging
 
 from flask import Blueprint, request
 from flask_jwt_extended import jwt_required
+from sqlalchemy import func, or_
 
 from api_utils import APIResponse
 from database.database import db
-from database.models import Institution, InstitutionZenodoCommunity, User, UserRole
-from exceptions import ResourceNotFoundError, ValidationError
+from database.models import Institution, InstitutionZenodoCommunity, Session, User, UserRole
+from exceptions import ValidationError
 from routes.access_helpers import get_current_user_from_jwt
 from services.audit_service import list_audit_events, record_audit_event
-from services.institution_service import InstitutionService
+from services.session_access_service import can_use_mounted_inputs, mounted_input_session_filter
+from services.institution_service import InstitutionService, serialize_member_identity
+from services.institution_workspace_request_service import InstitutionWorkspaceRequestService, serialize_workspace_request
 from services.zenodo_credential_service import ZenodoCredentialService
 
 logger = logging.getLogger(__name__)
 institution_bp = Blueprint("institutions", __name__)
 institution_service = InstitutionService()
+workspace_request_service = InstitutionWorkspaceRequestService()
 credential_service = ZenodoCredentialService()
 
 
-def _serialize_membership(membership):
+def _serialize_membership(membership, *, viewer=None, include_institution=False):
     payload = membership.to_dict()
-    payload["institution"] = membership.institution.to_dict() if getattr(membership, "institution", None) else None
+    if include_institution:
+        payload["institution"] = membership.institution.to_dict()
+    if viewer is not None:
+        payload["user"] = serialize_member_identity(membership.user, viewer=viewer)
     return payload
 
 
@@ -68,7 +75,7 @@ def _can_manage_institution(user: User | None, institution: Institution) -> bool
 def _serialize_institution(
     institution: Institution,
     *,
-    include_members=False,
+    viewer: User | None = None,
     include_communities=False,
     include_credentials=False,
     memberships=None,
@@ -78,9 +85,9 @@ def _serialize_institution(
 ):
     payload = institution.to_dict()
     membership_rows = memberships
-    if include_members and membership_rows is None:
+    if viewer is not None and membership_rows is None:
         membership_rows = institution_service.list_members(institution.id)
-    payload["memberships"] = [_serialize_membership(row) for row in membership_rows] if include_members and membership_rows else ([] if include_members else None)
+    payload["memberships"] = [_serialize_membership(row, viewer=viewer) for row in membership_rows] if viewer is not None else None
     if member_count is not None:
         payload["member_count"] = int(member_count)
     elif membership_rows is not None:
@@ -105,7 +112,7 @@ def _serialize_institution(
 
 def _require_admin_user():
     user = get_current_user_from_jwt()
-    if not user:
+    if not user or not user.is_verified or user.force_password_change:
         return None, APIResponse.unauthorized()
     if user.role != UserRole.ADMIN:
         return None, APIResponse.forbidden("Admin access required")
@@ -114,7 +121,7 @@ def _require_admin_user():
 
 def _require_institution_access(institution_id: int, *, required_role: str = "reader"):
     user = get_current_user_from_jwt()
-    if not user:
+    if not user or not user.is_verified or user.force_password_change:
         return None, None, APIResponse.unauthorized()
 
     institution = db.session.get(Institution, int(institution_id))
@@ -128,6 +135,48 @@ def _require_institution_access(institution_id: int, *, required_role: str = "re
     if not institution_service.has_role(membership, required_role):
         return None, user, APIResponse.not_found("Institution not found")
     return institution, user, None
+
+
+def _request_object():
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        raise ValidationError("Provide a JSON object")
+    return payload
+
+
+@institution_bp.route("/workspace-requests", methods=["GET"])
+@jwt_required()
+def list_workspace_requests():
+    user = get_current_user_from_jwt()
+    if not user:
+        return APIResponse.unauthorized()
+    include_all = request.args.get("all", "").strip().lower() in {"1", "true"}
+    return APIResponse.success(data=workspace_request_service.list(
+        user, include_all=include_all, status=request.args.get("status"),
+        page=_parse_positive_int_arg("page", 1), per_page=_parse_positive_int_arg("per_page", 25),
+    ))
+
+
+@institution_bp.route("/workspace-requests", methods=["POST"])
+@jwt_required()
+def request_workspace():
+    user = get_current_user_from_jwt()
+    if not user:
+        return APIResponse.unauthorized()
+    payload = _request_object()
+    workspace = workspace_request_service.submit(user, name=payload.get("name"), reason=payload.get("reason"))
+    return APIResponse.created(data={"request": serialize_workspace_request(workspace)})
+
+
+@institution_bp.route("/workspace-requests/<int:request_id>/decision", methods=["PATCH"])
+@jwt_required()
+def review_workspace_request(request_id):
+    actor, error_response = _require_admin_user()
+    if error_response:
+        return error_response
+    payload = _request_object()
+    workspace = workspace_request_service.decide(actor, request_id, decision=payload.get("decision"), note=payload.get("note"))
+    return APIResponse.success(data={"request": serialize_workspace_request(workspace, include_requester=True)})
 
 
 @institution_bp.route("", methods=["GET"])
@@ -169,9 +218,11 @@ def suggest_institutions():
     user = get_current_user_from_jwt()
     if not user:
         return APIResponse.unauthorized()
-    query = request.args.get("q") or request.args.get("query") or ""
+    query = (request.args.get("q") or request.args.get("query") or "").strip()
+    if len(query) > 255:
+        raise ValidationError("Institution searches must be no longer than 255 characters")
     limit = _parse_positive_int_arg("limit", 8)
-    return APIResponse.success(data={"institutions": institution_service.suggest_institutions(query, limit=limit)})
+    return APIResponse.success(data={"institutions": institution_service.suggest_institutions(query, user=user, limit=limit)})
 
 
 @institution_bp.route("/affiliation", methods=["POST"])
@@ -181,28 +232,19 @@ def configure_affiliation():
     if not user:
         return APIResponse.unauthorized()
 
-    payload = request.get_json() or {}
+    payload = _request_object()
     result = institution_service.configure_user_affiliation(
         user=user,
         institution_id=payload.get("institution_id"),
         name=payload.get("name"),
-        confirm_create=payload.get("confirm_create") is True,
     )
-    similar = result.get("similar") or []
-    if result.get("institution") is None and similar:
-        return APIResponse.error(
-            "SIMILAR_INSTITUTION_EXISTS",
-            "A very similar institution already exists.",
-            409,
-            details={"similar": similar},
-        )
 
     memberships = institution_service.list_for_user(user.id)
     return APIResponse.success(
         data={
-            "institution": result["institution"].to_dict(),
-            "membership": _serialize_membership(result["membership"]) if result.get("membership") else None,
-            "memberships": [_serialize_membership(membership) for membership in memberships],
+            "institution": result["institution"].to_dict() if result["institution"] else None,
+            "membership": _serialize_membership(result["membership"], include_institution=True) if result["membership"] else None,
+            "memberships": [_serialize_membership(membership, include_institution=True) for membership in memberships],
             "institutions": [
                 {
                     **membership.institution.to_dict(),
@@ -212,11 +254,10 @@ def configure_affiliation():
                 if membership.institution
             ],
             "user": user.to_dict(),
-            "created": bool(result.get("created")),
-            "similar": similar,
+            "created": False,
+            "similar": [],
         },
         message="Institutional affiliation updated",
-        status_code=201 if result.get("created") else 200,
     )
 
 
@@ -227,7 +268,7 @@ def create_institution():
     if error_response:
         return error_response
 
-    payload = request.get_json() or {}
+    payload = _request_object()
     institution = institution_service.create_institution(
         name=payload.get("name"),
         description=payload.get("description"),
@@ -235,19 +276,10 @@ def create_institution():
         website_url=payload.get("website_url"),
         logo_url=payload.get("logo_url"),
         profile_visibility=payload.get("profile_visibility"),
-        created_by_user_id=admin_user.id,
+        actor=admin_user,
     )
-    record_audit_event(
-        actor_user_id=admin_user.id,
-        institution_id=institution.id,
-        event_type="institution_created",
-        entity_type="institution",
-        entity_id=institution.id,
-        details={"name": institution.name, "slug": institution.slug},
-    )
-    db.session.commit()
     return APIResponse.created(
-        data={"institution": _serialize_institution(institution, include_members=True)},
+        data={"institution": _serialize_institution(institution, viewer=admin_user)},
         message="Institution created successfully",
     )
 
@@ -262,7 +294,7 @@ def get_institution(institution_id):
         data={
             "institution": _serialize_institution(
                 institution,
-                include_members=True,
+                viewer=user,
                 include_communities=True,
                 include_credentials=_can_manage_institution(user, institution),
             )
@@ -277,9 +309,10 @@ def update_institution(institution_id):
     if error_response:
         return error_response
 
-    payload = request.get_json() or {}
+    payload = _request_object()
     updated = institution_service.update_institution(
         institution,
+        actor=user,
         name=payload.get("name") if "name" in payload else None,
         description=payload.get("description") if "description" in payload else None,
         display_name=payload.get("display_name") if "display_name" in payload else None,
@@ -287,17 +320,8 @@ def update_institution(institution_id):
         logo_url=payload.get("logo_url") if "logo_url" in payload else None,
         profile_visibility=payload.get("profile_visibility") if "profile_visibility" in payload else None,
     )
-    record_audit_event(
-        actor_user_id=user.id,
-        institution_id=updated.id,
-        event_type="institution_updated",
-        entity_type="institution",
-        entity_id=updated.id,
-        details={"name": updated.name, "description": updated.description},
-    )
-    db.session.commit()
     return APIResponse.success(
-        data={"institution": _serialize_institution(updated, include_members=True, include_communities=True)},
+        data={"institution": _serialize_institution(updated, viewer=user, include_communities=True)},
         message="Institution updated successfully",
     )
 
@@ -305,24 +329,32 @@ def update_institution(institution_id):
 @institution_bp.route("/<int:institution_id>/memberships", methods=["GET"])
 @jwt_required()
 def list_institution_memberships(institution_id):
-    institution, _, error_response = _require_institution_access(institution_id, required_role="reader")
+    institution, user, error_response = _require_institution_access(institution_id, required_role="reader")
     if error_response:
         return error_response
     memberships = institution_service.list_members(institution.id)
-    return APIResponse.success(data={"memberships": [_serialize_membership(row) for row in memberships]})
+    return APIResponse.success(data={"memberships": [_serialize_membership(row, viewer=user) for row in memberships]})
 
 
 @institution_bp.route("/<int:institution_id>/audit-events", methods=["GET"])
 @jwt_required()
 def list_institution_audit_events(institution_id):
-    institution, _, error_response = _require_institution_access(institution_id, required_role="manager")
+    institution, user, error_response = _require_institution_access(institution_id, required_role="manager")
     if error_response:
         return error_response
 
     page = _parse_positive_int_arg("page", 1)
     per_page = _parse_positive_int_arg("per_page", 25)
+    visible_sessions = None if user.role == UserRole.ADMIN else db.session.query(Session.id).filter(
+        Session.institution_id == institution.id,
+        or_(Session.user_id == user.id, func.lower(func.trim(Session.sharing_scope)) == "institution"),
+    )
+    if visible_sessions is not None and not can_use_mounted_inputs(user):
+        visible_sessions = visible_sessions.filter(~mounted_input_session_filter())
     payload = list_audit_events(
         institution_id=institution.id,
+        visible_session_ids=visible_sessions,
+        actor_serializer=lambda actor: serialize_member_identity(actor, viewer=user),
         event_type=request.args.get("event_type"),
         entity_type=request.args.get("entity_type"),
         page=page,
@@ -334,36 +366,14 @@ def list_institution_audit_events(institution_id):
 @institution_bp.route("/<int:institution_id>/memberships", methods=["POST"])
 @jwt_required()
 def create_institution_membership(institution_id):
-    institution, user, error_response = _require_institution_access(institution_id, required_role="manager")
+    _, _, error_response = _require_institution_access(institution_id, required_role="manager")
     if error_response:
         return error_response
 
-    payload = request.get_json() or {}
-    target_user = None
-    if payload.get("user_id") is not None:
-        try:
-            target_user = db.session.get(User, int(payload.get("user_id")))
-        except (TypeError, ValueError) as exc:
-            raise ValidationError("user_id must be an integer") from exc
-    elif payload.get("email"):
-        target_user = User.query.filter_by(email=str(payload.get("email")).strip()).first()
-
-    if not target_user:
-        raise ResourceNotFoundError("Target user not found")
-
-    membership = institution_service.upsert_membership(institution.id, target_user.id, payload.get("role"))
-    record_audit_event(
-        actor_user_id=user.id,
-        institution_id=institution.id,
-        event_type="institution_membership_upserted",
-        entity_type="institution_membership",
-        entity_id=membership.id,
-        details={"user_id": target_user.id, "role": membership.role.value if membership.role else None},
-    )
-    db.session.commit()
-    return APIResponse.success(
-        data={"membership": _serialize_membership(membership)},
-        message="Institution membership saved successfully",
+    return APIResponse.error(
+        "INSTITUTION_INVITATION_REQUIRED",
+        "Send a workspace invitation so the recipient can accept membership.",
+        409,
     )
 
 
@@ -374,21 +384,10 @@ def update_institution_membership(institution_id, member_user_id):
     if error_response:
         return error_response
 
-    target_user = db.session.get(User, int(member_user_id))
-    if not target_user:
-        return APIResponse.not_found("Target user not found")
-
-    payload = request.get_json() or {}
-    membership = institution_service.upsert_membership(institution.id, target_user.id, payload.get("role"))
-    record_audit_event(
-        actor_user_id=user.id,
-        institution_id=institution.id,
-        event_type="institution_membership_upserted",
-        entity_type="institution_membership",
-        entity_id=membership.id,
-        details={"user_id": target_user.id, "role": membership.role.value if membership.role else None},
+    payload = _request_object()
+    membership = institution_service.upsert_membership(
+        institution.id, member_user_id, payload.get("role"), actor=user, existing_only=True,
     )
-    db.session.commit()
     return APIResponse.success(
         data={"membership": _serialize_membership(membership)},
         message="Institution membership updated successfully",
@@ -402,19 +401,10 @@ def delete_institution_membership(institution_id, member_user_id):
     if error_response:
         return error_response
 
-    removed = institution_service.remove_membership(institution.id, int(member_user_id))
+    removed = institution_service.remove_membership(institution.id, int(member_user_id), actor=user)
     if not removed:
         return APIResponse.not_found("Membership not found")
 
-    record_audit_event(
-        actor_user_id=user.id,
-        institution_id=institution.id,
-        event_type="institution_membership_removed",
-        entity_type="institution_membership",
-        entity_id=member_user_id,
-        details={"user_id": member_user_id},
-    )
-    db.session.commit()
     return APIResponse.success(message="Institution membership removed successfully")
 
 

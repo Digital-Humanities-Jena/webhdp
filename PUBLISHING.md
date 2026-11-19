@@ -3,7 +3,7 @@
 [WebHDP on GitHub](https://github.com/Digital-Humanities-Jena/webhdp) is the
 canonical public repository. Publishing a commit and tag does not deploy
 WebHDP. Use the [deployment guide](docs/docker_deployment_guide.md) and the
-[alpha.3 upgrade checklist](docs/guides/upgrade_alpha3.md) for that separate
+[alpha.4 upgrade checklist](docs/guides/upgrade_alpha4.md) for that separate
 operation.
 
 ## Review the release tree
@@ -23,6 +23,26 @@ operation.
    runtime version and Compose defaults with the intended tag. Regenerate
    the API references after route or schema changes. Update the
    [documentation index](docs/README.md) for changed operator/user workflows.
+
+### Review the untagged alpha.4 candidate
+
+- Start with the tracked file list from `git ls-files`. Add explicitly
+  reviewed source files. For alpha.4 these include guided account setup and
+  account usage, institution invitations and workspace requests, email
+  verification, the 3D tutorial and dataset picker, the four application
+  migrations after alpha.3, companion tests, the managed EDM validator
+  resource patch, and the alpha.4 guide.
+- Keep the untracked research files under `scripts/component_verification/`
+  and their streaming test in the research checkout. Host-specific Link
+  rehearsal and evidence-capture scripts, their continuation test, local
+  credentials and SMTP, Zenodo, and Slurm evidence belong in the private
+  staging workspace.
+- Copy the reviewed file list to an isolated candidate directory. Record a
+  SHA-256 inventory there and run the release checker from that directory
+  against fresh staging state and the locked dependencies. This process works
+  on untagged source and does not require repository publication. Record the
+  test results and distinguish external staging gates from local acceptance.
+- Add the release date to `CITATION.cff` when the candidate is published.
 
 ## Verify
 
@@ -60,13 +80,14 @@ findings before making compatibility changes or publishing an affected build.
 
 ## Publish the verified commit
 
-Check access and the target branch's protection rules. Create an annotated tag
-on the verified commit after the checks pass. For the canonical GitHub remote
-named `origin`, when direct pushes to `main` are allowed:
+Check access and the target branch's protection rules. When publication is
+authorized, create an annotated tag on the verified commit after the checks
+pass. For the canonical GitHub remote named `origin`, when direct pushes to
+`main` are allowed, set `release_tag` to the approved release version:
 
 ```sh
-git tag -a v0.1.0-alpha.3 -m 'WebHDP v0.1.0-alpha.3'
-git push --atomic origin HEAD:refs/heads/main refs/tags/v0.1.0-alpha.3
+git tag -a "$release_tag" -m "WebHDP $release_tag"
+git push --atomic origin HEAD:refs/heads/main "refs/tags/$release_tag"
 ```
 
 Use the repository's protected branch workflow if direct push is disallowed.

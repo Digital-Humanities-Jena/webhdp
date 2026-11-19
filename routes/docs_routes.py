@@ -537,6 +537,15 @@ DOCS_CATALOG: List[DocEntry] = [
         sort_order=11,
     ),
     DocEntry(
+        doc_id="account-usage",
+        title="Account access, usage and limits",
+        category="account-security",
+        audience="user",
+        description="Check workspace permissions, upload and processing limits, and HPC allocations.",
+        rel_path="guides/account_usage.md",
+        sort_order=12,
+    ),
+    DocEntry(
         doc_id="operations",
         title="Operations and Setup Guide",
         category="operations",
@@ -544,6 +553,15 @@ DOCS_CATALOG: List[DocEntry] = [
         description="Deployment, setup, runbook, and release readiness checklist.",
         rel_path="guides/operations_and_setup_guide.md",
         sort_order=40,
+    ),
+    DocEntry(
+        doc_id="upgrade-alpha4",
+        title="Upgrade WebHDP to v0.1.0-alpha.4",
+        category="operations",
+        audience="operator",
+        description="Rehearse the database migration, account continuity and optional runtime checks before rollout.",
+        rel_path="guides/upgrade_alpha4.md",
+        sort_order=41,
     ),
     DocEntry(
         doc_id="hpc-single-gpu-setup",

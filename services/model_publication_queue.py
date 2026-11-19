@@ -22,6 +22,11 @@ WORKSPACE_BUDGET = 768 * 1024**2
 RUN_RESERVATION = 128 * 1024**2
 SAMPLE_RESERVATION = 4 * 1024**2
 RETENTION_SECONDS = 48 * 3600
+ACCOUNT_ACTIVE = 3
+ACCOUNT_DAILY_JOBS = 10
+ACCOUNT_WORKSPACE_BYTES = 256 * 1024**2
+ONE_DAY = 24 * 3600
+PRACTICE_HEARTBEAT = ".practice-heartbeat"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS jobs (
@@ -38,9 +43,11 @@ CREATE INDEX IF NOT EXISTS model_job_owner ON jobs(user_id, sign_in, seq);
 
 
 class QueueError(ValueError):
-    def __init__(self, message, status=400):
+    def __init__(self, message, status=400, *, code="MODEL_PUBLICATION_INPUT", details=None):
         super().__init__(message)
         self.status = status
+        self.code = code
+        self.details = details or {}
 
 
 def root():
@@ -51,11 +58,19 @@ def enabled():
     return str(current_app.config.get("MODEL_PUBLICATION_ENABLED", os.environ.get("WEBHDP_MODEL_PUBLICATION_ENABLED", ""))).lower() in {"true", "1"}
 
 
-def worker_ready(base):
+def _heartbeat_recent(path):
     try:
-        return time.time() - (base / ".heartbeat").stat().st_mtime < 15
+        return time.time() - path.stat().st_mtime < 15
     except FileNotFoundError:
         return False
+
+
+def worker_ready(base):
+    return _heartbeat_recent(base / ".heartbeat")
+
+
+def practice_worker_ready(base):
+    return _heartbeat_recent(base / PRACTICE_HEARTBEAT)
 
 
 @contextmanager
@@ -94,14 +109,39 @@ def snapshot(base):
             "ready": ready, "updated": int(time.time())}
 
 
+def _account_usage(conn, user_id, now):
+    active, accepted, stored, oldest = conn.execute(
+        """SELECT count(CASE WHEN status IN ('staging','queued','running') THEN 1 END),
+                  count(CASE WHEN created>=? THEN 1 END), coalesce(sum(reserved), 0),
+                  min(CASE WHEN created>=? THEN created END)
+           FROM jobs WHERE user_id=? AND demo_window=0""",
+        (now - ONE_DAY, now - ONE_DAY, user_id),
+    ).fetchone()
+    return {"active": active, "active_limit": ACCOUNT_ACTIVE, "accepted_last_24_hours": accepted,
+            "daily_limit": ACCOUNT_DAILY_JOBS, "stored_bytes": stored, "storage_limit_bytes": ACCOUNT_WORKSPACE_BYTES,
+            "daily_reset_at": int(oldest + ONE_DAY) + 1 if oldest is not None and accepted >= ACCOUNT_DAILY_JOBS else None,
+            "retention_seconds": RETENTION_SECONDS}
+
+
+def account_usage(base, user_id):
+    if not (base / "queue.sqlite3").is_file():
+        return {"active": 0, "active_limit": ACCOUNT_ACTIVE, "accepted_last_24_hours": 0,
+                "daily_limit": ACCOUNT_DAILY_JOBS, "stored_bytes": 0, "storage_limit_bytes": ACCOUNT_WORKSPACE_BYTES,
+                "daily_reset_at": None, "retention_seconds": RETENTION_SECONDS}
+    with connection(base) as conn:
+        return _account_usage(conn, user_id, time.time())
+
+
 def reserve(base, *, user_id, sign_in, request_key, demo_window, parameters):
     now = time.time()
     with connection(base, write=True) as conn:
         existing = conn.execute(
-            "SELECT id, status FROM jobs WHERE user_id=? AND sign_in=? AND request_key=?",
+            "SELECT id, status, input_json FROM jobs WHERE user_id=? AND sign_in=? AND request_key=?",
             (user_id, sign_in, request_key),
         ).fetchone()
         if existing:
+            if json.loads(existing["input_json"]).get("run_mode", "sandbox") != parameters.get("run_mode", "sandbox"):
+                raise QueueError("This request identity belongs to a different run mode. Start a new request.", 409)
             if existing["status"] == "staging":
                 raise QueueError("This upload is still being saved. Try again in a moment.", 409)
             return existing["id"], False
@@ -110,8 +150,10 @@ def reserve(base, *, user_id, sign_in, request_key, demo_window, parameters):
                FROM jobs WHERE status IN ('staging','queued','running')"""
         ).fetchone()
         if active >= MAX_ACTIVE or (not demo_window and regular_active >= MAX_ACTIVE - DEMO_QUEUE_RESERVE):
-            raise QueueError("The queue is full. Please try again in a moment.", 429)
+            raise QueueError("The queue is full. Try again after a run finishes.", 429, code="MODEL_PUBLICATION_QUEUE_FULL")
         model_count = parameters.get("model_count", 1)
+        sample = parameters.get("sample_id") or parameters.get("practice_sample_id")
+        budget = SAMPLE_RESERVATION * model_count if sample else RUN_RESERVATION
         if demo_window:
             total, own = conn.execute(
                 """SELECT coalesce(sum(coalesce(json_extract(input_json, '$.model_count'), 1)), 0),
@@ -120,16 +162,15 @@ def reserve(base, *, user_id, sign_in, request_key, demo_window, parameters):
                 (sign_in, user_id, demo_window),
             ).fetchone()
             if total + model_count > 30 or own:
-                raise QueueError("This demonstration has reached its run limit, or a run on this browser is already in progress.", 429)
+                raise QueueError("This demonstration has reached its run limit, or a run on this browser is already in progress.", 429, code="MODEL_PUBLICATION_DEMO_LIMIT")
         else:
-            own, recent = conn.execute(
-                """SELECT count(CASE WHEN status IN ('staging','queued','running') THEN 1 END),
-                          count(CASE WHEN created>=? THEN 1 END) FROM jobs WHERE user_id=?""",
-                (now - 86400, user_id),
-            ).fetchone()
-            if own >= 3 or recent >= 10:
-                raise QueueError("Your processing limit has been reached. Please try again later.", 429)
-        budget = SAMPLE_RESERVATION * model_count if parameters.get("sample_id") else RUN_RESERVATION
+            usage = _account_usage(conn, user_id, now)
+            if usage["active"] >= ACCOUNT_ACTIVE:
+                raise QueueError("Wait for one of your current model runs before submitting another.", 429, code="MODEL_PUBLICATION_ACTIVE_QUOTA", details={"usage": usage})
+            if usage["accepted_last_24_hours"] >= ACCOUNT_DAILY_JOBS:
+                raise QueueError("You have reached the 24-hour model run limit. Check your account usage for the next available time.", 429, code="MODEL_PUBLICATION_DAILY_QUOTA", details={"usage": usage})
+            if usage["stored_bytes"] + budget > ACCOUNT_WORKSPACE_BYTES:
+                raise QueueError("Your model workspace is full. Try again after a run finishes or its downloads expire.", 413, code="MODEL_PUBLICATION_STORAGE_QUOTA", details={"usage": usage})
         allocated, regular_storage = conn.execute(
             "SELECT coalesce(sum(reserved), 0), coalesce(sum(CASE WHEN demo_window=0 THEN reserved END), 0) FROM jobs"
         ).fetchone()
@@ -137,7 +178,7 @@ def reserve(base, *, user_id, sign_in, request_key, demo_window, parameters):
         if (allocated + budget > WORKSPACE_BUDGET
                 or (not demo_window and regular_storage + budget > regular_limit)
                 or shutil.disk_usage(base).free < WORKSPACE_FLOOR + pending_storage + budget):
-            raise QueueError("Processing storage is temporarily full. Please try again later.", 507)
+            raise QueueError("Processing storage is temporarily full. Try again later.", 507, code="MODEL_PUBLICATION_STORAGE_FULL")
         job_id = uuid4().hex
         conn.execute(
             """INSERT INTO jobs (id,user_id,sign_in,request_key,demo_window,created,updated,reserved,status,stage,input_json)
@@ -206,7 +247,7 @@ def expire(base):
             conn.execute("DELETE FROM jobs WHERE id=?", (row["id"],))
 
 
-def get_jobs(base, *, user_id, sign_in=None, job_id=None):
+def get_jobs(base, *, user_id, sign_in=None, job_id=None, run_mode=None):
     sql = """SELECT j.*, (SELECT count(*) FROM jobs q WHERE q.status='queued' AND q.seq<j.seq) AS ahead
              FROM jobs j WHERE j.user_id=? AND j.status!='staging'"""
     args = [user_id]
@@ -216,6 +257,9 @@ def get_jobs(base, *, user_id, sign_in=None, job_id=None):
     if job_id is not None:
         sql += " AND j.id=?"
         args.append(job_id)
+    if run_mode is not None:
+        sql += " AND coalesce(json_extract(j.input_json, '$.run_mode'), 'sandbox')=?"
+        args.append(run_mode)
     with connection(base) as conn:
         return [dict(row) for row in conn.execute(sql + " ORDER BY j.seq DESC LIMIT 20", args)]
 
@@ -224,8 +268,11 @@ def serialize(job):
     data = json.loads(job["result_json"])
     parameters = json.loads(job["input_json"])
     data.setdefault("title", (data.get("draft") or {}).get("title") or parameters.get("title"))
+    if parameters.get("practice_sample_id"):
+        data.setdefault("sample_id", parameters["practice_sample_id"])
     fields = ("id", "status", "stage", "detail", "error", "created", "updated")
     return {**data, **{field: job[field] for field in fields},
+            "run_mode": parameters.get("run_mode", "sandbox"),
             "model_count": parameters.get("model_count", 1),
             "ahead": job["ahead"] if job["status"] == "queued" else None,
             "position": job["ahead"] + 1 if job["status"] == "queued" else None}

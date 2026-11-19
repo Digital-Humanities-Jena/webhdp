@@ -5,12 +5,12 @@
     {{ repairOnly ? 'Inspect texture repairs' : 'Pipeline details' }}
   </button>
   <Teleport to="body">
-    <dialog ref="dialog" :aria-label="repairOnly ? 'Texture repair details' : 'Model publication pipeline'"
+    <dialog ref="dialog" :aria-label="dialogTitle"
       class="m-auto max-h-[85dvh] w-[calc(100%-2rem)] max-w-2xl overflow-y-auto overscroll-contain rounded-xl bg-white p-0 text-slate-900 shadow-xl backdrop:bg-slate-950/50"
       @click.self="dialog.close()">
       <div class="sticky top-0 z-10 flex items-start justify-between gap-4 border-b bg-white px-5 py-4">
         <div>
-          <h2 class="text-lg font-semibold">{{ repairOnly ? 'Texture repair details' : 'Model publication pipeline' }}</h2>
+          <h2 class="text-lg font-semibold">{{ dialogTitle }}</h2>
           <p v-if="job?.model" class="mt-1 break-all text-sm text-slate-600">{{ job.model }}</p>
         </div>
         <button type="button" class="rounded-md px-3 py-2 text-sm font-semibold text-indigo-800 hover:bg-indigo-50" autofocus
@@ -57,20 +57,26 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 
 const props = defineProps({
   job: { type: Object, default: null },
   repairOnly: { type: Boolean, default: false },
+  practice: { type: Boolean, default: false },
 })
 const dialog = ref(null)
-const steps = [
+const dialogTitle = computed(() => props.repairOnly ? 'Texture repair details' : props.practice ? 'Practice pipeline' : 'Model publication pipeline')
+const sourceSteps = [
   { title: 'Check the source model', description: 'Read the geometry and included assets. Resolve misplaced or misnamed texture references and omit unreadable images.' },
   { title: 'Export a model and match its metadata', description: 'Write a self-contained GLB, then match the source filename to the spreadsheet row.' },
+]
+const steps = computed(() => props.practice ? [...sourceSteps,
+  { title: 'Prepare files for download', description: 'Save the model, preview, spreadsheet, and mapped metadata in WebHDP.' },
+] : [...sourceSteps,
   { title: 'Validate metadata files', description: 'Generate Europeana EDM, IIIF, METS/MODS, CIDOC-CRM RDF/XML and JSON-LD.' },
   { title: 'Create a reviewable Sandbox draft', description: 'Upload the GLB and its metadata files, then verify each attachment against the local file.' },
-]
-const stages = { preparing_model: 0, mapping_metadata: 1, creating_draft: 2, generating_metadata: 2, uploading: 3 }
+])
+const stages = { preparing_model: 0, mapping_metadata: 1, creating_draft: 2, generating_metadata: 2, preparing_downloads: 2, uploading: 3 }
 function state(index) {
   const job = props.job
   if (job.status === 'completed') return 'Completed'

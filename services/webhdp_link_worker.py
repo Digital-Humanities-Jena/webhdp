@@ -6,6 +6,7 @@ executes one job at a time. Run multiple processes for bounded concurrency.
 """
 from __future__ import annotations
 
+from collections import Counter
 from contextlib import contextmanager
 from datetime import timedelta
 import hashlib
@@ -40,8 +41,8 @@ def authorization_valid(run):
     publication = db.session.get(LinkPublication, run.publication_id)
     # Expiry limits new HTTP operations. Accepted durable jobs remain authorized
     # after access-token expiry, but explicit revocation/account changes stop them.
-    return bool(client and client.enabled and token and not token.revoked and user and user.is_verified
-                and not user.force_password_change and (user.token_version or 0) == token.user_token_version
+    return bool(client and client.enabled and token and not token.revoked and link.user_can_link(user)
+                and (user.token_version or 0) == token.user_token_version
                 and publication and publication.enabled and run.publication_id in link.client_config(client)['pipeline_ids'])
 
 
@@ -194,22 +195,26 @@ def claim_next():
         with registry_lock('link-queue'):
             recover_interrupted()
             maximum = int(current_app.config.get('WEBHDP_LINK_MAX_CONCURRENT_RUNS') or os.environ.get('WEBHDP_LINK_MAX_CONCURRENT_RUNS', '2'))
-            if LinkRun.query.filter_by(status='running').count() >= maximum:
+            running = LinkRun.query.filter_by(status='running').all()
+            if len(running) >= maximum:
                 return None
-            for run in LinkRun.query.filter_by(status='queued').order_by(LinkRun.created_at, LinkRun.id).all():
+            running_by_account = Counter(run.user_id for run in running)
+            running_by_app = Counter(run.client_id for run in running)
+            queued = LinkRun.query.filter_by(status='queued').order_by(LinkRun.created_at, LinkRun.id).all()
+            queued.sort(key=lambda run: running_by_account[run.user_id])
+            for run in queued:
                 if not authorization_valid(run):
                     run.status, run.error_code, run.completed_at = 'failed', 'authorization_revoked', link.now()
                     db.session.commit()
                     continue
                 client = db.session.get(LinkClient, run.client_id)
-                active = LinkRun.query.filter_by(client_id=run.client_id, status='running').count()
-                if active >= link.client_config(client)['max_concurrent_runs']:
+                if running_by_app[run.client_id] >= link.client_config(client)['max_concurrent_runs']:
                     continue
                 policy = link.loads(run.request_json).get('publication', {}).get('hpc', {})
                 if policy.get('reuse_retained_allocation'):
                     # Reuse is serialized in the durable queue even across apps
                     # and worker processes. A waiting job consumes no worker.
-                    same_user = LinkRun.query.filter_by(user_id=run.user_id, status='running').all()
+                    same_user = (row for row in running if row.user_id == run.user_id)
                     if any(link.loads(row.request_json).get('publication', {}).get('hpc', {}).get('enabled') for row in same_user):
                         continue
                 run.status, run.started_at, run.heartbeat_at = 'running', link.now(), link.now()
@@ -348,11 +353,21 @@ def _prepare_hpc(run, config):
         raise FileProcessingError('Central HPC component preflight failed.')
 
 
+def _storage_overflow(client, user_id):
+    quota = link.client_config(client)
+    if link.storage_used(client.id) > quota['max_storage_bytes']:
+        return 'storage_quota_exceeded'
+    if link.storage_used(client.id, user_id) > link.client_account_limits(quota)['max_storage_bytes']:
+        return 'account_storage_quota_exceeded'
+    return None
+
+
 def _collect_artifacts(run, root):
     native = db.session.get(PipelineRun, run.native_run_id)
     client = db.session.get(LinkClient, run.client_id)
-    if link.storage_used(client.id) > link.client_config(client)['max_storage_bytes']:
-        raise link.LinkError('storage_quota_exceeded', 'Outputs exceeded application storage quota.', 413)
+    overflow = _storage_overflow(client, run.user_id)
+    if overflow:
+        raise link.LinkError(overflow, 'Outputs exceeded a storage limit for this application.', 413)
     seen = set()
     for artifact in native.artifacts:
         source = Path(artifact.path or '')
@@ -442,11 +457,12 @@ def execute_run(run_id):
             if run.session_id:
                 db.session.get(Session, run.session_id).status = 'failed'
             client = db.session.get(LinkClient, run.client_id)
-            if client and link.storage_used(client.id) > link.client_config(client)['max_storage_bytes']:
+            overflow = _storage_overflow(client, run.user_id) if client else None
+            if overflow:
                 # Remove only this failed run's derived outputs, never uploads.
                 shutil.rmtree(root / 'outputs', ignore_errors=True)
                 LinkArtifact.query.filter_by(run_id=run.id).delete()
-                run.error_code = 'storage_quota_exceeded'
+                run.error_code = overflow
         run.completed_at, run.heartbeat_at = link.now(), link.now()
         db.session.commit()
         release_owned_allocation(run)

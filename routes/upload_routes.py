@@ -4,8 +4,11 @@ from api_utils import APIResponse
 from services.cloud_upload_service import CloudUploadService, issue_stream_receipt, read_stream_receipt
 from database.database import db
 from database.models import User
+from exceptions import AppException, ResourceNotFoundError
 import logging
+from routes.hpc_link_routes import visible_cloud_staging
 from security import sanitize_upload_filename
+from services.account_upload_quota import admit_upload, finish_stream_upload
 
 upload_bp = Blueprint("upload", __name__)
 logger = logging.getLogger(__name__)
@@ -18,7 +21,7 @@ def stream_upload():
     Expects raw body stream or chunked transfer encoding.
     Headers:
         X-File-Name: Original filename
-        Content-Length: Total file size (optional but recommended)
+        Content-Length: Total file size
     """
     try:
         raw_filename = request.headers.get("X-File-Name")
@@ -44,39 +47,44 @@ def stream_upload():
 
         logger.info(f"Starting stream upload for: {filename} (Size: {file_size})")
 
-        result = CloudUploadService.stream_upload_file(
-            request.stream,
-            filename,
-            file_size
-        )
+        user_id = int(get_jwt_identity())
+        allocation_id = str(request.headers.get("X-HPC-Allocation-ID") or "").strip()
+        allocation = None
+        if allocation_id:
+            user = db.session.get(User, user_id)
+            if user is None or not hasattr(current_app, "hpc_allocation_service"):
+                raise ResourceNotFoundError("HPC allocation not found")
+            allocation = current_app.hpc_allocation_service.get_allocation_for_compute(allocation_id, user)
+            relative_dir = sanitize_upload_filename(request.headers.get("X-HPC-Relative-Dir") or "uploads")
+
+        with admit_upload(user_id, file_size, kind="stream") as reservation_id:
+            result = CloudUploadService.stream_upload_file(request.stream, filename, file_size)
+            if result.get("success"):
+                finish_stream_upload(reservation_id)
 
         if result.get("success"):
-            user_id = int(get_jwt_identity())
-            result['cloud_upload_receipt'] = issue_stream_receipt(user_id, filename, result)
-            allocation_id = str(request.headers.get("X-HPC-Allocation-ID") or "").strip()
-            if allocation_id and hasattr(current_app, "hpc_allocation_service"):
+            result['cloud_upload_receipt'] = issue_stream_receipt(user_id, filename, result, size_bytes=file_size)
+            if allocation is not None:
                 try:
-                    user = db.session.get(User, user_id)
-                    if user is None:
-                        return APIResponse.not_found("User not found")
                     cloud_path = read_stream_receipt(result['cloud_upload_receipt'], user_id)['path']
-                    allocation = current_app.hpc_allocation_service.get_allocation(allocation_id, user)
-                    result["hpc_staging"] = current_app.hpc_allocation_service.stage_cloud_references(
+                    allocation = current_app.hpc_allocation_service.get_allocation_for_compute(allocation_id, user)
+                    staging = current_app.hpc_allocation_service.stage_cloud_references(
                         allocation,
                         [
                             {
                                 "cloud_path": cloud_path,
                                 "storage_type": result.get("storage_type"),
                                 "name": filename,
-                                "relative_dir": sanitize_upload_filename(request.headers.get("X-HPC-Relative-Dir") or "uploads"),
+                                "relative_dir": relative_dir,
                             }
                         ],
                     )
+                    result["hpc_staging"] = visible_cloud_staging(staging, user)
                 except Exception as staging_exc:
                     logger.error("HPC staging after stream upload failed: %s", staging_exc, exc_info=True)
                     return APIResponse.error(
                         "HPC_STAGING_FAILED",
-                        f"File uploaded to cloud, but HPC staging failed: {staging_exc}",
+                        "The file was uploaded to cloud storage. Check your HPC allocation before retrying staging.",
                         502,
                         details={"upload": result},
                     )
@@ -92,6 +100,8 @@ def stream_upload():
                 details=result
             )
 
+    except AppException:
+        raise
     except Exception as e:
         logger.error(f"Stream upload error: {e}", exc_info=True)
         return APIResponse.server_error(f"Stream upload failed: {str(e)}")

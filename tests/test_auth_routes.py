@@ -11,7 +11,7 @@ from flask import Flask
 from flask_jwt_extended import JWTManager, create_access_token
 
 from database.database import db
-from database.models import AuditEvent, Notification, SystemConfig, User, UserMfaChallenge, UserRecoveryCode, UserRole
+from database.models import AuditEvent, Notification, SystemConfig, User, UserEmailVerification, UserMfaChallenge, UserRecoveryCode, UserRole
 from middleware import setup_error_handlers
 from routes.auth_routes import auth_bp
 from services.zenodo_credential_service import ZenodoCredentialService
@@ -20,6 +20,14 @@ from services.zenodo_credential_service import ZenodoCredentialService
 class CapturingEmailService:
     def __init__(self):
         self.login_codes = []
+        self.verification_links = []
+        self.fail_verification_delivery = False
+
+    def send_verification_email(self, to_email, token):
+        if self.fail_verification_delivery:
+            return False
+        self.verification_links.append((to_email, token))
+        return True
 
     def send_login_mfa_code_email(self, to_email, code, expires_minutes):
         self.login_codes.append(
@@ -34,7 +42,8 @@ class CapturingEmailService:
 
 
 @pytest.fixture()
-def auth_app():
+def auth_app(monkeypatch):
+    monkeypatch.setenv("REGISTER_RATE_LIMIT_ATTEMPTS", "60")
     app = Flask(__name__)
     app.config["TESTING"] = True
     app.config["SECRET_KEY"] = "auth-test-secret"
@@ -50,6 +59,7 @@ def auth_app():
     app.config["MFA_RECOVERY_RATE_LIMIT_ATTEMPTS"] = 5
     app.config["MFA_RECOVERY_RATE_LIMIT_WINDOW_SECONDS"] = 300
     app.config["MFA_RECOVERY_RATE_LIMIT_LOCKOUT_SECONDS"] = 900
+    app.config["REGISTRATION_EMAIL_RESEND_SECONDS"] = 0
 
     setup_error_handlers(app)
     db.init_app(app)
@@ -100,6 +110,134 @@ def _login_for_mfa(auth_app, email="owner@example.com", password="password123"):
     )
 
 
+def test_new_account_requires_explicit_verification_and_sets_password_through_email(auth_app, caplog):
+    client = auth_app["client"]
+    credentials = {"email": "New-User@EXAMPLE.com", "password": "new-password123"}
+    registration = client.post("/api/v1/auth/register", json={**credentials, "password": "registration-only"})
+    assert registration.status_code == 202
+    assert registration.get_json()["data"] == {"accepted": True}
+
+    [(email, token)] = auth_app["email_service"].verification_links
+    assert email == "New-User@example.com"
+    with auth_app["app"].app_context():
+        assert User.query.filter_by(email=email).first() is None
+        assert UserEmailVerification.query.one().token_hash != token
+    caplog.set_level("INFO")
+    assert client.get(f"/api/v1/auth/verify-email/{token}").status_code == 410
+    assert client.post(f"/api/v1/auth/verify-email/{token}").status_code == 405
+    assert token not in caplog.text
+    assert client.get("/api/v1/auth/verify-email").status_code == 405
+
+    confirmation = {"token": token, "password": credentials["password"]}
+    assert client.post("/api/v1/auth/verify-email", json=confirmation).status_code == 200
+    for invalid_token in (token, "unknown-token"):
+        result = client.post("/api/v1/auth/verify-email", json={**confirmation, "token": invalid_token})
+        assert result.status_code == 400
+        assert result.get_json()["error"]["code"] == "INVALID_EMAIL_VERIFICATION_LINK"
+
+    assert client.post("/api/v1/auth/login", json={**credentials, "password": "registration-only"}).status_code == 400
+    login = client.post("/api/v1/auth/login", json={**credentials, "email": credentials["email"].lower()})
+    assert login.status_code == 200
+    assert login.get_json()["data"]["user"]["onboarding_required"] is True
+    with auth_app["app"].app_context():
+        assert UserEmailVerification.query.count() == 0
+        assert User.query.filter_by(canonical_email="new-user@example.com").one().is_verified
+
+
+def test_email_delivery_failure_can_be_retried_and_preserves_previous_link(auth_app):
+    client = auth_app["client"]
+    mail = auth_app["email_service"]
+    request_payload = {"email": "delivery-recovery@example.com"}
+    resend = "/api/v1/auth/resend-verification"
+    mail.fail_verification_delivery = True
+    failed = client.post("/api/v1/auth/register", json=request_payload)
+    assert failed.status_code == 503
+    assert failed.get_json()["error"]["code"] == "VERIFICATION_EMAIL_UNAVAILABLE"
+    with auth_app["app"].app_context():
+        assert UserEmailVerification.query.count() == 0
+        assert User.query.filter_by(email=request_payload["email"]).count() == 0
+
+    mail.fail_verification_delivery = False
+    assert client.post(resend, json=request_payload).status_code == 202
+    (_, first_token) = mail.verification_links[-1]
+    mail.fail_verification_delivery = True
+    assert client.post(resend, json=request_payload).status_code == 503
+    with auth_app["app"].app_context():
+        assert UserEmailVerification.query.count() == 1
+    assert client.post(
+        "/api/v1/auth/verify-email", json={"token": first_token, "password": "verified-password123"},
+    ).status_code == 200
+
+
+def test_replaced_and_expired_registration_challenges_are_rejected(auth_app):
+    client = auth_app["client"]
+    email = {"email": "expiring-activation@example.com"}
+    assert client.post("/api/v1/auth/register", json=email).status_code == 202
+    first_token = auth_app["email_service"].verification_links[-1][1]
+    assert client.post("/api/v1/auth/resend-verification", json=email).status_code == 202
+    next_token = auth_app["email_service"].verification_links[-1][1]
+    confirm_url = "/api/v1/auth/verify-email"
+    assert client.post(confirm_url, json={"token": first_token, "password": "new-password123"}).status_code == 400
+    with auth_app["app"].app_context():
+        challenge = UserEmailVerification.query.one()
+        challenge.expires_at = datetime.utcnow() - timedelta(seconds=1)
+        db.session.commit()
+    assert client.post(confirm_url, json={"token": next_token, "password": "new-password123"}).status_code == 400
+
+
+def test_pending_legacy_user_keeps_identity_and_must_choose_a_fresh_password(auth_app):
+    client = auth_app["client"]
+    email = "Legacy-Pending@example.com"
+    with auth_app["app"].app_context():
+        record = User(email=email, role=UserRole.USER, is_verified=False, verification_token="old-link")
+        record.set_password("legacy-password")
+        db.session.add(record)
+        db.session.commit()
+        identity = record.id
+    assert client.get("/api/v1/auth/verify-email/old-link").status_code == 410
+    assert client.post("/api/v1/auth/resend-verification", json={"email": email.lower()}).status_code == 202
+    assert auth_app["email_service"].verification_links[-1][0] == email
+    token = auth_app["email_service"].verification_links[-1][1]
+    assert client.post("/api/v1/auth/verify-email", json={"token": token, "password": "final-password"}).status_code == 200
+    with auth_app["app"].app_context():
+        verified = db.session.get(User, identity)
+        assert verified.is_verified and verified.onboarding_required
+        assert verified.check_password("final-password")
+        assert not verified.check_password("legacy-password")
+        assert verified.verification_token is None
+
+
+def test_case_collisions_do_not_merge_or_accept_a_third_registration(auth_app):
+    client = auth_app["client"]
+    with auth_app["app"].app_context():
+        for spelling, password in (("Case-Collision@example.com", "first-password"), ("case-collision@example.com", "second-password")):
+            account = User(email=spelling, role=UserRole.USER, is_verified=True, legacy_canonical_email=spelling.lower())
+            account.set_password(password)
+            db.session.add(account)
+        db.session.commit()
+    for spelling, password in (("Case-Collision@example.com", "first-password"), ("case-collision@example.com", "second-password")):
+        assert client.post("/api/v1/auth/login", json={"email": spelling, "password": password}).status_code == 200
+    assert client.post("/api/v1/auth/register", json={"email": "CASE-COLLISION@example.com"}).status_code == 202
+    assert client.post("/api/v1/auth/register", json={"email": "OWNER@example.com"}).status_code == 202
+    assert auth_app["email_service"].verification_links == []
+
+
+@pytest.mark.parametrize("email", ["not-an-address", "name@bad_domain.example", "a@example.com\nBcc: a@a.example", 123, None])
+def test_registration_rejects_malformed_email_before_delivery(auth_app, email):
+    response = auth_app["client"].post("/api/v1/auth/register", json={"email": email})
+    assert response.status_code == 400
+    assert auth_app["email_service"].verification_links == []
+
+
+def test_registration_caps_json_requests_before_parsing(auth_app):
+    response = auth_app["client"].post(
+        "/api/v1/auth/register", json={"email": "large-payload@example.com", "padding": "x" * 16384},
+    )
+    assert response.status_code == 413
+    assert response.get_json()["error"]["code"] == "AUTH_PAYLOAD_TOO_LARGE"
+    assert auth_app["email_service"].verification_links == []
+
+
 def test_password_login_requires_email_mfa_and_sends_code(auth_app):
     response = _login_for_mfa(auth_app)
 
@@ -120,6 +258,25 @@ def test_password_login_requires_email_mfa_and_sends_code(auth_app):
         challenge = UserMfaChallenge.query.one()
         assert challenge.method == "email"
         assert challenge.code_hash != sent["code"]
+
+
+def test_changing_password_invalidates_an_outstanding_login_challenge(auth_app):
+    challenge = _login_for_mfa(auth_app).get_json()["data"]
+    code = auth_app["email_service"].login_codes[-1]["code"]
+    changed = auth_app["client"].put(
+        "/api/v1/auth/me/password", headers=auth_app["headers"],
+        json={
+            "current_password": "password123",
+            "new_password": "replacement-password",
+            "confirm_new_password": "replacement-password",
+        },
+    )
+    assert changed.status_code == 200
+    old_challenge = auth_app["client"].post(
+        "/api/v1/auth/login/verify-code", json={"mfa_token": challenge["mfa_token"], "code": code},
+    )
+    assert old_challenge.status_code == 400
+    assert old_challenge.get_json()["error"]["code"] == "MFA_CHALLENGE_INVALID"
 
 
 def test_development_inline_mfa_delivery_returns_code_without_email(auth_app):
@@ -455,10 +612,6 @@ def test_recovery_code_rejects_expired_malformed_and_wrong_codes(auth_app):
 
 
 def test_recovery_code_verification_has_dedicated_rate_limit(auth_app):
-    import routes.auth_routes as auth_routes
-
-    auth_routes._recovery_rate_limit_events.clear()
-    auth_routes._recovery_rate_limit_lockouts.clear()
     auth_app["app"].config["MFA_RECOVERY_RATE_LIMIT_ATTEMPTS"] = 2
 
     login_response = _login_for_mfa(auth_app)
@@ -627,6 +780,16 @@ def test_auth_me_returns_derived_groups_from_capabilities(auth_app):
     user_payload = response.get_json()["data"]["user"]
     assert "developer_access" in user_payload["capabilities"]
     assert "developer" in user_payload["groups"]
+
+
+def test_verified_sign_in_address_cannot_be_changed_with_profile_edit(auth_app):
+    headers = auth_app["headers"]
+    result = auth_app["client"].put("/api/v1/auth/me", headers=headers,
+                                   json={"email": "different@example.com", "full_name": "Changed"})
+    assert result.status_code == 400
+    assert "verified sign-in email" in result.json["error"]["message"]
+    current = auth_app["client"].get("/api/v1/auth/me", headers=headers).json["data"]["user"]
+    assert current["email"] == "owner@example.com" and current["full_name"] != "Changed"
 
 
 def test_account_update_accepts_internal_profile_visibility_and_rejects_public(auth_app):

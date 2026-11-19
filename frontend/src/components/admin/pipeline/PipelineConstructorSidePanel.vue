@@ -51,12 +51,26 @@
           <p v-if="sessionsError" role="alert" class="mt-2 text-sm text-rose-700">{{ sessionsError }}</p>
           <button type="button" class="mt-2 text-xs text-indigo-700 underline" :disabled="loadingSessions" @click="$emit('retry-sessions')">Refresh sessions</button>
         </div>
+        <div v-if="gpuCount" class="space-y-2">
+          <p class="text-sm font-semibold text-slate-800">
+            This pipeline requires {{ gpuCount === 1 ? 'a GPU' : `${gpuCount} GPUs` }}.
+          </p>
+          <PipelineGpuStatus
+            v-if="preflightSessionId"
+            ref="gpuStatus"
+            :session-id="preflightSessionId"
+            :gpu-count="gpuCount"
+            :component-keys="hpcComponentKeys"
+            :requests-allocation="false"
+          />
+          <p v-else class="text-xs text-slate-600">Choose a session to check its GPU allocation.</p>
+        </div>
         <ReservedGpuAccess
           v-if="preflightSessionId && usesHpc"
           :session-id="preflightSessionId"
           :disabled="executingPipeline"
-          @claimed="$emit('reservation-changed')"
-          @released="$emit('reservation-changed')"
+          @claimed="onReservationChanged"
+          @released="onReservationChanged"
         />
         <div v-if="preflightSessionId" class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
           <div class="flex flex-wrap items-center justify-between gap-4">
@@ -245,7 +259,8 @@
 </template>
 
 <script setup>
-import { computed, reactive } from 'vue'
+import { computed, reactive, ref } from 'vue'
+import PipelineGpuStatus from '@/components/hpc/PipelineGpuStatus.vue'
 import ReservedGpuAccess from '@/components/hpc/ReservedGpuAccess.vue'
 import ProgressBar from '@/components/ui/ProgressBar.vue'
 import SessionPathPicker from '@/components/ui/SessionPathPicker.vue'
@@ -262,6 +277,8 @@ const props = defineProps({
   runElapsed: { type: Number, default: 0 },
   executionBlockedReason: { type: String, default: '' },
   usesHpc: { type: Boolean, default: false },
+  gpuCount: { type: Number, default: 0 },
+  hpcComponentKeys: { type: Array, default: () => [] },
   validationResult: {
     type: Object,
     default: null,
@@ -317,6 +334,13 @@ const emit = defineEmits([
   'run-pipeline-execution',
   'run-preflight',
 ])
+
+const gpuStatus = ref(null)
+
+function onReservationChanged() {
+  gpuStatus.value?.refresh()
+  emit('reservation-changed')
+}
 
 const runPercentage = computed(() => {
   const progress = props.pipelineExecutionRun?.result?.progress

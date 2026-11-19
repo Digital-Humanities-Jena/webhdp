@@ -5,6 +5,7 @@ import hashlib
 from collections import Counter
 import os
 from pathlib import Path
+import re
 import sys
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
@@ -16,11 +17,15 @@ sys.path.insert(0, str(ROOT))
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager, create_access_token
+from flask_mail import Mail
 from werkzeug.serving import run_simple
 
 from database.database import db
 from database.models import ComponentDefinition, ComponentProfile, ComponentVersion, PlaygroundRun, PipelineRun, Session, User, UserRole
 from middleware import setup_error_handlers
+from routes.auth_routes import auth_bp
+from routes.institution_invitation_routes import institution_invitation_bp
+from routes.institution_routes import institution_bp
 from routes.pipeline_v2_routes import pipeline_v2_bp
 from services.native_pipeline_system import NativePipelineSystemService
 from routes.session_routes import session_bp
@@ -30,6 +35,7 @@ from routes.template_routes import template_bp
 from services.project_service import ProjectService
 from services.msf_service import MSFService
 from services.edm_service import EdmService
+from services.email_service import EmailService
 from session_manager import SessionManager
 from services.submission_pipeline_service import execute_submission_pipeline
 from unittest.mock import patch
@@ -83,12 +89,19 @@ def create_fixture_app(directory):
                       SECRET_KEY=str(uuid4()), MAX_CONTENT_LENGTH=32 * 1024 * 1024,
                       ALLOWED_EXTENSIONS=SINGLE_FILE_ALLOWED_EXTENSIONS, STORAGE_MODE='server_only',
                       WEBHDP_DEPLOYMENT_MODE='local', WEBHDP_ALLOW_LOCAL_HDP_COMPONENTS=True,
-                      ENABLE_RENDERER=False, ENABLE_USDZ_CONVERSION=False, ENABLE_METIS_VALIDATION=False)
+                      ENABLE_RENDERER=False, ENABLE_USDZ_CONVERSION=False, ENABLE_METIS_VALIDATION=False,
+                      FRONTEND_URL='http://127.0.0.1:4175')
     os.environ['SHARED_SESSION_PATH'] = directory
     db.init_app(app)
     JWTManager(app)
     CORS(app, origins=['http://127.0.0.1:4175'])
     setup_error_handlers(app)
+    app.register_blueprint(auth_bp, url_prefix='/api/v1/auth')
+    app.register_blueprint(institution_bp, url_prefix='/api/v1/institutions')
+    app.register_blueprint(institution_invitation_bp, url_prefix='/api/v1/institutions')
+    mailbox = []
+    Mail(app)
+    app.email_service = EmailService(SimpleNamespace(send=mailbox.append))
     app.register_blueprint(pipeline_v2_bp, url_prefix='/api/v2')
     app.register_blueprint(session_bp, url_prefix='/api/v1/sessions')
     app.register_blueprint(single_file_bp, url_prefix='/api/v1/sessions')
@@ -156,6 +169,30 @@ def create_fixture_app(directory):
     def health():
         return jsonify(ready=True)
 
+    @app.post('/__test__/identity/fixture')
+    def identity_fixture():
+        label = uuid4().hex
+        admin = User(email=f'admin-{label}@example.com', role=UserRole.ADMIN, is_verified=True, password_hash='fixture')
+        requester = User(email=f'requester-{label}@example.com', role=UserRole.USER, is_verified=True, password_hash='fixture')
+        db.session.add_all([admin, requester])
+        db.session.commit()
+        return jsonify(admin_token=create_access_token(identity=str(admin.id)),
+                       requester_token=create_access_token(identity=str(requester.id)),
+                       invited_email=f'invitee-{label}@example.com')
+
+    @app.get('/__test__/identity/mail')
+    def identity_mail():
+        email = request.args.get('email')
+        kind = request.args.get('kind')
+        path = {'verification': 'verify-email', 'invitation': 'institution-invitation'}.get(kind)
+        if path:
+            for message in reversed(mailbox):
+                if email in message.recipients:
+                    match = re.search(rf'http://127\.0\.0\.1:4175/{path}#token=[A-Za-z0-9_-]+', message.body or '')
+                    if match:
+                        return jsonify(url=match.group())
+        return jsonify(error='Mail not found'), 404
+
     @app.get('/api/v1/admin/storage-status')
     def storage_status():
         return jsonify(success=True, data={'config': {'storage_mode': 'server_only'}, 'active_storage': 'server', 'services': {}})
@@ -193,7 +230,8 @@ def create_fixture_app(directory):
     @app.post('/__test__/fixture')
     def fixture():
         label = str(uuid4())
-        users = [User(email=f'{name}-{label}@example.com', password_hash='test-only-hash') for name in ('owner', 'other')]
+        users = [User(email=f'{name}-{label}@example.com', password_hash='test-only-hash', is_verified=True)
+                 for name in ('owner', 'other')]
         db.session.add_all(users)
         db.session.flush()
         workspace = Path(directory) / label

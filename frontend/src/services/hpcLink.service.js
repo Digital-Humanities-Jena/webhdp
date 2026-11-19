@@ -1,8 +1,8 @@
 import api from './api'
 
 const hpcLinkService = {
-  getStatus(params = {}) {
-    return api.get('/hpc-link/status', { params })
+  getStatus(params = {}, options = {}) {
+    return api.get('/hpc-link/status', { ...options, params })
   },
 
   listReservations(purpose) {
@@ -17,8 +17,12 @@ const hpcLinkService = {
     return api.post('/hpc-link/allocations', payload)
   },
 
-  getAllocation(allocationId) {
-    return api.get(`/hpc-link/allocations/${encodeURIComponent(allocationId)}`)
+  listMyAllocations(options = {}) {
+    return api.get('/hpc-link/allocations', { ...options, suppressGlobalError: true })
+  },
+
+  getAllocation(allocationId, options = {}) {
+    return api.get(`/hpc-link/allocations/${encodeURIComponent(allocationId)}`, options)
   },
 
   preflightAllocation(allocationId, components = []) {
@@ -37,8 +41,8 @@ const hpcLinkService = {
     return api.post(`/hpc-link/allocations/${encodeURIComponent(allocationId)}/zenodo/upload-draft`, payload)
   },
 
-  releaseAllocation(allocationId) {
-    return api.post(`/hpc-link/allocations/${encodeURIComponent(allocationId)}/release`, {})
+  releaseAllocation(allocationId, options = {}) {
+    return api.post(`/hpc-link/allocations/${encodeURIComponent(allocationId)}/release`, {}, options)
   }
 }
 

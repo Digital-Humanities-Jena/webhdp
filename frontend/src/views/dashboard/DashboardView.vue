@@ -1,6 +1,16 @@
 <template>
   <div class="min-h-screen bg-gray-50">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <header class="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h1 class="text-2xl font-bold text-gray-900">Dashboard</h1>
+          <p class="mt-1 text-sm text-gray-600">Resume an upload or learn the workflow with a sample model.</p>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <router-link :to="{ name: 'ModelPublicationTutorial' }" class="rounded-md border border-indigo-200 px-4 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-50">Try the 3D tutorial</router-link>
+          <router-link to="/workflow/upload" class="rounded-md bg-indigo-700 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-800">Upload files</router-link>
+        </div>
+      </header>
 
       <div class="bg-white shadow rounded-lg">
         <div class="px-6 py-4 border-b border-gray-200 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -33,8 +43,7 @@
 
         <div v-else-if="sessions.length === 0" class="p-6 text-center">
           <h3 class="text-lg font-semibold text-gray-900">{{ currentScope === 'all' ? 'Start your first session' : 'No sessions in this workspace' }}</h3>
-          <p class="mx-auto mt-2 max-w-xl text-sm text-gray-600">Upload a self-contained model to try the workflow, or a ZIP and metadata spreadsheet for a batch. You will review everything before processing starts.</p>
-          <router-link to="/workflow/upload" class="mt-4 inline-flex rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700">Upload files</router-link>
+          <p v-if="currentScope === 'all'" class="mx-auto mt-2 max-w-xl text-sm text-gray-600">Once you upload files, you can return here to review them and continue processing.</p>
           <button v-if="currentScope !== 'all'" type="button" class="ml-3 mt-4 text-sm font-medium text-indigo-700 underline" @click="changeScope('all')">Show all sessions</button>
         </div>
 
@@ -228,7 +237,7 @@ const statusClass = (status) => {
 }
 
 const formatCredentialSource = (source) => {
-  if (!source) return 'System credentials'
+  if (!source || source === 'none') return 'No Zenodo credential'
   return `${source.charAt(0).toUpperCase()}${source.slice(1)} credentials`
 }
 

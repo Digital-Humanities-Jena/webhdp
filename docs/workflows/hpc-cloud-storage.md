@@ -51,9 +51,9 @@ Entry points:
 - API: `/api/v1/hpc-link/allocations`
 - API: `/api/v1/hpc-link/allocations/<allocation_id>`
 - API: `/api/v1/hpc-link/allocations/<allocation_id>/preflight`
-- API: `/api/v1/hpc-link/allocations/<allocation_id>/stage/cloud`
+- Operator API: `/api/v1/hpc-link/allocations/<allocation_id>/stage/cloud`
 - API: `/api/v1/hpc-link/allocations/<allocation_id>/stage/cloud-references`
-- API: `/api/v1/hpc-link/allocations/<allocation_id>/zenodo/upload-draft`
+- Operator API: `/api/v1/hpc-link/allocations/<allocation_id>/zenodo/upload-draft`
 - API: `/api/v1/hpc-link/allocations/<allocation_id>/release`
 
 Workflow:
@@ -61,13 +61,75 @@ Workflow:
 2. Request an allocation, or claim a [pre-reserved GPU](../guides/prereserved_gpu_demo.md)
    that an operator granted to this verified account for its own upload session.
 3. Run preflight for the allocation.
-4. Stage files or recorded cloud mirrors from that upload session.
-5. Optionally upload a Zenodo draft from the allocation context.
+4. Use the upload session's files or stage cloud files using receipts from your own WebHDP uploads.
+5. Use the publishing workflow to create a Zenodo draft.
 6. Release the allocation when finished. Releasing a pre-reserved GPU detaches
    WebHDP access and leaves the operator's Slurm job running.
 
 Complete when:
 - HPC resources are staged, used, and released cleanly.
+
+Staging and preflight require a running allocation, current HPC permission and
+edit access to the attached working session. An owner can still cancel or
+release their idle request after HPC access is withdrawn.
+
+The Compose `hpc-queue` service advances waiting requests even after users
+close their browsers. Other deployments can run `python -m flask --app app hpc-queue`
+with the same instance database and configuration as the API. The queue pauses
+during maintenance and uses the same admission lock as the API.
+
+WebHDP applies the active allocation limits across ordinary allocations and
+reserved GPU claims. The default waiting limit is two HPC requests per account
+and 24 per site. A waiting request expires after 24 hours if WebHDP has not sent
+it to the scheduler. The `HPC_LINK_MAX_QUEUED_ALLOCATIONS_PER_USER`,
+`HPC_LINK_MAX_QUEUED_ALLOCATIONS`, and `HPC_LINK_QUEUED_REQUEST_TTL_MINUTES`
+environment settings control these limits. Use `HPC_LINK_MAX_GPUS_PER_ALLOCATION`
+and `HPC_LINK_MAX_DURATION_MINUTES_PER_ALLOCATION` to set smaller per-request
+limits where required by the gateway policy.
+
+### Recover an unconfirmed scheduler submission
+
+WebHDP keeps the active slot occupied when HPC-Link has yet to confirm a
+submission. The allocation owner sees **Waiting for confirmation** while the
+queue checks the gateway. A current gateway persists a request identity before
+calling `sbatch`, so WebHDP can recover its existing job handle after an HTTP
+timeout. Replay is only available when the gateway confirms that no request
+intent exists. An older gateway can still start an ordinary allocation, but a
+lost response on its legacy endpoint requires operator reconciliation.
+
+Upgrade HPC-Link before starting the new WebHDP API and queue worker. Keep
+`WEBHDP_SESSIONS_REGISTRY_PATH` on the same persistent volume across updates and
+run one gateway process against that registry. Reconcile outstanding requests
+before moving WebHDP to a different gateway or restoring its registry.
+
+If confirmation does not return, use the following maintenance procedure.
+
+1. Record the allocation’s public ID, partition attempt index, request time,
+   requested resources, and gateway account. Enable maintenance mode and drain
+   WebHDP writers before making any corrections, including the `hpc-queue`
+   service. Snapshot the WebHDP database and gateway registry.
+2. Check cluster accounting and the live scheduler under the gateway’s Slurm
+   account with `sacct` and `squeue`. For a current gateway, the full job name is
+   `hpc-link-webhdp-<request-id>`. The request ID is
+   `uuid5(NAMESPACE_URL, f"webhdp-allocation:{public_id}:{partition_attempt_index}")`.
+   Cross-check the job’s output path under the request’s private gateway
+   workspace. For legacy submissions, correlate its submission time, partition,
+   GPU request and workspace with the gateway logs. Leave the slot occupied if
+   the evidence is incomplete or identifies more than one candidate.
+3. If a keyed request has one verified live job, stop the gateway and restore
+   the numeric `job_id` on its existing intent in the persisted registry, then
+   restart the same gateway. The WebHDP queue can attach the handle on its next
+   check. If the request is legacy, have the cluster operator cancel only the
+   positively identified job and confirm its terminal state before clearing
+   the slot.
+4. If authoritative scheduler records confirm the job ended or no job was
+   submitted, and all original gateway requests have finished, clear the slot
+   in WebHDP by changing only the matching ordinary allocation row from
+   `allocating` to `failed` in a maintenance transaction. The row must have no
+   `remote_session_id` or `reservation_id`. Record the evidence and allocation ID
+   in the operations log, then restart the queue and verify that the account’s
+   active count drops. Keep the registry’s request intent and release receipts
+   so a delayed retry can never create a second job for that identity.
 
 ## HPC Diagnostics
 
@@ -104,6 +166,20 @@ Storage modes:
 - `cloud_backup`
 - `server_only`
 - `local`
+
+In local storage mode, site administrators can use the operator-configured
+input mount. Workstation-local deployments can also give verified users
+**Mounted input access**. In **Admin
+Panel → Users**, grant that capability only to accounts that can read the
+shared mount. All accounts with the capability can browse the shared input
+root, so mount a dedicated folder containing data intended for that group.
+An institution membership and HPC Access have their own permission checks.
+Users without mounted input access can still upload ZIP batches into their
+own server workspace when local mode is active.
+
+Mounted sessions also require ordinary session access. Revoking the capability
+removes access to mounted-input sessions and prevents waiting scans from starting.
+Previously created sessions backed by the shared mount follow the same rules.
 
 Workflow:
 1. Configure storage providers and storage mode.

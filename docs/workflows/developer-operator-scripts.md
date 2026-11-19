@@ -125,6 +125,7 @@ Entry points:
 - `scripts/readiness_check.py`
 - `scripts/release_check.sh`
 - `scripts/check_release_images.py`
+- `scripts/check_account_continuity.py`
 - `scripts/maintenance.py`
 - `scripts/wait_for_celery_drain.py`
 - `scripts/cleanup_legacy_workflow_state.py`
@@ -135,7 +136,7 @@ Entry points:
 Workflow:
 1. Check readiness or release state.
 2. Run backup, restore, or retention operations.
-3. Drain queues before maintenance.
+3. Drain queues before maintenance and verify account continuity across updates.
 4. Clean legacy workflow state when required.
 5. Validate component manifests before release.
 

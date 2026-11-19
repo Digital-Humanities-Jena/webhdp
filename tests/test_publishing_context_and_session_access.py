@@ -4,6 +4,7 @@ pytest.importorskip("cryptography.fernet")
 from flask import Flask
 
 from database.database import db
+from exceptions import SecurityError
 from database.models import (
     Institution,
     InstitutionMembership,
@@ -128,9 +129,16 @@ def test_publishing_context_resolves_user_then_institution_then_system(app, monk
             actor_user_id=user.id,
         )
         monkeypatch.setenv("ZENODO_SANDBOX_API_KEY", "system-sandbox-token")
+        monkeypatch.setenv("ZENODO_API_KEY", "system-production-token")
+        monkeypatch.delenv("WEBHDP_ALLOW_SYSTEM_SANDBOX_PUBLISHING", raising=False)
+        with pytest.raises(SecurityError, match="authorized Zenodo Sandbox"):
+            publishing_context_service.resolve_token_for_session(session_row, "sandbox", require_credential=True)
+        monkeypatch.setenv("WEBHDP_ALLOW_SYSTEM_SANDBOX_PUBLISHING", "true")
         token_context = publishing_context_service.resolve_token_for_session(session_row, "sandbox")
         assert token_context["source"] == "system"
         assert token_context["token"] == "system-sandbox-token"
+        with pytest.raises(SecurityError, match="authorized Zenodo Production"):
+            publishing_context_service.resolve_token_for_session(session_row, "production", require_credential=True)
 
 
 def test_publishing_context_resolves_active_shared_user_credential(app):
@@ -182,6 +190,14 @@ def test_publishing_context_resolves_active_shared_user_credential(app):
         assert token_context["selected_by_user_id"] == recipient.id
         assert token_context["owner_id"] == owner.id
         assert token_context["token"] == "owner-shared-token"
+        unrelated = User(email="unrelated@example.com", role=UserRole.USER, is_verified=True)
+        unrelated.set_password("password123")
+        db.session.add(unrelated)
+        db.session.flush()
+        with pytest.raises(SecurityError, match="selected personal Zenodo credential"):
+            publishing_context_service.resolve_token_for_session(session_row, "sandbox", actor_user_id=unrelated.id)
+        assert publishing_context_service.describe_session(session_row, actor_user_id=unrelated.id)["effective_credential_source"] == "none"
+        assert publishing_context_service.resolve_token_for_session(session_row, "sandbox", actor_user_id=owner.id)["token"] == "owner-shared-token"
 
         description = publishing_context_service.describe_session(session_row)
         assert description["effective_credential_source"] == "user"
@@ -287,7 +303,7 @@ def test_describe_sessions_batches_sources_and_community_policy(app, monkeypatch
 
         assert descriptions[user_session.id]["effective_credential_source"] == "user"
         assert descriptions[institution_session.id]["effective_credential_source"] == "institution"
-        assert descriptions[system_session.id]["effective_credential_source"] == "system"
+        assert descriptions[system_session.id]["effective_credential_source"] == "none"
         assert descriptions[user_session.id]["default_communities"] == ["shared-primary", "shared-secondary"]
         assert descriptions[institution_session.id]["moderation_default_communities"] == ["shared-primary"]
         assert descriptions[system_session.id]["default_communities"] == []

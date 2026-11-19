@@ -1,13 +1,20 @@
 <template>
   <div class="mx-auto max-w-5xl px-4 py-8 text-slate-900 sm:px-6 sm:py-12">
     <header class="mb-7">
-      <p class="text-sm font-semibold text-teal-800">Zenodo Sandbox workflow</p>
-      <h1 class="mt-1 text-3xl font-bold tracking-tight sm:text-4xl">Prepare a 3D model for publication</h1>
-      <p class="mt-3 max-w-2xl text-base leading-7 text-slate-600">
+      <p class="text-sm font-semibold text-teal-800">{{ practice ? 'Hands-on tutorial' : 'Zenodo Sandbox workflow' }}</p>
+      <h1 class="mt-1 text-3xl font-bold tracking-tight sm:text-4xl">{{ practice ? 'Try the 3D asset pipeline' : 'Prepare a 3D model for publication' }}</h1>
+      <p v-if="practice" class="mt-3 max-w-2xl text-base leading-7 text-slate-600">
+        Use a sample to learn how WebHDP repairs textures, matches a model to its metadata, and prepares a GLB file for download. This CPU tutorial runs entirely in WebHDP and needs no Zenodo account.
+      </p>
+      <p v-else class="mt-3 max-w-2xl text-base leading-7 text-slate-600">
         Choose a sample or upload your model. WebHDP checks texture references, maps your metadata, and
         prepares a draft with linked data files in the Zenodo test environment.
       </p>
-      <div v-if="showForm" class="mt-4"><ModelPublicationDetails /></div>
+      <div v-if="showForm" class="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2">
+        <ModelPublicationDetails :practice="practice" />
+        <router-link v-if="!practice && !demoAccount" :to="{ name: 'ModelPublicationTutorial' }" class="text-sm font-semibold text-indigo-700 underline underline-offset-4">Try a sample tutorial without a Zenodo key</router-link>
+        <router-link v-if="!demoAccount" to="/account/usage" class="text-sm font-semibold text-indigo-700 underline underline-offset-4">Your request limits</router-link>
+      </div>
     </header>
 
     <div class="publication-queue mb-5" :style="{ '--publication-nav-offset': demoAccount ? '0px' : `${navigationHeight}px` }">
@@ -18,12 +25,15 @@
     </div>
 
     <div v-if="!showForm && currentJob" class="space-y-5">
-      <ModelPublicationRun :key="currentJob.id" :job="currentJob" :refresh-error="refreshError" :published-example="publishedExample" :demo-account="demoAccount"
+      <ModelPublicationRun :key="currentJob.id" :job="currentJob" :refresh-error="refreshError" :published-example="publishedExample" :demo-account="demoAccount" :practice="practice"
         @refresh="refreshJobs" />
-      <button v-if="!demoAccount || ['completed', 'failed'].includes(currentJob.status)" type="button" class="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-50"
-        @click="startAnother">
-        Prepare another model
-      </button>
+      <div v-if="(!demoAccount && !practice) || ['completed', 'failed'].includes(currentJob.status)" class="flex flex-wrap items-center gap-3">
+        <button type="button" class="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-50" @click="startAnother">
+          {{ practice ? 'Run tutorial again' : 'Prepare another model' }}
+        </button>
+        <router-link v-if="practice && currentJob.status === 'completed'" :to="{ name: 'ModelPublication' }" class="text-sm font-semibold text-indigo-700 underline underline-offset-4">Prepare a model for Zenodo Sandbox</router-link>
+        <router-link v-if="practice" :to="{ name: 'Onboarding' }" class="text-sm font-semibold text-indigo-700 underline underline-offset-4">Getting started</router-link>
+      </div>
     </div>
 
     <form v-else class="space-y-5" @submit.prevent="submit">
@@ -32,14 +42,14 @@
           <div class="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h2 id="source-heading" ref="sourceHeading" tabindex="-1" class="text-lg font-semibold">Choose a model</h2>
-              <p class="mt-1 text-sm text-slate-600">Samples include a metadata spreadsheet and are ready to try.</p>
+              <p class="mt-1 text-sm text-slate-600">{{ practice ? 'Start with Glazed Bowl to see how WebHDP handles a misplaced glaze and an unreadable detail texture.' : 'Samples include a metadata spreadsheet and are ready to try.' }}</p>
             </div>
             <router-link to="/model-publication/samples" class="text-sm font-semibold text-indigo-700 underline underline-offset-4">
               Sample downloads
             </router-link>
           </div>
 
-          <div class="mt-4 inline-flex flex-wrap gap-1 rounded-lg bg-slate-100 p-1" role="group" aria-label="Model source">
+          <div v-if="!practice" class="mt-4 inline-flex flex-wrap gap-1 rounded-lg bg-slate-100 p-1" role="group" aria-label="Model source">
             <button type="button" :aria-pressed="mode === 'sample'" :class="modeButton('sample')" @click="changeMode('sample')">
               Use a sample
             </button>
@@ -58,7 +68,7 @@
               Sample models could not be loaded.
               <button type="button" class="ml-1 font-semibold underline" @click="loadSamples">Try again</button>
             </div>
-            <details v-if="batchSample" class="mt-4 rounded-lg border border-slate-200 p-3" :open="selectedSample?.id === batchSample.id || undefined">
+            <details v-if="batchSample && !practice" class="mt-4 rounded-lg border border-slate-200 p-3" :open="selectedSample?.id === batchSample.id || undefined">
               <summary class="cursor-pointer text-sm font-semibold">Optional batch sample</summary>
               <div class="mt-3 max-w-md">
                 <ModelSampleCard :sample="batchSample" :selected="selectedSample?.id === batchSample.id" selectable @select="chooseSample" />
@@ -128,11 +138,12 @@
           <p class="font-semibold">Using the spreadsheet supplied with {{ selectedSample.title }}</p>
         </section>
 
-        <div v-if="availabilityError || missingCredential" role="status" class="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
-          <p v-if="availabilityError">Could not check your Sandbox access.</p>
+        <div v-if="availabilityError || destinationUnavailable" role="status" class="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+          <p v-if="availabilityError">{{ practice ? 'Could not check tutorial availability.' : 'Could not check your Sandbox access.' }}</p>
+          <p v-else-if="practice">The tutorial worker is temporarily unavailable. You can still review the sample and its metadata.</p>
           <p v-else-if="demoAccount">Sandbox access is temporarily unavailable. Check again or ask the presenter.</p>
           <p v-else>Add a Zenodo Sandbox key to create drafts from your WebHDP account.</p>
-          <router-link v-if="!demoAccount && missingCredential" to="/account/configuration" class="mt-2 inline-block font-semibold underline">
+          <router-link v-if="!practice && !demoAccount && destinationUnavailable" to="/account/configuration" class="mt-2 inline-block font-semibold underline">
             Manage your Zenodo Sandbox key
           </router-link>
           <button type="button" class="mt-2 block font-semibold underline" @click="loadAvailability">Check again</button>
@@ -141,10 +152,12 @@
         <div class="flex flex-wrap items-center gap-3">
           <button type="submit" :disabled="submitting || !canSubmit"
             class="rounded-md bg-indigo-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-800 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-600">
-            {{ submitting ? 'Sending model…' : reviewSample?.format === 'batch' ? 'Prepare 3 Sandbox drafts' : 'Prepare Sandbox draft' }}
+            {{ submitting ? 'Sending model…' : practice ? 'Run practice pipeline' : reviewSample?.format === 'batch' ? 'Prepare 3 Sandbox drafts' : 'Prepare Sandbox draft' }}
           </button>
           <p class="text-sm text-slate-600">
             <template v-if="processingOffline">You can set up your request while the worker is offline.</template>
+            <template v-else-if="practice && activeJob">Your current practice request is still running.</template>
+            <template v-else-if="practice">You can follow the queue, review the repairs, and download the result in WebHDP.</template>
             <template v-else-if="demoAccount && activeJob">Wait for your current request before starting another.</template>
             <template v-else-if="reviewSample?.format === 'batch'">Creates one private draft per model.</template>
             <template v-else>Creates a private draft for review.</template>
@@ -163,7 +176,7 @@
     </form>
 
     <section v-if="jobs.length" class="mt-8 border-t border-slate-200 pt-4" aria-labelledby="recent-model-jobs">
-      <h2 id="recent-model-jobs" class="text-sm font-semibold">Recent requests</h2>
+      <h2 id="recent-model-jobs" class="text-sm font-semibold">{{ practice ? 'Recent practice runs' : 'Recent requests' }}</h2>
       <ul class="mt-2 flex flex-wrap gap-2">
         <li v-for="job in jobs.slice(0, 5)" :key="job.id">
           <button type="button" :aria-pressed="!showForm && currentJob?.id === job.id"
@@ -189,6 +202,7 @@ import publicationService, { sandboxDraftUrl } from '@/services/modelPublication
 import { useAuthStore } from '@/stores/auth'
 
 const route = useRoute()
+const props = defineProps({ practice: { type: Boolean, default: false } })
 const authStore = useAuthStore()
 const demoAccount = computed(() => Boolean(authStore.user?.model_publication_only))
 const samples = ref([])
@@ -210,12 +224,13 @@ const metadata = ref({ title: '', creator: '', description: '' })
 const standaloneGlb = computed(() => archive.value?.name.toLowerCase().endsWith('.glb') ?? false)
 const availability = ref(null)
 const availabilityError = ref(false)
-const missingCredential = computed(() => availability.value?.credential_ready === false)
+const destinationUnavailable = computed(() => props.practice ? availability.value?.practice_ready === false : availability.value?.credential_ready === false)
 const queue = ref(null)
 const queueUnavailable = ref(false)
 const processingOffline = computed(() => (queueUnavailable.value ? availability.value?.ready : queue.value?.ready ?? availability.value?.ready) === false)
 const canSubmit = computed(() => {
-  if (!availability.value?.credential_ready || availabilityError.value || processingOffline.value || (demoAccount.value && activeJob.value)) return false
+  const ready = props.practice ? availability.value?.practice_ready : availability.value?.credential_ready
+  if (!ready || availabilityError.value || processingOffline.value || ((demoAccount.value || props.practice) && activeJob.value)) return false
   return mode.value === 'sample' ? Boolean(selectedSample.value) : Boolean(archive.value && !checkingArchive.value && (demoAccount.value ? uploadedSample.value : uploadedSample.value?.format === 'batch' || metadataSource.value !== 'upload' || msf.value))
 })
 const submitting = ref(false)
@@ -341,7 +356,9 @@ async function loadSamples() {
     const payload = await publicationService.samples()
     samples.value = payload.datasets
     publishedExample.value = sandboxDraftUrl(payload.published_example)
-    const requestedSample = samples.value.find(sample => sample.id === route.query.sample)
+    const requestedSample = props.practice
+      ? singleSamples.value.find(sample => sample.id === 'glazed-bowl') || singleSamples.value[0]
+      : samples.value.find(sample => sample.id === route.query.sample)
     if (requestedSample && !setupInteracted) chooseSample(requestedSample, false)
   } catch {
     samples.value = []
@@ -421,13 +438,13 @@ async function refreshJobs({ restore = false } = {}) {
   const currentRevision = jobRevision
   pendingRefresh = controller
   try {
-    const result = await publicationService.jobs(controller.signal)
+    const result = await publicationService.jobs(controller.signal, props.practice ? 'practice' : 'sandbox')
     if (!mounted || controller.signal.aborted || currentRevision !== jobRevision) return
-    jobs.value = result.jobs
+    jobs.value = result.jobs.filter(job => ((job.run_mode || 'sandbox') === 'practice') === props.practice)
     if (currentJob.value) {
       const updatedJob = jobs.value.find(job => job.id === currentJob.value.id)
       if (updatedJob) currentJob.value = updatedJob
-    } else if (restore && !setupInteracted && !route.query.sample && !submitting.value) {
+    } else if (restore && !setupInteracted && (props.practice || !route.query.sample) && !submitting.value) {
       const latest = jobs.value.find(isActive) || jobs.value[0]
       if (latest) openJob(latest, false)
     }
@@ -453,6 +470,7 @@ async function submit() {
   uploadPercent.value = null
   retryKey ||= crypto.randomUUID()
   const form = new FormData()
+  if (props.practice) form.set('run_mode', 'practice')
   if (mode.value === 'sample') {
     form.set('sample_id', selectedSample.value.id)
     form.set('metadata_source', 'archive')

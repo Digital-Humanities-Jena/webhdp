@@ -180,6 +180,11 @@ def hpc_only_component(component_key: Any) -> bool:
     return bool(component_runtime_traits(component_key)["hpc_only"])
 
 
+def component_gpu_count(component_key: str, resources: dict[str, Any]) -> Any:
+    """Read the declared GPU count, with a default for the legacy renderer."""
+    return resources.get("gpu_count", 1 if component_key == "fast_renderer" else 0)
+
+
 def hpc_required_component_label(component_key: Any) -> str:
     key = str(component_key or "").strip()
     return component_runtime_traits(key)["label"]

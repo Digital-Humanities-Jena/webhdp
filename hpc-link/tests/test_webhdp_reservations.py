@@ -1,10 +1,11 @@
 """Verify that GPU reservation ownership and private claim lifecycles are enforced."""
 
 import asyncio
-from datetime import datetime, timezone
+from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 from fastapi import HTTPException, Request
@@ -13,7 +14,7 @@ import pytest
 
 from app.auth_store import AuthenticatedUser
 from app.main import app
-from app.schemas.apps import WebHdpReservationInspectRequest, WebHdpReservationRegisterRequest, WebHdpSessionAdoptRequest
+from app.schemas.apps import WebHdpReservationInspectRequest, WebHdpReservationRegisterRequest, WebHdpSessionAdoptRequest, WebHdpSessionCreateRequest
 from app.security import get_api_key
 from app.services import apps_gateway as gateway
 
@@ -65,6 +66,84 @@ async def register(cluster):
     return await cluster.service.register_webhdp_reservation(
         WebHdpReservationRegisterRequest(job_id="9319538", owner_username=cluster.owner.username), cluster.admin,
     )
+
+
+@pytest.mark.asyncio
+async def test_ordinary_release_keeps_allocation_registered_until_scheduler_confirms(cluster, monkeypatch):
+    now = datetime.now(timezone.utc)
+    session = gateway._WebHdpSession(
+        session_id="ordinary", partition="gpu", gpu_count=1, gpu_type=None, duration_minutes=30,
+        time_limit="00:30:00", job_id="123", remote_session_dir="/tmp/ordinary",
+        remote_input_dir="/tmp/ordinary/inputs", remote_output_dir="/tmp/ordinary/outputs",
+        cuda_module=None, created_at=now, expires_at=now + timedelta(minutes=30),
+        owner_username=cluster.owner.username,
+    )
+    cluster.service._webhdp_sessions[session.session_id] = session
+    cluster.service._save_webhdp_sessions_to_registry(required=True)
+    ssh = AsyncMock(side_effect=[("", "unreachable", 1), ("RUNNING|gpu001", "", 0), ("", "", 0)])
+    monkeypatch.setattr(gateway.ssh_manager, "run_command", ssh)
+    first = await cluster.service.stop_webhdp_session(session.session_id, cluster.owner)
+    assert not first.cancelled and cluster.service._webhdp_sessions[session.session_id] is session
+    assert len(gateway.HpcApplicationGatewayService()._webhdp_sessions) == 1
+    second = await cluster.service.stop_webhdp_session(session.session_id, cluster.owner)
+    assert second.cancelled and session.session_id not in cluster.service._webhdp_sessions
+    assert len(gateway.HpcApplicationGatewayService()._webhdp_sessions) == 0
+
+
+@pytest.mark.asyncio
+async def test_submit_identity_survives_gateway_restart_and_release(cluster, monkeypatch):
+    request_id = uuid4()
+    request = WebHdpSessionCreateRequest(request_id=request_id, partition="gpu")
+    owner = replace(cluster.owner, allowed_partitions=["gpu"])
+    sftp = AsyncMock()
+    sftp.__aenter__.return_value = sftp
+    sftp.open = Mock(return_value=AsyncMock())
+    monkeypatch.setattr(gateway.ssh_manager, "open_sftp", AsyncMock(return_value=sftp))
+    scheduler = AsyncMock(side_effect=[("", "", 0), ("12345;cluster", "", 0), ("", "", 0)])
+    monkeypatch.setattr(gateway.ssh_manager, "run_command", scheduler)
+
+    session = await cluster.service.create_webhdp_session(request, owner)
+    assert session.session_id == str(request_id)
+    restarted = gateway.HpcApplicationGatewayService()
+    assert await restarted.get_webhdp_session_request(str(request_id), owner) == session
+    assert await restarted.get_webhdp_session_request(str(uuid4()), owner) is None
+    assert await restarted.create_webhdp_session(request, owner) == session
+    with pytest.raises(HTTPException) as forbidden:
+        await restarted.get_webhdp_session_request(str(request_id), cluster.other)
+    assert forbidden.value.status_code == 403
+
+    assert (await restarted.stop_webhdp_session(str(request_id), owner)).cancelled
+    restarted = gateway.HpcApplicationGatewayService()
+    assert (await restarted.stop_webhdp_session(str(request_id), owner)).cancelled
+    with pytest.raises(HTTPException) as released:
+        await restarted.create_webhdp_session(request, owner)
+    assert released.value.status_code == 409
+    assert sum(call.args[0].startswith("sbatch ") for call in scheduler.call_args_list) == 1
+
+
+@pytest.mark.asyncio
+async def test_unconfirmed_scheduler_intent_cannot_submit_twice(cluster, monkeypatch):
+    request_id = uuid4()
+    request = WebHdpSessionCreateRequest(request_id=request_id, partition="gpu")
+    owner = replace(cluster.owner, allowed_partitions=["gpu"])
+    sftp = AsyncMock()
+    sftp.__aenter__.return_value = sftp
+    sftp.open = Mock(return_value=AsyncMock())
+    monkeypatch.setattr(gateway.ssh_manager, "open_sftp", AsyncMock(return_value=sftp))
+    scheduler = AsyncMock(side_effect=[("", "", 0), ("", "connection interrupted", 1)])
+    monkeypatch.setattr(gateway.ssh_manager, "run_command", scheduler)
+
+    with pytest.raises(HTTPException) as interrupted:
+        await cluster.service.create_webhdp_session(request, owner)
+    assert interrupted.value.status_code == 500
+    restarted = gateway.HpcApplicationGatewayService()
+    with pytest.raises(HTTPException) as unconfirmed:
+        await restarted.get_webhdp_session_request(str(request_id), owner)
+    assert unconfirmed.value.status_code == 409
+    with pytest.raises(HTTPException) as duplicate:
+        await restarted.create_webhdp_session(request, owner)
+    assert duplicate.value.status_code == 409
+    assert sum(call.args[0].startswith("sbatch ") for call in scheduler.call_args_list) == 1
 
 
 @pytest.mark.asyncio

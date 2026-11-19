@@ -23,7 +23,7 @@ from database.models import (
     User,
     UserRole,
 )
-from exceptions import FileProcessingError, ResourceNotFoundError, ValidationError
+from exceptions import FileProcessingError, ResourceNotFoundError, SecurityError, ValidationError
 from services.native_pipeline_adapters import AdapterExecutionRequest
 from services.native_pipeline_system import NativePipelineSystemService
 
@@ -2369,6 +2369,7 @@ class NativePipelineSystemTestCase(unittest.TestCase):
                 "db_session": session_row,
                 "hdpc_path": str(hdpc_path),
                 "is_sandbox": True,
+                "access_token": "authorized-test-token",
                 "abort_on_critical_error": False,
                 "progress_callback": None,
                 "pipeline_timings": {
@@ -2663,6 +2664,7 @@ class NativePipelineSystemTestCase(unittest.TestCase):
                 "db_session": session_row,
                 "hdpc_path": str(hdpc_path),
                 "is_sandbox": True,
+                "access_token": "authorized-test-token",
                 "abort_on_critical_error": False,
                 "progress_callback": None,
                 "pipeline_timings": {
@@ -2782,6 +2784,14 @@ class NativePipelineSystemTestCase(unittest.TestCase):
                 "services.native_pipeline_system.upload_local_zenodo_files",
                 return_value={"success": True, "published": False},
             ) as local_upload:
+                with self.assertRaisesRegex(SecurityError, "authorized Zenodo credential"):
+                    self.native_service._builtin_zenodo_draft_handler(draft_request)
+                with self.assertRaisesRegex(SecurityError, "authorized Zenodo credential"):
+                    self.native_service._builtin_zenodo_upload_handler(upload_request)
+                local_draft.assert_not_called()
+                local_upload.assert_not_called()
+                draft_request.metadata["execution_context"]["access_token"] = "authorized-test-token"
+                upload_request.metadata["execution_context"]["access_token"] = "authorized-test-token"
                 draft_result = self.native_service._builtin_zenodo_draft_handler(draft_request)
                 upload_result = self.native_service._builtin_zenodo_upload_handler(upload_request)
 
@@ -2834,6 +2844,7 @@ class NativePipelineSystemTestCase(unittest.TestCase):
                 "db_session": session_row,
                 "hdpc_path": str(hdpc_path),
                 "is_sandbox": True,
+                "access_token": "authorized-test-token",
                 "abort_on_critical_error": False,
                 "progress_callback": None,
                 "pipeline_timings": {

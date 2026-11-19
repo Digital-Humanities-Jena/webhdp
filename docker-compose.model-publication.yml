@@ -5,7 +5,7 @@ services:
       WEBHDP_MODEL_PUBLICATION_PUBLISHED_EXAMPLE: ${WEBHDP_MODEL_PUBLICATION_PUBLISHED_EXAMPLE:-}
 
   model-publication-worker:
-    image: webhdp-backend:${WEBHDP_IMAGE_TAG:-plesk}
+    image: ${WEBHDP_BACKEND_IMAGE:-webhdp-backend:${WEBHDP_IMAGE_TAG:-0.1.0-alpha.4}}
     command: ["python", "-m", "scripts.model_publication", "worker"]
     restart: unless-stopped
     init: true
@@ -21,7 +21,10 @@ services:
       ENABLE_LOCAL_EDM_VALIDATION: ${ENABLE_LOCAL_EDM_VALIDATION:-true}
       LOCAL_EDM_VALIDATOR_REQUIRED: ${LOCAL_EDM_VALIDATOR_REQUIRED:-true}
     volumes:
-      - ${WEBHDP_INSTANCE_PATH:-./instance}:/app/instance
+      - ${WEBHDP_INSTANCE_PATH:?Set WEBHDP_INSTANCE_PATH to the backend instance directory}:/app/instance
+    depends_on:
+      backend:
+        condition: service_healthy
     networks:
       - hdp-network
     extra_hosts:

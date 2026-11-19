@@ -16,10 +16,44 @@
   "info": {
     "description": "Generated from the Flask route map. This contract is an onboarding aid and route inventory; endpoint-specific request and response examples remain documented in docs/api/webhdp_api_reference.md and docs/api/webhdp_api_examples.md.",
     "title": "WebHDP API",
-    "version": "0.1.0-alpha.3"
+    "version": "0.1.0-alpha.4"
   },
   "openapi": "3.0.3",
   "paths": {
+    "/api/v1/account/usage": {
+      "get": {
+        "operationId": "get_account_usage_get_usage",
+        "responses": {
+          "200": {
+            "description": "Successful response. WebHDP API responses generally use {success, data, message, metadata}."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "account_usage get_usage",
+        "tags": [
+          "account"
+        ]
+      }
+    },
     "/api/v1/admin/backups": {
       "get": {
         "operationId": "get_admin_list_backups",
@@ -2219,11 +2253,6 @@
             "description": "Unexpected server error"
           }
         },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
         "summary": "auth login",
         "tags": [
           "auth"
@@ -2253,11 +2282,6 @@
             "description": "Unexpected server error"
           }
         },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
         "summary": "auth resend_login_code",
         "tags": [
           "auth"
@@ -2287,11 +2311,6 @@
             "description": "Unexpected server error"
           }
         },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
         "summary": "auth verify_login_code",
         "tags": [
           "auth"
@@ -2321,11 +2340,6 @@
             "description": "Unexpected server error"
           }
         },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
         "summary": "auth verify_login_recovery_code",
         "tags": [
           "auth"
@@ -3245,12 +3259,65 @@
             "description": "Unexpected server error"
           }
         },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
         "summary": "auth register",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/resend-verification": {
+      "post": {
+        "operationId": "post_auth_resend_verification",
+        "responses": {
+          "200": {
+            "description": "Successful response. WebHDP API responses generally use {success, data, message, metadata}."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "summary": "auth resend_verification",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/verify-email": {
+      "post": {
+        "operationId": "post_auth_verify_email",
+        "responses": {
+          "200": {
+            "description": "Successful response. WebHDP API responses generally use {success, data, message, metadata}."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "summary": "auth verify_email",
         "tags": [
           "auth"
         ]
@@ -3258,7 +3325,7 @@
     },
     "/api/v1/auth/verify-email/{token}": {
       "get": {
-        "operationId": "get_auth_verify_email",
+        "operationId": "get_auth_legacy_email_verification",
         "parameters": [
           {
             "in": "path",
@@ -3289,12 +3356,7 @@
             "description": "Unexpected server error"
           }
         },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "auth verify_email",
+        "summary": "auth legacy_email_verification",
         "tags": [
           "auth"
         ]
@@ -3879,6 +3941,38 @@
       }
     },
     "/api/v1/hpc-link/allocations": {
+      "get": {
+        "operationId": "get_hpc_link_list_my_hpc_allocations",
+        "responses": {
+          "200": {
+            "description": "Successful response. WebHDP API responses generally use {success, data, message, metadata}."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "hpc_link list_my_hpc_allocations",
+        "tags": [
+          "hpc-link"
+        ]
+      },
       "post": {
         "operationId": "post_hpc_link_request_hpc_allocation",
         "responses": {
@@ -4490,6 +4584,74 @@
         ]
       }
     },
+    "/api/v1/institutions/invitations/accept": {
+      "post": {
+        "operationId": "post_institution_invitations_accept_institution_invitation",
+        "responses": {
+          "200": {
+            "description": "Successful response. WebHDP API responses generally use {success, data, message, metadata}."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "institution_invitations accept_institution_invitation",
+        "tags": [
+          "institutions"
+        ]
+      }
+    },
+    "/api/v1/institutions/invitations/preview": {
+      "post": {
+        "operationId": "post_institution_invitations_preview_institution_invitation",
+        "responses": {
+          "200": {
+            "description": "Successful response. WebHDP API responses generally use {success, data, message, metadata}."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "institution_invitations preview_institution_invitation",
+        "tags": [
+          "institutions"
+        ]
+      }
+    },
     "/api/v1/institutions/suggestions": {
       "get": {
         "operationId": "get_institutions_suggest_institutions",
@@ -4519,6 +4681,116 @@
           }
         ],
         "summary": "institutions suggest_institutions",
+        "tags": [
+          "institutions"
+        ]
+      }
+    },
+    "/api/v1/institutions/workspace-requests": {
+      "get": {
+        "operationId": "get_institutions_list_workspace_requests",
+        "responses": {
+          "200": {
+            "description": "Successful response. WebHDP API responses generally use {success, data, message, metadata}."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "institutions list_workspace_requests",
+        "tags": [
+          "institutions"
+        ]
+      },
+      "post": {
+        "operationId": "post_institutions_request_workspace",
+        "responses": {
+          "200": {
+            "description": "Successful response. WebHDP API responses generally use {success, data, message, metadata}."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "institutions request_workspace",
+        "tags": [
+          "institutions"
+        ]
+      }
+    },
+    "/api/v1/institutions/workspace-requests/{request_id}/decision": {
+      "patch": {
+        "operationId": "patch_institutions_review_workspace_request",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response. WebHDP API responses generally use {success, data, message, metadata}."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "institutions review_workspace_request",
         "tags": [
           "institutions"
         ]
@@ -4837,6 +5109,144 @@
           }
         ],
         "summary": "institutions update_institution_community",
+        "tags": [
+          "institutions"
+        ]
+      }
+    },
+    "/api/v1/institutions/{institution_id}/invitations": {
+      "get": {
+        "operationId": "get_institution_invitations_list_institution_invitations",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "institution_id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response. WebHDP API responses generally use {success, data, message, metadata}."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "institution_invitations list_institution_invitations",
+        "tags": [
+          "institutions"
+        ]
+      },
+      "post": {
+        "operationId": "post_institution_invitations_issue_institution_invitation",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "institution_id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response. WebHDP API responses generally use {success, data, message, metadata}."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "institution_invitations issue_institution_invitation",
+        "tags": [
+          "institutions"
+        ]
+      }
+    },
+    "/api/v1/institutions/{institution_id}/invitations/{invitation_id}": {
+      "delete": {
+        "operationId": "delete_institution_invitations_revoke_institution_invitation",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "institution_id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "invitation_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response. WebHDP API responses generally use {success, data, message, metadata}."
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Authentication required or token invalid"
+          },
+          "403": {
+            "description": "Authenticated user is not authorized for this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Unexpected server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "institution_invitations revoke_institution_invitation",
         "tags": [
           "institutions"
         ]

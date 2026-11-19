@@ -24,8 +24,16 @@ def _activity_log_path() -> str:
     return os.path.join(log_dir, _ACTIVITY_FILENAME)
 
 
-def _normalize_path(path: str | None) -> str:
+def redact_identity_path(path: str | None) -> str:
     text = str(path or "").strip()
+    for prefix in ("/verify-email/", "/api/v1/auth/verify-email/"):
+        if text.startswith(prefix):
+            return prefix + "[redacted]"
+    return text
+
+
+def _normalize_path(path: str | None) -> str:
+    text = redact_identity_path(path)
     return text if text.startswith("/api/") else ""
 
 
@@ -158,6 +166,8 @@ def list_api_activity(
                 payload = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            if payload.get("path"):
+                payload["path"] = redact_identity_path(payload["path"])
             if normalized_route_family and str(payload.get("route_family") or "").lower() != normalized_route_family:
                 continue
             if normalized_service and str(payload.get("service") or "").lower() != normalized_service:

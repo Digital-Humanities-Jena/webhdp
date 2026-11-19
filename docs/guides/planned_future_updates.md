@@ -1,8 +1,8 @@
 # Future Roadmap And Planned Updates
 
-This roadmap describes work beyond `v0.1.0-alpha.3`. For current capabilities,
+This roadmap describes work beyond `v0.1.0-alpha.4`. For current capabilities,
 see the [release notes](../../RELEASE_NOTES.md) and
-[upgrade guide](upgrade_alpha3.md).
+[upgrade guide](upgrade_alpha4.md).
 
 ## Planning Principles
 
@@ -87,6 +87,13 @@ Open work:
 
 ### Institutional Accounts, Groups, And Communities
 
+Implemented foundation:
+- Site administrators can approve workspace requests and workspace managers
+  can invite users with a verified email address.
+- Role-scoped workspaces keep member and audit data within their intended
+  permissions. Account setup guides users to the relevant credentials and
+  workspace actions.
+
 Planned outcome:
 - Extend the current user and institution model toward governed multi-user
   publication and moderation workflows.
@@ -95,7 +102,8 @@ Open work:
 - Define group-scoped visibility and collaboration controls.
 - Improve migration paths for individual accounts moving into institutional
   contexts.
-- Add auditable review and approval flows.
+- Extend the auditable review and approval flows to more collaboration and
+  publication actions.
 
 ### Cloud Transaction Mirroring
 

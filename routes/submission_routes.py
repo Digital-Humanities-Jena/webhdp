@@ -5,7 +5,7 @@ import os
 import sqlite3
 
 from flask import Blueprint, current_app
-from flask_jwt_extended import get_jwt_identity, jwt_required
+from flask_jwt_extended import jwt_required
 
 from api_utils import APIResponse
 from constants import WORKFLOW_STATE_FIELD
@@ -289,17 +289,15 @@ def _submission_outcomes(submission, session, result, user_id):
 def get_user_submission_progress(submission_id):
     """Get lightweight live progress payload for a submission."""
     try:
-        user_id_str = get_jwt_identity()
-        user_id = int(user_id_str)
-
+        user = get_current_user_from_jwt()
         result = (
             db.session.query(Submission, Session)
             .join(Session, Submission.session_id == Session.id)
-            .filter(Submission.id == submission_id, Session.user_id == user_id)
+            .filter(Submission.id == submission_id)
             .first()
         )
 
-        if not result:
+        if not result or not can_view_session(result[1], user):
             return APIResponse.not_found("Submission not found or you do not have permission to view it")
 
         submission, _ = result

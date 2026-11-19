@@ -228,6 +228,7 @@ def main():
                 link_service.save_publication(publication)
         app_configs, clients = [], []
         by_app = {'photo-lab': (5191, 'link-photo-preparation'), 'roll-studio': (5192, 'link-piano-roll'), 'model-depot': (5193, 'link-model-deposit')}
+        app_names = {'photo-lab': 'Reconstruction Testlab', 'roll-studio': 'MMIC-Transformer', 'model-depot': 'Model Depot'}
         samples = {'photo-lab': ['photo-1.jpg', 'photo-2.jpg', 'photo-3.jpg'], 'roll-studio': ['piano-roll.png'], 'model-depot': ['tetrahedron.obj']}
         live_configs = {}
         if args.live_validation:
@@ -239,7 +240,7 @@ def main():
         for name, (port, publication_id) in by_app.items():
             origin = f'http://127.0.0.1:{port}'
             client_id = live_configs.get(name, {}).get('client_id', name)
-            clients.append({'id': client_id, 'name': name.replace('-', ' ').title(), 'origins': [origin],
+            clients.append({'id': client_id, 'name': app_names[name], 'origins': [origin],
                 'redirect_uris': [f'{origin}/{name}/'], 'pipeline_ids': [publication_id], 'enabled': True,
                 'max_queued_runs': 20, 'max_concurrent_runs': 1, 'max_upload_bytes': 104857600, 'max_storage_bytes': 1073741824})
             app_configs.append({'app': name, 'port': port, 'base_url': os.environ['WEBHDP_LINK_PUBLIC_BASE_URL'] + '/api/v1/link',

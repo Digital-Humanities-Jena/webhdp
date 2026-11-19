@@ -215,6 +215,46 @@ def test_idempotency_queue_quota_and_cancel(api):
     assert api['http'].delete(BASE + '/uploads/' + uploaded['id'], headers=headers(api)).status_code == 204
 
 
+def test_per_account_link_quotas_leave_capacity_for_a_second_account(api):
+    other_token = api['other_token']
+    client = link.save_client({'max_queued_runs': 3, 'max_queued_runs_per_user': 1,
+                               'max_storage_bytes': 100, 'max_storage_bytes_per_user': 10}, existing=api['client'])
+    assert link.serialize_client(client)['account_limits'] == {'max_queued_runs': 1, 'max_storage_bytes': 10}
+
+    first_file = upload(api, b'21', token=other_token).json
+    assert submit(api, first_file['id'], token=other_token).status_code == 202
+    queued = submit(api, first_file['id'], token=other_token)
+    assert queued.status_code == 429 and queued.json['code'] == 'account_queue_quota_exceeded'
+    over_storage = upload(api, b'0123456', token=other_token)
+    assert over_storage.status_code == 413 and over_storage.json['code'] == 'account_storage_quota_exceeded'
+    assert link.storage_used(client.id, api['other'].id) == 4
+
+    second_file = upload(api, b'12').json
+    assert submit(api, second_file['id']).status_code == 202
+    assert link.storage_used(client.id) == 8
+
+
+def test_link_dispatch_gives_an_idle_account_a_worker_before_a_second_job(api):
+    api['app'].config['WEBHDP_LINK_MAX_CONCURRENT_RUNS'] = 2
+    link.save_client({'max_concurrent_runs': 2}, existing=api['client'])
+    first_file = upload(api).json
+    first = submit(api, first_file['id']).json['id']
+    second = submit(api, first_file['id']).json['id']
+    other_file = upload(api, token=api['other_token']).json
+    third = submit(api, other_file['id'], token=api['other_token']).json['id']
+    assert worker.claim_next() == first
+    assert worker.claim_next() == third
+    assert db.session.get(LinkRun, second).status == 'queued'
+
+
+def test_demo_accounts_cannot_receive_or_keep_link_authorization(api):
+    api['other'].set_capabilities(['model_publication_demo'])
+    db.session.commit()
+    with pytest.raises(link.LinkError, match='not eligible'):
+        link.issue_token(api['client'], api['other'], service=True)
+    assert api['http'].get(BASE + '/pipelines', headers=headers(api, api['other_token'])).status_code == 403
+
+
 def test_pipeline_grants_limit_history_and_idempotent_reuse(api):
     uploaded = upload(api).json
     key = str(uuid4())

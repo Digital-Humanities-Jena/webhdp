@@ -8,7 +8,7 @@ from flask import request, g
 from functools import wraps
 from exceptions import AppException
 from api_utils import generate_request_id, error_response
-from services.api_activity_service import record_api_activity
+from services.api_activity_service import record_api_activity, redact_identity_path
 from services.maintenance_service import maintenance_status
 
 logger = logging.getLogger(__name__)
@@ -52,6 +52,14 @@ def _ensure_upload_capacity(app):
             g.get("request_id"),
         )
 
+    # JSON account and workflow controls must work even if an upload mount is
+    # unmounted or full. Directory intake can also use a JSON cloud reference.
+    if request.mimetype != "multipart/form-data" and request.path not in {
+        "/api/v1/sessions/directory",
+        "/api/v1/upload/stream",
+    }:
+        return None
+
     min_free_bytes = int(app.config.get("MIN_UPLOAD_FREE_BYTES") or 0)
     multiplier = float(app.config.get("MIN_UPLOAD_FREE_MULTIPLIER") or 1)
     required_free = max(min_free_bytes, int(content_length * multiplier))
@@ -60,11 +68,20 @@ def _ensure_upload_capacity(app):
 
     checked_devices = set()
     for root in _upload_disk_roots(app):
-        os.makedirs(root, exist_ok=True)
-        usage = shutil.disk_usage(root)
-        device_key = (usage.total, root)
-        if device_key in checked_devices:
-            continue
+        try:
+            os.makedirs(root, exist_ok=True)
+            device_key = os.stat(root).st_dev
+            if device_key in checked_devices:
+                continue
+            usage = shutil.disk_usage(root)
+        except OSError as exc:
+            logger.warning("Upload storage is unavailable (%s).", type(exc).__name__)
+            return error_response(
+                "UPLOAD_STORAGE_UNAVAILABLE",
+                "Upload storage is temporarily unavailable",
+                507,
+                request_id=g.get("request_id"),
+            )
         checked_devices.add(device_key)
         if usage.free < required_free:
             return error_response(
@@ -72,7 +89,6 @@ def _ensure_upload_capacity(app):
                 "Not enough free disk space for this upload",
                 507,
                 {
-                    "path": root,
                     "free_bytes": usage.free,
                     "required_free_bytes": required_free,
                     "content_length": content_length,
@@ -135,7 +151,7 @@ def setup_error_handlers(app):
         logger.info(
             f"Request started - ID: {g.request_id} | "
             f"Method: {request.method} | "
-            f"Path: {request.path} | "
+            f"Path: {redact_identity_path(request.path)} | "
             f"IP: {request.remote_addr}"
         )
         status = maintenance_status()
@@ -231,19 +247,21 @@ def setup_error_handlers(app):
     @app.errorhandler(404)
     def handle_not_found(error):
         """Handle 404 Not Found errors"""
-        logger.warning(f"Not found - ID: {g.get('request_id', 'N/A')} | " f"Path: {request.path}")
-        return error_response("NOT_FOUND", f"Endpoint {request.path} not found", 404, request_id=g.get("request_id"))
+        path = redact_identity_path(request.path)
+        logger.warning(f"Not found - ID: {g.get('request_id', 'N/A')} | Path: {path}")
+        return error_response("NOT_FOUND", f"Endpoint {path} not found", 404, request_id=g.get("request_id"))
 
     @app.errorhandler(405)
     def handle_method_not_allowed(error):
         """Handle 405 Method Not Allowed errors"""
+        path = redact_identity_path(request.path)
         logger.warning(
             f"Method not allowed - ID: {g.get('request_id', 'N/A')} | "
-            f"Method: {request.method} | Path: {request.path}"
+            f"Method: {request.method} | Path: {path}"
         )
         return error_response(
             "METHOD_NOT_ALLOWED",
-            f"Method {request.method} not allowed for {request.path}",
+            f"Method {request.method} not allowed for {path}",
             405,
             request_id=g.get("request_id"),
         )

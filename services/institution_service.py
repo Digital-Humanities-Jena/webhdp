@@ -1,14 +1,20 @@
 import re
+import unicodedata
+from contextlib import contextmanager
 from difflib import SequenceMatcher
 from typing import Iterable
+from urllib.parse import urlsplit
 
 from sqlalchemy import func, or_
 from sqlalchemy.orm import selectinload
 
 from database.database import db
-from database.models import Institution, InstitutionMembership, InstitutionRole, InstitutionZenodoCommunity, User
-from exceptions import ResourceNotFoundError, ValidationError
+from database.models import Institution, InstitutionMembership, InstitutionRole, InstitutionZenodoCommunity, User, UserRole
+from exceptions import ResourceNotFoundError, SecurityError, ValidationError
+from services.audit_service import record_audit_event
+from services.model_publication_accounts import is_demo
 from services.notification_service import notify_user
+from services.registry_lock import registry_lock
 
 
 _ROLE_RANKS = {
@@ -18,17 +24,83 @@ _ROLE_RANKS = {
     InstitutionRole.OWNER.value: 4,
 }
 INTERNAL_PROFILE_VISIBILITIES = {"private", "internal"}
-SIMILAR_INSTITUTION_THRESHOLD = 0.82
 
 
 def slugify_institution_name(value: str) -> str:
-    text = re.sub(r"[^a-z0-9]+", "-", str(value or "").strip().lower()).strip("-")
+    ascii_value = unicodedata.normalize("NFKD", value.casefold()).encode("ascii", "ignore").decode("ascii")
+    text = re.sub(r"[^a-z0-9]+", "-", ascii_value).strip("-")
     return text[:120]
 
 
 def normalize_institution_name(value: str) -> str:
-    text = re.sub(r"\s+", " ", str(value or "").strip().lower())
-    return re.sub(r"[^a-z0-9 ]+", "", text)
+    text = unicodedata.normalize("NFKC", value).casefold()
+    return " ".join("".join(
+        char if char.isalnum() or unicodedata.category(char).startswith("M") else " "
+        for char in text
+    ).split())
+
+
+def validate_institution_name(value: str) -> str:
+    if not isinstance(value, str):
+        raise ValidationError("Institution name is required")
+    name = value.strip()
+    if not name or len(name) > 255 or not any(char.isalnum() for char in normalize_institution_name(name)):
+        raise ValidationError("Provide an institution name with letters or numbers, up to 255 characters")
+    return name
+
+
+def _validated_web_url(value: str | None) -> str | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, str) and len(value) <= 500 and not any(char.isspace() or char == "\\" for char in value):
+        try:
+            url = urlsplit(value)
+            if url.scheme in {"http", "https"} and url.hostname and not url.username and not url.password:
+                return value
+        except ValueError:
+            pass
+    raise ValidationError("Provide a valid HTTP or HTTPS URL")
+
+
+def _optional_workspace_text(value: str | None, *, field: str, limit: int) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or len(value.strip()) > limit:
+        raise ValidationError(f"{field} must be text of up to {limit:,} characters")
+    return value.strip() or None
+
+
+def serialize_member_identity(member: User | None, *, viewer: User) -> dict | None:
+    if member is None:
+        return None
+    payload = {"id": member.id}
+    is_self = viewer.id == member.id
+    profile_visible = member.profile_visibility in {"internal", "public"}
+    if is_self or profile_visible:
+        payload.update(display_name=member.display_name, full_name=member.full_name)
+    if is_self or (profile_visible and member.show_email):
+        payload["email"] = member.email
+    return payload
+
+
+@contextmanager
+def institution_membership_lock(institution_id: int):
+    with registry_lock(f"institution-memberships:{int(institution_id)}"):
+        try:
+            yield
+        except Exception:
+            db.session.rollback()
+            raise
+
+
+@contextmanager
+def institution_directory_lock():
+    with registry_lock("institution-directory"):
+        try:
+            yield
+        except Exception:
+            db.session.rollback()
+            raise
 
 
 class InstitutionService:
@@ -47,11 +119,15 @@ class InstitutionService:
         return institution
 
     def _serialize_suggestion(self, institution: Institution, *, query: str | None = None, score: float | None = None) -> dict:
-        payload = institution.to_dict()
         if score is None and query:
             score = self.similarity_score(query, institution.name)
-        payload["similarity"] = round(float(score or 0), 3)
-        return payload
+        return {
+            "id": institution.id,
+            "name": institution.name,
+            "display_name": institution.display_name,
+            "slug": institution.slug,
+            "similarity": round(float(score or 0), 3),
+        }
 
     def similarity_score(self, left: str, right: str) -> float:
         normalized_left = normalize_institution_name(left)
@@ -66,61 +142,50 @@ class InstitutionService:
             return max(0.86, shorter / longer)
         return SequenceMatcher(None, normalized_left, normalized_right).ratio()
 
-    def find_exact_by_name(self, name: str) -> Institution | None:
+    def find_exact_by_name(self, name: str, *, user: User | None = None, exclude_id: int | None = None) -> Institution | None:
         normalized_name = normalize_institution_name(name)
         if not normalized_name:
             return None
-        return Institution.query.filter(func.lower(Institution.name) == normalized_name).first()
+        candidates = self._visible_affiliations(user) if user else Institution.query
+        if exclude_id is not None:
+            candidates = candidates.filter(Institution.id != exclude_id)
+        for identifier, candidate in candidates.with_entities(Institution.id, Institution.name).order_by(Institution.id):
+            if normalize_institution_name(candidate) == normalized_name:
+                return db.session.get(Institution, identifier)
+        return None
 
-    def suggest_institutions(self, query: str, *, limit: int = 8) -> list[dict]:
+    def _visible_affiliations(self, user: User):
+        if user.role in {UserRole.ADMIN, UserRole.MODERATOR}:
+            return Institution.query
+        memberships = db.session.query(InstitutionMembership.institution_id).filter_by(user_id=user.id)
+        return Institution.query.filter(or_(Institution.profile_visibility == "internal", Institution.id.in_(memberships)))
+
+    def suggest_institutions(self, query: str, *, user: User, limit: int = 8) -> list[dict]:
         text = str(query or "").strip()
         normalized = normalize_institution_name(text)
         if not normalized:
             return []
-        like_value = f"%{text}%"
-        candidates = (
-            Institution.query.filter(
-                or_(
-                    Institution.name.ilike(like_value),
-                    Institution.slug.ilike(f"%{slugify_institution_name(text)}%"),
-                )
-            )
-            .order_by(Institution.name.asc())
-            .limit(max(1, min(int(limit or 8), 20)) * 2)
-            .all()
-        )
-        scored_by_id: dict[int, tuple[Institution, float]] = {
-            institution.id: (institution, self.similarity_score(text, institution.name))
+        visible = self._visible_affiliations(user)
+        limit = min(int(limit), 20)
+        slug = slugify_institution_name(text)
+        filters = [Institution.name.icontains(text, autoescape=True), Institution.display_name.icontains(text, autoescape=True)]
+        if slug:
+            filters.append(Institution.slug.contains(slug, autoescape=True))
+        candidates = visible.filter(or_(*filters)).order_by(Institution.name).limit(limit * 2).all()
+        if len(candidates) < limit:
+            candidates = list({institution.id: institution for institution in (
+                candidates + visible.order_by(Institution.name).limit(250).all()
+            )}.values())
+        scored = [
+            (institution, max(self.similarity_score(text, institution.name),
+                              self.similarity_score(text, institution.display_name or "")))
             for institution in candidates
-        }
-        if len(scored_by_id) < limit:
-            for institution in Institution.query.order_by(Institution.name.asc()).limit(250).all():
-                score = self.similarity_score(text, institution.name)
-                if score >= 0.55:
-                    scored_by_id[institution.id] = (institution, max(score, scored_by_id.get(institution.id, (institution, 0))[1]))
-        ranked = sorted(
-            scored_by_id.values(),
-            key=lambda item: (-item[1], item[0].name.lower()),
-        )
+        ]
+        ranked = sorted(scored, key=lambda item: (-item[1], item[0].name.casefold()))
         return [
             self._serialize_suggestion(institution, query=text, score=score)
-            for institution, score in ranked[: max(1, min(int(limit or 8), 20))]
-        ]
-
-    def similar_institutions(self, name: str, *, threshold: float = SIMILAR_INSTITUTION_THRESHOLD, limit: int = 5) -> list[dict]:
-        text = str(name or "").strip()
-        if not text:
-            return []
-        scored = []
-        for institution in Institution.query.order_by(Institution.name.asc()).limit(500).all():
-            score = self.similarity_score(text, institution.name)
-            if score >= float(threshold):
-                scored.append((institution, score))
-        scored.sort(key=lambda item: (-item[1], item[0].name.lower()))
-        return [
-            self._serialize_suggestion(institution, query=text, score=score)
-            for institution, score in scored[: max(1, min(int(limit or 5), 20))]
-        ]
+            for institution, score in ranked if score >= 0.55
+        ][:limit]
 
     def list_for_user(self, user_id: int) -> list[InstitutionMembership]:
         return (
@@ -139,23 +204,14 @@ class InstitutionService:
         return InstitutionMembership.query.filter_by(
             institution_id=int(institution_id),
             user_id=int(user_id),
-        ).first()
+        ).populate_existing().first()
 
-    def ensure_user_affiliation(self, *, user: User, institution: Institution, role: str = "reader") -> InstitutionMembership:
-        try:
-            role_enum = InstitutionRole(str(role or "reader").strip().lower())
-        except ValueError as exc:
-            raise ValidationError(f"Invalid institution role: {role}") from exc
-
+    def _set_user_affiliation(self, *, user: User, institution: Institution) -> InstitutionMembership | None:
         membership = self.get_membership(institution.id, user.id)
-        if membership is None:
-            membership = InstitutionMembership(
-                institution_id=int(institution.id),
-                user_id=int(user.id),
-                role=role_enum,
-            )
-            db.session.add(membership)
-        user.default_institution_id = int(institution.id)
+        if membership is None and institution.profile_visibility != "internal" and user.role not in {UserRole.ADMIN, UserRole.MODERATOR}:
+            raise ResourceNotFoundError("Institution not found")
+        if membership:
+            user.default_institution_id = institution.id
         user.affiliation = institution.display_name or institution.name
         db.session.commit()
         return membership
@@ -166,37 +222,25 @@ class InstitutionService:
         user: User,
         institution_id: int | None = None,
         name: str | None = None,
-        confirm_create: bool = False,
     ) -> dict:
         if institution_id not in (None, ""):
-            institution = self.get_by_id(int(institution_id))
-            membership = self.ensure_user_affiliation(user=user, institution=institution)
-            return {"institution": institution, "membership": membership, "created": False, "similar": []}
+            try:
+                institution = self.get_by_id(int(institution_id))
+            except (TypeError, ValueError) as exc:
+                raise ValidationError("institution_id must be an integer") from exc
+            membership = self._set_user_affiliation(user=user, institution=institution)
+            return {"institution": institution, "membership": membership}
 
-        normalized_name = str(name or "").strip()
-        if not normalized_name:
-            raise ValidationError("Institution name is required")
-
-        existing = self.find_exact_by_name(normalized_name)
+        if not isinstance(name, str) or len(name.strip()) > 255:
+            raise ValidationError("Affiliation must be text of up to 255 characters")
+        label = name.strip()
+        existing = self.find_exact_by_name(label, user=user)
         if existing:
-            membership = self.ensure_user_affiliation(user=user, institution=existing)
-            return {"institution": existing, "membership": membership, "created": False, "similar": []}
-
-        similar = self.similar_institutions(normalized_name)
-        if similar and not confirm_create:
-            return {"institution": None, "membership": None, "created": False, "similar": similar}
-
-        institution = self.create_institution(
-            name=normalized_name,
-            description=None,
-            created_by_user_id=int(user.id),
-            profile_visibility="internal",
-        )
-        user.default_institution_id = int(institution.id)
-        user.affiliation = institution.display_name or institution.name
-        membership = self.get_membership(institution.id, user.id)
+            membership = self._set_user_affiliation(user=user, institution=existing)
+            return {"institution": existing, "membership": membership}
+        user.affiliation = label or None
         db.session.commit()
-        return {"institution": institution, "membership": membership, "created": True, "similar": similar}
+        return {"institution": None, "membership": None}
 
     def has_role(self, membership: InstitutionMembership | None, required_role: str) -> bool:
         if not membership:
@@ -209,48 +253,64 @@ class InstitutionService:
         *,
         name: str,
         description: str | None,
-        created_by_user_id: int | None,
+        actor: User,
         display_name: str | None = None,
         website_url: str | None = None,
         logo_url: str | None = None,
         profile_visibility: str | None = None,
+        owner: User | None = None,
+        commit: bool = True,
     ) -> Institution:
-        normalized_name = str(name or "").strip()
-        if not normalized_name:
-            raise ValidationError("Institution name is required")
+        with institution_directory_lock():
+            db.session.refresh(actor)
+            if not self._eligible_account(actor) or actor.role != UserRole.ADMIN:
+                raise SecurityError("Site administration is required to create an institution workspace")
+            owner = owner or actor
+            db.session.refresh(owner)
+            if not self._eligible_account(owner):
+                raise ValidationError("The first owner must have a verified, active account")
+            name = validate_institution_name(name)
+            if self.find_exact_by_name(name):
+                raise ValidationError("An institution with this name already exists")
 
-        slug_base = slugify_institution_name(normalized_name)
-        if not slug_base:
-            raise ValidationError("Institution name must contain alphanumeric characters")
+            slug_base = slugify_institution_name(name) or "institution"
+            slug = slug_base
+            suffix = 1
+            while Institution.query.filter_by(slug=slug).first():
+                suffix += 1
+                ending = f"-{suffix}"
+                slug = f"{slug_base[:120 - len(ending)]}{ending}"
 
-        slug = slug_base
-        suffix = 1
-        while Institution.query.filter_by(slug=slug).first():
-            suffix += 1
-            slug = f"{slug_base}-{suffix}"
-
-        institution = Institution(
-            name=normalized_name,
-            slug=slug,
-            description=str(description or "").strip() or None,
-            display_name=str(display_name or "").strip() or None,
-            website_url=str(website_url or "").strip() or None,
-            logo_url=str(logo_url or "").strip() or None,
-            profile_visibility=self._normalize_profile_visibility(profile_visibility),
-            created_by_user_id=created_by_user_id,
-        )
-        db.session.add(institution)
-        db.session.flush()
-        if created_by_user_id is not None:
+            institution = Institution(
+                name=name,
+                slug=slug,
+                description=_optional_workspace_text(description, field="Description", limit=10000),
+                display_name=_optional_workspace_text(display_name, field="Display name", limit=255),
+                website_url=_validated_web_url(website_url),
+                logo_url=_validated_web_url(logo_url),
+                profile_visibility=self._normalize_profile_visibility(profile_visibility),
+                created_by_user_id=actor.id,
+            )
+            db.session.add(institution)
+            db.session.flush()
             db.session.add(
                 InstitutionMembership(
                     institution_id=institution.id,
-                    user_id=int(created_by_user_id),
+                    user_id=owner.id,
                     role=InstitutionRole.OWNER,
                 )
             )
-        db.session.commit()
-        return institution
+            record_audit_event(
+                actor_user_id=actor.id,
+                institution_id=institution.id,
+                event_type="institution_created",
+                entity_type="institution",
+                entity_id=institution.id,
+                details={"name": institution.name, "slug": institution.slug, "owner_user_id": owner.id},
+            )
+            if commit:
+                db.session.commit()
+            return institution
 
     def _normalize_profile_visibility(self, value: str | None) -> str:
         visibility = str(value or "private").strip().lower()
@@ -262,6 +322,7 @@ class InstitutionService:
         self,
         institution: Institution,
         *,
+        actor: User,
         name: str | None,
         description: str | None,
         display_name: str | None = None,
@@ -269,92 +330,150 @@ class InstitutionService:
         logo_url: str | None = None,
         profile_visibility: str | None = None,
     ) -> Institution:
-        if name is not None:
-            normalized_name = str(name or "").strip()
-            if not normalized_name:
-                raise ValidationError("Institution name is required")
-            existing = Institution.query.filter_by(name=normalized_name).first()
-            if existing and existing.id != institution.id:
-                raise ValidationError("Institution name already exists")
-            institution.name = normalized_name
-        if description is not None:
-            institution.description = str(description or "").strip() or None
-        if display_name is not None:
-            institution.display_name = str(display_name or "").strip() or None
-        if website_url is not None:
-            institution.website_url = str(website_url or "").strip() or None
-        if logo_url is not None:
-            institution.logo_url = str(logo_url or "").strip() or None
-        if profile_visibility is not None:
-            institution.profile_visibility = self._normalize_profile_visibility(profile_visibility)
-        db.session.commit()
-        return institution
+        with institution_membership_lock(institution.id), institution_directory_lock():
+            self.require_membership_manager(institution.id, actor)
+            db.session.refresh(institution)
+            if name is not None and name != institution.name:
+                if actor.role != UserRole.ADMIN:
+                    raise SecurityError("Ask a site administrator to change the official institution name")
+                name = validate_institution_name(name)
+                if self.find_exact_by_name(name, exclude_id=institution.id):
+                    raise ValidationError("An institution with this name already exists")
+                institution.name = name
+            if description is not None:
+                institution.description = _optional_workspace_text(description, field="Description", limit=10000)
+            if display_name is not None:
+                institution.display_name = _optional_workspace_text(display_name, field="Display name", limit=255)
+            if website_url is not None:
+                institution.website_url = _validated_web_url(website_url)
+            if logo_url is not None:
+                institution.logo_url = _validated_web_url(logo_url)
+            if profile_visibility is not None:
+                institution.profile_visibility = self._normalize_profile_visibility(profile_visibility)
+            record_audit_event(
+                actor_user_id=actor.id,
+                institution_id=institution.id,
+                event_type="institution_updated",
+                entity_type="institution",
+                entity_id=institution.id,
+                details={"name": institution.name, "description": institution.description},
+            )
+            db.session.commit()
+            return institution
 
-    def upsert_membership(self, institution_id: int, user_id: int, role: str) -> InstitutionMembership:
+    @staticmethod
+    def _eligible_account(user: User | None) -> bool:
+        return bool(user and user.is_verified and not user.force_password_change and not is_demo(user))
+
+    def require_membership_manager(self, institution_id: int, actor: User) -> None:
+        db.session.refresh(actor)
+        if self._eligible_account(actor) and actor.role == UserRole.ADMIN:
+            return
+        membership = self.get_membership(institution_id, actor.id)
+        if not self._eligible_account(actor) or not self.has_role(membership, "manager"):
+            raise ResourceNotFoundError("Institution not found")
+
+    def _require_owner_role_change(self, actor: User, institution_id: int, *roles) -> None:
+        if InstitutionRole.OWNER not in roles or actor.role == UserRole.ADMIN:
+            return
+        if not self.has_role(self.get_membership(institution_id, actor.id), "owner"):
+            raise SecurityError("Only an institution owner or administrator can change owner membership")
+
+    def validate_membership_role(self, institution_id: int, role: str, *, actor: User) -> InstitutionRole:
+        self.require_membership_manager(institution_id, actor)
         try:
-            role_enum = InstitutionRole(str(role or "").strip().lower())
+            role_enum = role if isinstance(role, InstitutionRole) else InstitutionRole(str(role or "").strip().lower())
         except ValueError as exc:
             raise ValidationError(f"Invalid institution role: {role}") from exc
+        self._require_owner_role_change(actor, institution_id, role_enum)
+        return role_enum
 
-        membership = self.get_membership(institution_id, user_id)
-        previous_role = membership.role.value if membership and membership.role else None
-        if membership and membership.role == InstitutionRole.OWNER and role_enum != InstitutionRole.OWNER:
-            if self._owner_count(institution_id) <= 1:
+    def upsert_membership(
+        self, institution_id: int, user_id: int, role: str, *, actor: User, commit: bool = True,
+        existing_only: bool = False, notify_change: bool = True,
+    ) -> InstitutionMembership:
+        with institution_membership_lock(institution_id):
+            role_enum = self.validate_membership_role(institution_id, role, actor=actor)
+            membership = self.get_membership(institution_id, user_id)
+            if not membership and existing_only:
+                raise ResourceNotFoundError("Institution membership not found")
+            target = db.session.get(User, int(user_id), populate_existing=True)
+            if not self._eligible_account(target):
+                raise ValidationError("Institution membership requires a verified, active account")
+            if membership and membership.role == role_enum:
+                return membership
+            previous_role = membership.role if membership else None
+            self._require_owner_role_change(actor, institution_id, previous_role)
+            if previous_role == InstitutionRole.OWNER and self._owner_count(institution_id) <= 1:
                 raise ValidationError("Cannot remove the last institution owner")
-        if membership:
-            membership.role = role_enum
-        else:
-            membership = InstitutionMembership(
-                institution_id=int(institution_id),
-                user_id=int(user_id),
-                role=role_enum,
+            if membership:
+                membership.role = role_enum
+            else:
+                membership = InstitutionMembership(institution_id=institution_id, user_id=user_id, role=role_enum)
+                db.session.add(membership)
+            db.session.flush()
+            record_audit_event(
+                actor_user_id=actor.id,
+                institution_id=institution_id,
+                event_type="institution_membership_upserted",
+                entity_type="institution_membership",
+                entity_id=membership.id,
+                details={"user_id": user_id, "role": role_enum.value},
             )
-            db.session.add(membership)
-        institution = db.session.get(Institution, int(institution_id))
-        notify_user(
-            recipient_user_id=int(user_id),
-            notification_type="institution.membership_updated" if previous_role else "institution.membership_added",
-            category="profiles",
-            severity="info",
-            title="Institution membership updated" if previous_role else "Institution membership added",
-            body=f"You are now {role_enum.value} in {institution.display_name or institution.name if institution else 'an institution'}.",
-            institution_id=int(institution_id),
-            entity_type="institution",
-            entity_id=int(institution_id),
-            action_url="/account/institutions",
-            dedupe_key=f"institution:{institution_id}:membership:{user_id}:{role_enum.value}",
-        )
-        db.session.commit()
-        return membership
+            if notify_change:
+                institution = self.get_by_id(institution_id)
+                notify_user(
+                    recipient_user_id=user_id,
+                    notification_type="institution.membership_updated" if previous_role else "institution.membership_added",
+                    title="Institution membership updated" if previous_role else "Institution membership added",
+                    body=f"You are now {role_enum.value} in {institution.display_name or institution.name}.",
+                    institution_id=institution_id,
+                    entity_type="institution",
+                    entity_id=institution_id,
+                    action_url="/account/institutions",
+                    dedupe_key=f"institution:{institution_id}:membership:{user_id}:{role_enum.value}",
+                )
+            if commit:
+                db.session.commit()
+            return membership
 
-    def remove_membership(self, institution_id: int, user_id: int) -> bool:
-        membership = self.get_membership(institution_id, user_id)
-        if not membership:
-            return False
-        if membership.role == InstitutionRole.OWNER and self._owner_count(institution_id) <= 1:
-            raise ValidationError("Cannot remove the last institution owner")
+    def remove_membership(self, institution_id: int, user_id: int, *, actor: User) -> bool:
+        with institution_membership_lock(institution_id):
+            self.require_membership_manager(institution_id, actor)
+            membership = self.get_membership(institution_id, user_id)
+            if not membership:
+                return False
+            self._require_owner_role_change(actor, institution_id, membership.role)
+            if membership.role == InstitutionRole.OWNER and self._owner_count(institution_id) <= 1:
+                raise ValidationError("Cannot remove the last institution owner")
+            target = db.session.get(User, user_id)
+            if target and target.default_institution_id == institution_id:
+                target.default_institution_id = None
 
-        user = db.session.get(User, int(user_id))
-        if user and int(user.default_institution_id or 0) == int(institution_id):
-            user.default_institution_id = None
-
-        institution = db.session.get(Institution, int(institution_id))
-        notify_user(
-            recipient_user_id=int(user_id),
-            notification_type="institution.membership_removed",
-            category="profiles",
-            severity="warning",
-            title="Institution membership removed",
-            body=f"Your membership in {institution.display_name or institution.name if institution else 'an institution'} was removed.",
-            institution_id=int(institution_id),
-            entity_type="institution",
-            entity_id=int(institution_id),
-            action_url="/account/institutions",
-            dedupe_key=f"institution:{institution_id}:membership:{user_id}:removed",
-        )
-        db.session.delete(membership)
-        db.session.commit()
-        return True
+            record_audit_event(
+                actor_user_id=actor.id,
+                institution_id=institution_id,
+                event_type="institution_membership_removed",
+                entity_type="institution_membership",
+                entity_id=membership.id,
+                details={"user_id": user_id, "role": membership.role.value},
+            )
+            institution = self.get_by_id(institution_id)
+            notify_user(
+                recipient_user_id=user_id,
+                notification_type="institution.membership_removed",
+                severity="warning",
+                title="Institution membership removed",
+                body=f"Your membership in {institution.display_name or institution.name} was removed.",
+                institution_id=institution_id,
+                entity_type="institution",
+                entity_id=institution_id,
+                action_url="/account/institutions",
+                dedupe_key=f"institution:{institution_id}:membership:{user_id}:removed",
+            )
+            db.session.delete(membership)
+            db.session.commit()
+            return True
 
     def list_members(self, institution_id: int) -> list[InstitutionMembership]:
         return (

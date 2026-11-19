@@ -5,14 +5,18 @@ import json
 import logging
 import os
 import tempfile
+import time
 import uuid
+from contextlib import nullcontext
 from functools import wraps
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List
 
 from flask import Blueprint, current_app, request, send_file
 from flask import session as flask_session
 from flask_jwt_extended import get_jwt_identity, jwt_required
+from werkzeug.datastructures import FileStorage
 
 from api_utils import APIResponse
 from constants import (
@@ -27,16 +31,19 @@ from database.models import File as DBFile
 from database.models import Session as DBSession
 from database.models import UserMetadata
 from database.models import User, UserRole
-from exceptions import AppException
-from routes.access_helpers import get_session_with_permission
+from exceptions import AppException, SecurityError, ValidationError
+from routes.access_helpers import get_current_user_from_jwt, get_session_with_permission
+from services.session_access_service import MOUNTED_INPUT_ORIGIN, can_use_mounted_inputs
 from routes.lod_mapping_helpers import build_pipeline_aligned_lod_metadata, infer_row_fallback_title
 from security import resolve_child_path, sanitize_upload_filename
+from services.account_upload_quota import UploadQuotaError, admit_upload, attach_upload_to_session, upload_size
 from services.cloud_upload_service import CloudUploadService, STORAGE_MODE_LOCAL
 from services.edm_service import EdmService
 from services.iiif_service import IiifService
 from services.mets_service import MetsService
 from services.hdpc_local_service import _file_sha256, _guess_mime_type
 from services.msf_service import MSFService
+from services.registry_lock import registry_lock
 from services.user_service import UserService
 from services.zenodo_metadata_normalizer import normalize_zenodo_metadata
 from workflow_status import normalize_session_state
@@ -48,6 +55,9 @@ edm_service = EdmService()
 iiif_service = IiifService()
 mets_service = MetsService()
 DATASET_DUPLICATE_FILE_EXTENSIONS = {".glb", ".gltf", ".obj", ".ply", ".stl", ".fbx", ".usdz"}
+MSF_FILE_BYTES = 16 * 1024**2
+MSF_WORKSPACE_BYTES = 64 * 1024**2
+MSF_WORKSPACE_RETENTION = 24 * 3600
 
 
 def _get_directory_files(directory_path: str) -> List[str]:
@@ -205,9 +215,15 @@ def _resolve_local_input_root() -> str:
     return current_app.config.get("LOCAL_INPUT_PATH", "/data/local_input")
 
 
+def _account_msf_workspace() -> Path:
+    root = Path(current_app.config.get("UPLOAD_FOLDER", "/tmp/msf_uploads"))
+    workspace = root / f"account-{int(get_jwt_identity())}"
+    workspace.mkdir(mode=0o700, parents=True, exist_ok=True)
+    return workspace
+
+
 def _resolve_upload_folder_path(raw_path: Any, *, must_be_file: bool = True) -> str:
-    upload_folder = current_app.config.get("UPLOAD_FOLDER", "/tmp/msf_uploads")
-    os.makedirs(upload_folder, exist_ok=True)
+    upload_folder = _account_msf_workspace()
     try:
         resolved = resolve_child_path(upload_folder, raw_path, must_exist=True)
     except AppException as exc:
@@ -216,10 +232,62 @@ def _resolve_upload_folder_path(raw_path: Any, *, must_be_file: bool = True) -> 
         raise ValueError("Selected path must be a file in the upload workspace")
     if not must_be_file and not resolved.is_dir():
         raise ValueError("Selected path must be a directory in the upload workspace")
+    if must_be_file and resolved.stat().st_mtime < time.time() - MSF_WORKSPACE_RETENTION:
+        raise ValueError("This temporary spreadsheet has expired. Please upload it again.")
     return str(resolved)
 
 
+def _workflow_msf_input(raw_path, project_service, *, directory=False):
+    try:
+        return _resolve_upload_folder_path(project_service._translate_path(raw_path, to_container=True), must_be_file=not directory)
+    except ValueError:
+        if CloudUploadService.get_storage_mode() != STORAGE_MODE_LOCAL:
+            raise
+    resolver = _resolve_local_directory_path if directory else _resolve_local_msf_path
+    return resolver(raw_path, project_service)
+
+
+def _require_mounted_inputs():
+    if not can_use_mounted_inputs(get_current_user_from_jwt()):
+        raise SecurityError("Mounted input access is required")
+
+
+def _staged_msf_size(upload):
+    size = upload_size(upload)
+    if not size:
+        raise ValidationError("Choose a spreadsheet containing data.")
+    if size > MSF_FILE_BYTES:
+        raise UploadQuotaError("MSF_FILE_QUOTA", "Choose a spreadsheet of 16 MiB or smaller.", 413, {"limit_bytes": MSF_FILE_BYTES})
+    return size
+
+
+def _store_staged_msf(upload, filename, directory=None):
+    size = _staged_msf_size(upload)
+    with registry_lock(f"msf-workspace:{int(get_jwt_identity())}"):
+        workspace = _account_msf_workspace()
+        cutoff = time.time() - MSF_WORKSPACE_RETENTION
+        stored = 0
+        for item in workspace.rglob("*"):
+            if item.is_file() and not item.is_symlink():
+                info = item.stat()
+                if info.st_mtime < cutoff:
+                    item.unlink(missing_ok=True)
+                else:
+                    stored += info.st_size
+        if stored + size > MSF_WORKSPACE_BYTES:
+            raise UploadQuotaError("MSF_WORKSPACE_QUOTA", "Your temporary spreadsheet workspace is full. Try again as earlier files expire.", 413,
+                                   {"used_bytes": stored, "limit_bytes": MSF_WORKSPACE_BYTES})
+        destination = Path(directory or workspace) / f"msf_{uuid.uuid4().hex}_{filename}"
+        try:
+            upload.save(destination)
+        except OSError:
+            destination.unlink(missing_ok=True)
+            raise
+        return str(destination)
+
+
 def _resolve_local_directory_path(raw_directory_path: Any, project_service) -> str:
+    _require_mounted_inputs()
     base_local_path = _resolve_local_input_root()
     translated_base = project_service._translate_path(base_local_path, to_container=True)
     if not os.path.isdir(translated_base):
@@ -243,6 +311,7 @@ def _resolve_local_directory_path(raw_directory_path: Any, project_service) -> s
 
 
 def _resolve_local_msf_path(raw_msf_path: Any, project_service) -> str:
+    _require_mounted_inputs()
     text = str(raw_msf_path or "").strip()
     if not text:
         raise ValueError("msf_path is required")
@@ -429,10 +498,11 @@ def _create_workflow_session_dirs(user_id: int, **workspace_options) -> tuple[DB
         use_institution_default_communities=bool(workspace_options.get("use_institution_default_communities"))
         if workspace_options.get("institution_id")
         else False,
-        origin_type="workflow",
+        origin_type=workspace_options.get("origin_type", "workflow"),
         access_mode="full",
     )
     db.session.add(session_row)
+    attach_upload_to_session(session_row)
     db.session.commit()
 
     flask_session["hdpc_path"] = hdpc_path
@@ -1253,15 +1323,8 @@ def upload_msf():
                 f"Invalid file type '{ext}'. Allowed: {', '.join(MSF_ALLOWED_EXTENSIONS)}"
             )
 
-        # Save to uploads folder
-        upload_folder = current_app.config.get("UPLOAD_FOLDER", "/tmp/msf_uploads")
-        os.makedirs(upload_folder, exist_ok=True)
-
-        # Generate unique filename
         original_filename = sanitize_upload_filename(file.filename, allowed_extensions=MSF_ALLOWED_EXTENSIONS)
-        safe_filename = f"msf_{uuid.uuid4().hex[:8]}_{original_filename}"
-        file_path = os.path.join(upload_folder, safe_filename)
-        file.save(file_path)
+        file_path = _store_staged_msf(file, original_filename)
 
         logger.info(f"MSF file uploaded: {file_path}")
 
@@ -1273,6 +1336,8 @@ def upload_msf():
             message="MSF file uploaded successfully"
         )
 
+    except AppException:
+        raise
     except Exception as e:
         logger.error(f"MSF upload failed: {e}", exc_info=True)
         return APIResponse.server_error(f"Failed to upload MSF file: {e}")
@@ -1288,6 +1353,7 @@ def parse_msf():
     - File upload (multipart/form-data with 'file' field)
     - JSON with 'msf_path' for server-side files
     """
+    temporary = None
     try:
         project_service = current_app.project_service
 
@@ -1303,13 +1369,13 @@ def parse_msf():
                     f"Invalid file type. Allowed: {', '.join(MSF_ALLOWED_EXTENSIONS)}"
                 )
 
-            # Save to temp location
-            temp_dir = current_app.config.get("UPLOAD_FOLDER", "/tmp/msf_uploads")
-            os.makedirs(temp_dir, exist_ok=True)
-            safe_filename = sanitize_upload_filename(file.filename, allowed_extensions=MSF_ALLOWED_EXTENSIONS)
-            temp_path = os.path.join(temp_dir, f"msf_temp_{uuid.uuid4().hex[:8]}_{safe_filename}")
-            file.save(temp_path)
-            msf_path = temp_path
+            size = _staged_msf_size(file)
+            with admit_upload(int(get_jwt_identity()), size, kind="inspect"):
+                temporary = tempfile.TemporaryDirectory(prefix="parse-", dir=_account_msf_workspace())
+                safe_filename = sanitize_upload_filename(file.filename, allowed_extensions=MSF_ALLOWED_EXTENSIONS)
+                msf_path = os.path.join(temporary.name, safe_filename)
+                file.save(msf_path)
+                df, columns = msf_service.parse_msf_file(msf_path)
         else:
             # Get path from JSON
             data = request.get_json() or {}
@@ -1318,16 +1384,8 @@ def parse_msf():
             if not msf_path:
                 return APIResponse.validation_error("No MSF file or path provided")
 
-            if CloudUploadService.get_storage_mode() == STORAGE_MODE_LOCAL:
-                msf_path = _resolve_local_msf_path(msf_path, project_service)
-            else:
-                msf_path = _resolve_upload_folder_path(project_service._translate_path(msf_path, to_container=True))
-
-        if not os.path.exists(msf_path):
-            return APIResponse.error(f"MSF file not found: {msf_path}", 404)
-
-        # Parse the MSF file
-        df, columns = msf_service.parse_msf_file(msf_path)
+            msf_path = _workflow_msf_input(msf_path, project_service)
+            df, columns = msf_service.parse_msf_file(msf_path)
         preview = msf_service.get_msf_preview(df)
 
         return APIResponse.success(
@@ -1339,12 +1397,17 @@ def parse_msf():
             message="MSF file parsed successfully"
         )
 
+    except AppException:
+        raise
     except ValueError as e:
         logger.warning(f"MSF parse error: {e}")
         return APIResponse.validation_error(str(e))
     except Exception as e:
         logger.error(f"MSF parse failed: {e}", exc_info=True)
         return APIResponse.server_error(f"Failed to parse MSF file: {e}")
+    finally:
+        if temporary:
+            temporary.cleanup()
 
 
 @msf_bp.route("/validate", methods=["POST"])
@@ -1374,9 +1437,8 @@ def validate_msf():
         if not directory_path:
             return APIResponse.validation_error("directory_path is required")
 
-        # Translate paths for container environment
-        msf_path = project_service._translate_path(msf_path, to_container=True)
-        directory_path = project_service._translate_path(directory_path, to_container=True)
+        msf_path = _workflow_msf_input(msf_path, project_service)
+        directory_path = _workflow_msf_input(directory_path, project_service, directory=True)
 
         if not os.path.exists(msf_path):
             return APIResponse.error(f"MSF file not found: {msf_path}", 404)
@@ -1400,6 +1462,8 @@ def validate_msf():
             message="MSF validation completed"
         )
 
+    except AppException:
+        raise
     except ValueError as e:
         logger.warning(f"MSF validation error: {e}")
         return APIResponse.validation_error(str(e))
@@ -1432,9 +1496,8 @@ def detect_filename_column():
         if not directory_path:
             return APIResponse.validation_error("directory_path is required")
 
-        # Translate paths
-        msf_path = project_service._translate_path(msf_path, to_container=True)
-        directory_path = project_service._translate_path(directory_path, to_container=True)
+        msf_path = _workflow_msf_input(msf_path, project_service)
+        directory_path = _workflow_msf_input(directory_path, project_service, directory=True)
 
         if not os.path.exists(msf_path):
             return APIResponse.error(f"MSF file not found: {msf_path}", 404)
@@ -1459,6 +1522,10 @@ def detect_filename_column():
             message="Filename column detection completed"
         )
 
+    except AppException:
+        raise
+    except ValueError as exc:
+        return APIResponse.validation_error(str(exc))
     except Exception as e:
         logger.error(f"Filename column detection failed: {e}", exc_info=True)
         return APIResponse.server_error(f"Failed to detect filename column: {e}")
@@ -1504,8 +1571,7 @@ def get_metadata_for_files():
         if not filenames:
             return APIResponse.validation_error("filenames list is required")
 
-        # Translate path
-        msf_path = project_service._translate_path(msf_path, to_container=True)
+        msf_path = _workflow_msf_input(msf_path, project_service)
 
         if not os.path.exists(msf_path):
             return APIResponse.error(f"MSF file not found: {msf_path}", 404)
@@ -1536,6 +1602,10 @@ def get_metadata_for_files():
             message="Metadata retrieved successfully"
         )
 
+    except AppException:
+        raise
+    except ValueError as exc:
+        return APIResponse.validation_error(str(exc))
     except Exception as e:
         logger.error(f"Get metadata for files failed: {e}", exc_info=True)
         return APIResponse.server_error(f"Failed to get metadata: {e}")
@@ -1576,27 +1646,19 @@ def patch_msf():
         recursive_scan = True if "recursive" not in data else _coerce_bool(data.get("recursive"))
         parse_options = _build_parse_options(data)
 
-        if storage_mode == STORAGE_MODE_LOCAL:
-            msf_path = _resolve_local_msf_path(msf_path, project_service)
-        else:
-            msf_path = _resolve_upload_folder_path(project_service._translate_path(msf_path, to_container=True))
+        msf_path = _workflow_msf_input(msf_path, project_service)
 
         translated_directory_path = None
         directory_files: List[str] = []
         if directory_path:
-            if storage_mode == STORAGE_MODE_LOCAL:
-                translated_directory_path = _resolve_local_directory_path(directory_path, project_service)
-            else:
-                translated_directory_path = _resolve_upload_folder_path(
-                    project_service._translate_path(directory_path, to_container=True),
-                    must_be_file=False,
-                )
+            translated_directory_path = _workflow_msf_input(directory_path, project_service, directory=True)
             if not os.path.isdir(translated_directory_path):
                 return APIResponse.error(f"Directory not found: {translated_directory_path}", 404)
             directory_files = _scan_directory_files(translated_directory_path, recursive=recursive_scan)
 
+        admin_local = storage_mode == STORAGE_MODE_LOCAL and _is_admin_request_user()
         if output_directory:
-            if storage_mode == STORAGE_MODE_LOCAL:
+            if admin_local:
                 output_directory = _resolve_local_directory_path(output_directory, project_service)
             else:
                 output_directory = _resolve_upload_folder_path(
@@ -1604,16 +1666,26 @@ def patch_msf():
                     must_be_file=False,
                 )
 
-        report = msf_service.patch_msf_file(
-            file_path=msf_path,
-            parse_options=parse_options,
-            directory_files=directory_files,
-            directory_root=translated_directory_path,
-            filename_column=filename_column,
-            duplicate_policy=duplicate_policy,
-            apply=apply_patch,
-            output_dir=output_directory,
-        )
+        generated_in_scratch = apply_patch and not admin_local
+        context = tempfile.TemporaryDirectory(prefix="webhdp-msf-patch-") if generated_in_scratch else nullcontext(output_directory)
+        with context as output_dir:
+            report = msf_service.patch_msf_file(
+                file_path=msf_path,
+                parse_options=parse_options,
+                directory_files=directory_files,
+                directory_root=translated_directory_path,
+                filename_column=filename_column,
+                duplicate_policy=duplicate_policy,
+                apply=apply_patch,
+                output_dir=output_dir,
+            )
+            generated = report.get("patched_msf_path")
+            if generated_in_scratch and generated:
+                with open(generated, "rb") as stream:
+                    file = FileStorage(stream=stream, filename=Path(generated).name)
+                    saved = _store_staged_msf(file, file.filename, output_directory)
+                report["patched_msf_path"] = saved
+                report["actions"] = [action.replace(generated, saved) for action in report.get("actions", [])]
 
         message = "MSF patch analysis completed"
         if apply_patch and report.get("patched_msf_path"):
@@ -1622,6 +1694,8 @@ def patch_msf():
             message = "MSF patch apply requested, but blockers remain"
 
         return APIResponse.success(data=report, message=message)
+    except AppException:
+        raise
     except ValueError as exc:
         logger.warning(f"MSF patch validation error: {exc}")
         return APIResponse.validation_error(str(exc))
@@ -1797,6 +1871,8 @@ def analyze_workflow_session_msf(session_id: int):
             },
             message="Workflow MSF analysis completed",
         )
+    except AppException:
+        raise
     except Exception as exc:
         logger.error("Workflow MSF analysis failed: %s", exc, exc_info=True)
         return APIResponse.server_error(f"Failed to analyze workflow MSF: {exc}")
@@ -1825,7 +1901,8 @@ def prepare_local_workflow_session():
         current_user = db.session.get(User, user_id)
         workspace_options = _normalize_session_workspace_options(user=current_user, payload=data or {})
 
-        session_row, _, _, _ = _create_workflow_session_dirs(user_id, **workspace_options)
+        with admit_upload(user_id, 0):
+            session_row, _, _, _ = _create_workflow_session_dirs(user_id, origin_type=MOUNTED_INPUT_ORIGIN, **workspace_options)
         scanned_files = _scan_directory_files(directory_root, recursive=recursive)
         preflight = msf_service.patch_msf_file(
             file_path=msf_path,
@@ -1885,7 +1962,7 @@ def start_local_workflow_scan(session_id: int):
         if CloudUploadService.get_storage_mode() != STORAGE_MODE_LOCAL:
             return APIResponse.forbidden("Local workflow scanning is only available in local storage mode")
 
-        session_row, _, error_response = get_session_with_permission(
+        session_row, actor, error_response = get_session_with_permission(
             session_id,
             permission="edit",
             require_mutable=True,
@@ -1958,6 +2035,7 @@ def start_local_workflow_scan(session_id: int):
             storage_mode=STORAGE_MODE_LOCAL,
             msf_parse_options=final_parse_options,
             input_directory_path=directory_root,
+            requested_by_user_id=actor.id,
         )
 
         queued_progress = {

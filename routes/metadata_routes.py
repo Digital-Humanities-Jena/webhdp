@@ -13,8 +13,9 @@ from flask_jwt_extended import get_jwt_identity, jwt_required
 from api_utils import APIResponse
 from database.database import db
 from database.models import Session as DBSession, UserMetadata
-from routes.access_helpers import get_file_with_session_permission, get_session_with_permission
-from security import path_is_within, resolve_child_path
+from routes.access_helpers import get_current_user_from_jwt, get_file_with_session_permission, get_session_with_permission
+from security import path_is_within
+from services.session_access_service import can_use_mounted_inputs
 from services.metadata_service import MetadataService
 from services.msf_service import MSFService
 from services.metadata_workflow_service import get_metadata_workflow_contract
@@ -52,13 +53,13 @@ def _resolve_msf_path(msf_path: str, session_id: Any) -> str:
         sid = int(session_id)
     except (TypeError, ValueError):
         if msf_path:
-            upload_folder = current_app.config.get("UPLOAD_FOLDER", "/tmp/msf_uploads")
-            return str(resolve_child_path(upload_folder, msf_path, must_exist=True))
+            from routes.msf_routes import _resolve_upload_folder_path
+            return _resolve_upload_folder_path(msf_path)
         return msf_path
 
     session = db.session.get(DBSession, sid)
     if not session:
-        return msf_path
+        return None
 
     candidate_dirs = []
     if session.session_dir:
@@ -66,16 +67,23 @@ def _resolve_msf_path(msf_path: str, session_id: Any) -> str:
     if session.hdpc_path:
         candidate_dirs.append(os.path.join(os.path.dirname(session.hdpc_path), "uploads"))
 
+    profile = _get_session_msf_profile(sid)
+    profile_path = profile.get("file_path")
+    if profile.get("storage_mode") == "local" and can_use_mounted_inputs(get_current_user_from_jwt()):
+        local_root = current_app.config.get("LOCAL_INPUT_PATH", "/data/local_input")
+        if profile_path and path_is_within(local_root, profile_path) and os.path.isfile(profile_path):
+            if not msf_path or Path(msf_path).resolve() == Path(profile_path).resolve():
+                return profile_path
+
     if msf_path:
         raw_candidate = Path(msf_path).expanduser()
         if not raw_candidate.is_absolute() and candidate_dirs:
             raw_candidate = Path(candidate_dirs[0]) / raw_candidate
         resolved_candidate = raw_candidate.resolve(strict=False)
-        if os.path.exists(resolved_candidate) and any(path_is_within(base_dir, resolved_candidate) for base_dir in candidate_dirs):
+        if resolved_candidate.is_file() and any(path_is_within(base_dir, resolved_candidate) for base_dir in candidate_dirs):
             return str(resolved_candidate)
+        return None
 
-    profile = _get_session_msf_profile(sid)
-    profile_path = profile.get("file_path")
     if (
         isinstance(profile_path, str)
         and os.path.exists(profile_path)
@@ -88,10 +96,10 @@ def _resolve_msf_path(msf_path: str, session_id: Any) -> str:
             continue
         for ext in (".xlsx", ".xls", ".csv"):
             candidate = os.path.join(base_dir, f"upload.msf{ext}")
-            if os.path.exists(candidate):
+            if os.path.isfile(candidate) and path_is_within(base_dir, candidate):
                 return candidate
 
-    return msf_path
+    return None
 
 
 def _resolve_msf_parse_options(payload: Dict[str, Any], session_id: Any) -> Dict[str, Any]:

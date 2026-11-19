@@ -67,6 +67,8 @@ def test_paired_inputs_do_not_intersect_unrelated_formats_and_resources_are_expl
                  'input_bindings': [{'target': 'input_file', 'type': 'pipeline_source_file'},
                                     {'target': 'reference_files', 'type': 'record_source_files'}]}]}, {'align': manifest})
     assert guide['requires_hpc']
+    assert guide['requires_gpu']
+    assert guide['hpc_component_keys'] == ['align']
     assert guide['source_extensions'] is None
     assert 'reference files: .tif, .tiff' in guide['requirements']
     assert guide['largest_step_resources']['memory_mb'] == 32768
@@ -79,3 +81,20 @@ def test_invalid_optional_resource_values_do_not_hide_the_pipeline_list():
     assert guide['largest_step_resources'] == {'cpus': 4, 'memory_mb': 0, 'gpu_count': 0}
     assert any('review invalid memory_mb' in value for value in guide['requirements'])
     assert any('review invalid gpu_count' in value for value in guide['requirements'])
+
+
+def test_runtime_guidance_uses_selected_profiles_and_excludes_disabled_steps():
+    config = {'steps': [{'id': 'a', 'component_ref': 'archive_unpack'},
+                        {'id': 'b', 'component_ref': 'any_to_usdz'},
+                        {'id': 'c', 'component_ref': 'fast_renderer', 'enabled': False}]}
+    guide = pipeline_guidance(config, {}, {'a': {'adapter': 'hpc_link', 'resources': {'gpu_count': 0, 'cpus': 4}}})
+    assert guide['requires_hpc']
+    assert not guide['requires_gpu']
+    assert guide['hpc_component_keys'] == ['archive_unpack', 'any_to_usdz']
+    assert guide['largest_step_resources'] == {'cpus': 4, 'memory_mb': 0, 'gpu_count': 0}
+
+    config['steps'][2]['enabled'] = True
+    render = pipeline_guidance(config, {})
+    assert render['requires_gpu']
+    assert 'fast_renderer' in render['hpc_component_keys']
+    assert render['largest_step_resources']['gpu_count'] == 1

@@ -20,6 +20,14 @@ maintainers can use the lower sections to tune execution and component behavior.
 
 ## Built-In Publication Pipelines
 
+Pipeline selection and submission review show a GPU requirement when a selected
+component profile needs one. A session with no allocation can still be prepared.
+When processing requests a GPU, the submission view distinguishes the WebHDP
+queue from a request waiting for the HPC scheduler. The scheduler can report
+that no resources match the request yet or that it is prioritizing other jobs.
+GPU availability can change while you prepare a workflow. A running allocation
+and successful runtime preflight are required to use a newly requested GPU.
+
 Primary actor: publishing user or API client.
 
 Entry points:

@@ -7,7 +7,7 @@ Zenodo workflows, and generated EDM, CIDOC-CRM, JSON-LD, IIIF, and METS/MODS out
 Canonical source repository:
 `https://github.com/Digital-Humanities-Jena/webhdp`
 
-Release version: `v0.1.0-alpha.3`
+Release candidate `v0.1.0-alpha.4`
 
 ## What WebHDP Does
 
@@ -27,6 +27,8 @@ Core capabilities:
 - Optional 3D rendering and USDZ conversion services
 - Public record pages and oEmbed responses for published records
 - Zenodo credential handling with encrypted, masked, user-managed keys
+- Guided account setup, verified invitations, and institution workspace approval
+- Public 3D samples, a replayable CPU practice workflow, and Sandbox draft preparation
 - Zenodo account retrieval into explorer-only `.hdpc` collections
 - Docker-based local, server, and operator deployment paths
 
@@ -52,9 +54,10 @@ corresponding HPC capability. One session can claim it at a time, and detaching
 returns it to the demonstration pool for the remainder of the allocation.
 See the [reserved GPU guide](docs/guides/prereserved_gpu_demo.md).
 
-The guided CPU workflow checks a single model package, maps its metadata, and
-creates a Zenodo Sandbox draft. It includes a public sample library and a
-time-limited account for group demonstrations. See the
+The guided CPU workflow checks model packages, maps their metadata, and
+creates Zenodo Sandbox drafts. It includes a public sample library, a
+replayable practice workflow, and a time-limited account for group
+demonstrations. See the
 [3D model publication guide](docs/guides/model_publication.md).
 
 Models whose dependencies span directories include a `<model>.sources.zip` in
@@ -68,8 +71,11 @@ Pipeline Constructor and HDP Component Installer with their usual account and
 runtime checks. On hosted storage, run Submission readiness from the Submit
 step of an upload. Set `ZENODO_PUBLISH_ENABLED=false` for draft-only
 demonstrations and testing.
-Username (email) and password login is the default; users may enroll in email
-two-factor authentication from their account settings.
+New accounts verify their email before choosing a password. In **Getting
+started**, select **Open account setup** for guidance on Zenodo keys and
+institution access.
+Users may enroll in email two-factor authentication from their account
+settings.
 
 HDP Component installation, Pipeline Constructor workflows, local Docker-backed
 components, and SIF execution remain optional evaluation features outside the
@@ -105,7 +111,7 @@ access. See the [integration and operator guide](docs/guides/webhdp_link.md),
 [three real processing examples](external_code/webhdp_link_examples/README.md).
 
 Existing installations should follow the
-[alpha.3 upgrade guide](docs/guides/upgrade_alpha3.md) before enabling these
+[alpha.4 upgrade guide](docs/guides/upgrade_alpha4.md) before enabling these
 optional execution paths.
 
 ## Repository Layout

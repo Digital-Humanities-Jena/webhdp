@@ -133,7 +133,6 @@ def bearer(scope):
         @wraps(fn)
         def wrapped(*args, **kwargs):
             g.link_token, g.link_client, g.link_user = link.authenticate(scope)
-            link.fail(is_demo(g.link_user), 'access_denied', 'This account is limited to the model publication demonstration.', 403)
             if request.path == '/api/v1/link/uploads' and request.method == 'POST':
                 # Set before request.files triggers Werkzeug multipart spooling.
                 request.max_content_length = link.client_config(g.link_client)['max_upload_bytes'] + 16384

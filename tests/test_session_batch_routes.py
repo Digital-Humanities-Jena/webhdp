@@ -14,6 +14,7 @@ from database.models import Session as DBSession, User, UserRole
 from middleware import setup_error_handlers
 from routes.session_routes import session_bp
 from services.session_batch_history_service import get_task_entry
+from services.zenodo_credential_service import ZenodoCredentialService
 
 
 def _build_batch_hdpc(path: str, root_dir: str) -> None:
@@ -195,6 +196,7 @@ def session_batch_app():
     app.config["TESTING"] = True
     app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///:memory:"
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+    app.config["SECRET_KEY"] = "session-batch-testing"
     app.config["JWT_SECRET_KEY"] = "test-jwt-secret"
     app.project_service = types.SimpleNamespace()
     setup_error_handlers(app)
@@ -212,6 +214,10 @@ def session_batch_app():
         db.session.add(owner)
         db.session.add(moderator)
         db.session.commit()
+        ZenodoCredentialService().upsert_credential(
+            owner_type="user", owner_id=owner.id, environment="sandbox",
+            token="test-sandbox-token", actor_user_id=owner.id,
+        )
 
         hdpc_path = os.path.join(temp_dir, "session.hdpc")
         _build_batch_hdpc(hdpc_path, temp_dir)

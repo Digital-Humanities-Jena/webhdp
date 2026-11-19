@@ -377,7 +377,7 @@ def test_community_migration_direct_target_uses_source_record_token_without_targ
         user = User.query.filter_by(email="mod@example.com").first()
         service = CommunityMigrationService()
         service.publishing_context_service = types.SimpleNamespace(
-            resolve_token_for_session=lambda session, environment: {
+            resolve_token_for_session=lambda session, environment, **kwargs: {
                 "token": "source-record-edit-token",
                 "source": "user",
                 "owner_type": "user",

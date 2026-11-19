@@ -6,6 +6,7 @@ from flask_jwt_extended import JWTManager, create_access_token
 
 from database.database import db
 from database.models import Session as DBSession, User, UserRole
+from middleware import setup_error_handlers
 from routes.msf_routes import msf_bp
 from routes.tools_routes import tools_bp
 from services.cloud_upload_service import CloudUploadService, STORAGE_MODE_LOCAL
@@ -122,14 +123,16 @@ def test_patch_route_returns_report_for_authenticated_request(tmp_path):
     with app.app_context():
         token = create_access_token(identity="1")
 
-    msf_path = tmp_path / "input.csv"
+    workspace = tmp_path / "account-1"
+    workspace.mkdir()
+    msf_path = workspace / "input.csv"
     _write_csv(
         str(msf_path),
         "filename,title\n"
         "/asset.glb,First\n"
         "asset.glb,Second\n",
     )
-    (tmp_path / "asset.glb").write_bytes(b"glb")
+    (workspace / "asset.glb").write_bytes(b"glb")
 
     client = app.test_client()
     response = client.post(
@@ -137,7 +140,7 @@ def test_patch_route_returns_report_for_authenticated_request(tmp_path):
         headers={"Authorization": f"Bearer {token}"},
         json={
             "msf_path": str(msf_path),
-            "directory_path": str(tmp_path),
+            "directory_path": str(workspace),
             "duplicate_policy": "keep_first",
             "parse_options": {"delimiter": ",", "use_first_row_as_header": True},
             "apply": False,
@@ -157,6 +160,10 @@ def test_patch_route_resolves_relative_directory_in_local_mode(tmp_path, monkeyp
     app.config["TESTING"] = True
     app.config["JWT_SECRET_KEY"] = "test-jwt-secret"
     app.config["LOCAL_INPUT_PATH"] = str(tmp_path / "local_input")
+    app.config["UPLOAD_FOLDER"] = str(tmp_path / "staged")
+    app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///:memory:"
+    setup_error_handlers(app)
+    db.init_app(app)
     JWTManager(app)
     app.project_service = _DummyProjectService()
     app.register_blueprint(msf_bp, url_prefix="/api/v1/msf")
@@ -164,7 +171,14 @@ def test_patch_route_resolves_relative_directory_in_local_mode(tmp_path, monkeyp
     monkeypatch.setattr(CloudUploadService, "get_storage_mode", lambda: STORAGE_MODE_LOCAL)
 
     with app.app_context():
-        token = create_access_token(identity="1")
+        db.create_all()
+        user = User(email="mount-reader@example.com", role=UserRole.USER, is_verified=True, password_hash="fixture")
+        user.set_capabilities(["mounted_input_access"])
+        outsider = User(email="ordinary@example.com", role=UserRole.USER, is_verified=True, password_hash="fixture")
+        db.session.add_all([user, outsider])
+        db.session.commit()
+        token = create_access_token(identity=str(user.id))
+        outsider_token = create_access_token(identity=str(outsider.id))
 
     local_root = tmp_path / "local_input"
     target_dir = local_root / "rcin"
@@ -179,6 +193,9 @@ def test_patch_route_resolves_relative_directory_in_local_mode(tmp_path, monkeyp
     )
 
     client = app.test_client()
+    denied = client.post("/api/v1/msf/patch", headers={"Authorization": f"Bearer {outsider_token}"},
+                         json={"msf_path": str(msf_path), "directory_path": "rcin"})
+    assert denied.status_code == 403
     response = client.post(
         "/api/v1/msf/patch",
         headers={"Authorization": f"Bearer {token}"},
@@ -347,18 +364,20 @@ def test_local_validator_routes_require_admin_and_local_mode_and_export(tmp_path
     app.config["JWT_SECRET_KEY"] = "test-jwt-secret"
     app.config["LOCAL_INPUT_PATH"] = str(tmp_path)
     app.config["UPLOAD_FOLDER"] = str(tmp_path)
+    app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///:memory:"
+    db.init_app(app)
     JWTManager(app)
     app.project_service = _DummyProjectService()
     app.register_blueprint(msf_bp, url_prefix="/api/v1/msf")
 
-    class _DummyUser:
-        role = UserRole.ADMIN
-
-    monkeypatch.setattr(UserService, "get_by_id", lambda self, _user_id: _DummyUser())
     monkeypatch.setattr(CloudUploadService, "get_storage_mode", lambda: STORAGE_MODE_LOCAL)
 
     with app.app_context():
-        token = create_access_token(identity="1")
+        db.create_all()
+        admin = User(email="admin@example.com", role=UserRole.ADMIN, is_verified=True, password_hash="fixture")
+        db.session.add(admin)
+        db.session.commit()
+        token = create_access_token(identity=str(admin.id))
 
     msf_path = tmp_path / "input.csv"
     _write_csv(

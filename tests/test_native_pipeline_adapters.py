@@ -2,6 +2,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 from flask import Flask
 import pytest
@@ -395,21 +396,24 @@ def test_builtin_adapter_reports_unknown_handler():
     assert "Unknown builtin handler" in result["error"]
 
 
-def test_hpc_link_adapter_forwards_component_payload_to_allocation_service():
+@pytest.mark.parametrize('allocated_gpus', [0, 1])
+def test_hpc_link_adapter_forwards_component_payload_to_allocation_service(allocated_gpus):
+    active = SimpleNamespace(requested_gpu_count=allocated_gpus)
+
     class FakeHpcAllocationService:
         def __init__(self):
             self.payload = None
 
-        def get_active_for_session(self, session_id, *, user_id=None):
-            assert session_id == 42 and user_id == 88
-            return {"allocation_id": "alloc-1"}
+        def get_active_for_session(self, session_id, *, user_id=None, purpose=None):
+            assert session_id == 42 and user_id == 88 and purpose == "workflow"
+            return active
 
         def stage_local_files(self, allocation, paths):
-            assert allocation == {"allocation_id": "alloc-1"}
+            assert allocation is active
             return {"staged_files": [{"local_path": path, "remote_path": f"/remote/{path.split('/')[-1]}"} for path in paths]}
 
         def execute_component(self, allocation, payload):
-            assert allocation == {"allocation_id": "alloc-1"}
+            assert allocation is active
             self.payload = payload
             return {"success": True, "artifacts": [{"path": "/remote/out.png"}]}
 
@@ -431,6 +435,12 @@ def test_hpc_link_adapter_forwards_component_payload_to_allocation_service():
 
     with app.app_context():
         result = adapter.execute(request)
+
+    if allocated_gpus == 0:
+        assert result['success'] is False
+        assert 'at least 1 GPU' in result['error']
+        assert app.hpc_allocation_service.payload is None
+        return
 
     assert result["success"] is True
     assert result["status"] == "completed"

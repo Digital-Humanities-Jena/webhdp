@@ -2,7 +2,7 @@ import { defineConfig, devices } from '@playwright/test'
 
 export default defineConfig({
   testDir: './e2e',
-  testMatch: ['backend-playground.spec.ts', 'backend-workflow.spec.ts'],
+  testMatch: ['backend-playground.spec.ts', 'backend-workflow.spec.ts', 'backend-identity.spec.ts'],
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,
   workers: 1,

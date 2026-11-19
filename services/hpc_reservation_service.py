@@ -15,6 +15,7 @@ from database.models import (
 from exceptions import APIConnectionError, APITimeoutError, ResourceNotFoundError, SecurityError, ValidationError
 from services.hpc_allocation_service import ACTIVE_ALLOCATION_STATES, _parse_datetime, _utc_now_naive
 from services.registry_lock import OperationConflict, serialize_registry
+from services.session_access_service import is_session_mutable
 
 
 GATEWAY_RESERVATIONS = "/api/apps/webhdp/reservations"
@@ -184,7 +185,12 @@ class HpcReservationService:
         session = db.session.get(Session, session_id)
         if session is None or session.user_id != user.id:
             raise SecurityError("Choose an upload session that belongs to your account")
+        if not is_session_mutable(session):
+            raise SecurityError("This read-only session cannot claim an HPC allocation")
         existing = self.active_claim(reservation)
+        if existing and existing.expires_at and existing.expires_at <= _utc_now_naive():
+            self.allocations.refresh_allocation(existing)
+            existing = None
         if existing:
             if existing.user_id != user.id or existing.session_id != session.id:
                 raise OperationConflict("This GPU reservation already has an active claim")
@@ -217,7 +223,7 @@ class HpcReservationService:
             allocation.status = "expired"
             db.session.commit()
             return
-        if not self.can_use(reservation, allocation.user):
+        if not reservation.enabled or not self.can_use(reservation, allocation.user):
             allocation.last_error = "Access to this GPU claim is no longer enabled"
             db.session.commit()
             return

@@ -30,12 +30,15 @@ class User(db.Model):
             "profile_visibility IN ('private', 'internal')",
             name="profile_visibility_internal",
         ),
+        db.Index("uq_users_canonical_email", "canonical_email", unique=True),
     )
 
     id = db.Column(db.Integer, primary_key=True)
     public_id = db.Column(db.String(36), unique=True, nullable=False, default=lambda: str(uuid.uuid4()), index=True)
     slug = db.Column(db.String(120), unique=True, nullable=True, index=True)
-    email = db.Column(db.String(120), unique=True, nullable=False, index=True)
+    email = db.Column(db.String(254), unique=True, nullable=False, index=True)
+    canonical_email = db.Column(db.String(254), nullable=True)
+    legacy_canonical_email = db.Column(db.String(254), nullable=True, index=True)
     password_hash = db.Column(db.String(255), nullable=False)
     role = db.Column(
         db.Enum(UserRole, values_callable=lambda x: [e.value for e in x]),
@@ -251,6 +254,17 @@ class User(db.Model):
         }
 
 
+class UserEmailVerification(db.Model):
+    __tablename__ = "user_email_verifications"
+
+    id = db.Column(db.Integer, primary_key=True)
+    canonical_email = db.Column(db.String(254), nullable=False, index=True)
+    delivery_email = db.Column(db.String(254), nullable=False)
+    token_hash = db.Column(db.String(64), nullable=False, unique=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    expires_at = db.Column(db.DateTime, nullable=False, index=True)
+
+
 class UserMfaChallenge(db.Model):
     __tablename__ = "user_mfa_challenges"
 
@@ -370,8 +384,55 @@ class InstitutionMembership(db.Model):
             "role": self.role.value if self.role else InstitutionRole.READER.value,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
-            "user": self.user.to_dict() if getattr(self, "user", None) else None,
         }
+
+
+class InstitutionInvitation(db.Model):
+    __tablename__ = "institution_invitations"
+    __table_args__ = (
+        db.CheckConstraint("role IN ('reader', 'curator', 'manager', 'owner')", name="institution_invitation_role"),
+        db.CheckConstraint("delivery_status IN ('sending', 'sent', 'failed')", name="institution_invitation_delivery"),
+        db.CheckConstraint("accepted_at IS NULL OR revoked_at IS NULL", name="institution_invitation_terminal_state"),
+        db.Index("ix_institution_invitations_recipient", "institution_id", "recipient_email", "created_at"),
+    )
+
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    institution_id = db.Column(db.Integer, db.ForeignKey("institutions.id", ondelete="CASCADE"), nullable=False)
+    recipient_email = db.Column(db.String(254), nullable=False)
+    delivery_email = db.Column(db.String(254), nullable=False)
+    role = db.Column(db.String(16), nullable=False)
+    token_hash = db.Column(db.String(64), nullable=True, unique=True)
+    issued_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    accepted_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False)
+    expires_at = db.Column(db.DateTime, nullable=False)
+    delivery_attempted_at = db.Column(db.DateTime, nullable=False)
+    delivery_status = db.Column(db.String(16), nullable=False)
+    accepted_at = db.Column(db.DateTime, nullable=True)
+    revoked_at = db.Column(db.DateTime, nullable=True)
+
+
+class InstitutionWorkspaceRequest(db.Model):
+    __tablename__ = "institution_workspace_requests"
+    __table_args__ = (
+        db.CheckConstraint("status IN ('pending', 'approved', 'rejected')", name="institution_workspace_request_status"),
+        db.Index("ix_institution_workspace_requests_requester_status", "requester_user_id", "status"),
+        db.Index("ix_institution_workspace_requests_status_created", "status", "created_at"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    requester_user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    name = db.Column(db.String(255), nullable=False)
+    normalized_name = db.Column(db.Text, nullable=False)
+    reason = db.Column(db.Text)
+    status = db.Column(db.String(16), nullable=False, default="pending")
+    institution_id = db.Column(db.Integer, db.ForeignKey("institutions.id", ondelete="SET NULL"))
+    reviewed_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"))
+    review_note = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    reviewed_at = db.Column(db.DateTime)
+
+    requester = db.relationship("User", foreign_keys=[requester_user_id])
 
 
 class LodStandard(enum.Enum):
@@ -450,6 +511,18 @@ class Session(db.Model):
         except (TypeError, ValueError, json.JSONDecodeError):
             return None
         return parsed if isinstance(parsed, dict) else None
+
+
+class AccountUploadReservation(db.Model):
+    __tablename__ = "account_upload_reservations"
+
+    id = db.Column(db.String(32), primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    session_id = db.Column(db.Integer, db.ForeignKey("sessions.id", ondelete="CASCADE"), nullable=True, unique=True)
+    kind = db.Column(db.String(16), nullable=False)
+    size_bytes = db.Column(db.BigInteger, nullable=False)
+    started_at = db.Column(db.DateTime, nullable=False)
+    finished_at = db.Column(db.DateTime, nullable=True)
 
 
 class File(db.Model):

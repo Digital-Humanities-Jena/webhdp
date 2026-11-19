@@ -2,7 +2,7 @@
 
 Use this guide to review and rehearse a WebHDP-Link deployment. The validator
 reads only local configuration. For backups and the shared WebHDP migration
-sequence, see [Upgrade to v0.1.0-alpha.3](upgrade_alpha3.md).
+sequence, see [Upgrade to v0.1.0-alpha.4](upgrade_alpha4.md).
 
 The existing production stack has a WebHDP API, nginx frontend and Celery worker.
 Link additionally needs a persistent database-backed worker. Celery does not

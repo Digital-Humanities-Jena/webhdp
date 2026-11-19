@@ -6,9 +6,11 @@
         <p class="mt-2 max-w-3xl text-gray-600">
           Upload one self-contained file, or use a batch for datasets and models with separate textures.
         </p>
-        <router-link to="/model-publication" class="mt-3 inline-flex text-sm font-semibold text-indigo-700 underline underline-offset-4 hover:text-indigo-900">
-          Prepare a 3D model and create a Zenodo Sandbox draft
-        </router-link>
+        <div class="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-sm font-semibold text-indigo-700">
+          <router-link to="/tutorial/3d" class="underline underline-offset-4 hover:text-indigo-900">Try the 3D tutorial</router-link>
+          <router-link to="/model-publication" class="underline underline-offset-4 hover:text-indigo-900">Prepare a 3D model and create a Zenodo Sandbox draft</router-link>
+          <router-link to="/account/usage" class="underline underline-offset-4 hover:text-indigo-900">Your upload limits</router-link>
+        </div>
       </div>
 
       <StepIndicator
@@ -22,9 +24,9 @@
         <fieldset :disabled="uploading || validatingMsf" class="min-w-0">
           <legend class="sr-only">Upload source and workspace</legend>
         <div class="mb-6">
-          <h2 class="text-lg font-semibold text-gray-900">Choose workflow path</h2>
+          <h2 class="text-lg font-semibold text-gray-900">How are your files organized?</h2>
           <p class="mt-1 text-sm text-gray-600">
-            Pick the path that matches your source material. The application will guide the rest of the workflow accordingly.
+            Use a single-file upload for a self-contained model or image. Use a batch for multiple assets or a model with separate texture files.
           </p>
         </div>
 

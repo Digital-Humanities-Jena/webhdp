@@ -16,6 +16,7 @@ UPLOAD_TASK_ID_FIELD = "upload_task_id"
 UPLOAD_STORAGE_MODE_FIELD = "upload_storage_mode"
 UPLOAD_PROGRESS_FIELD = "upload_progress"
 UPLOAD_WORKER_GROUP_ID_FIELD = "upload_worker_group_id"
+CLOUD_BATCH_INPUT_DIR = "cloud-input"
 WORKFLOW_STATE_FIELD = "workflow_state"
 RECORD_RESOLUTION_STATE_FIELD = "record_resolution_state"
 

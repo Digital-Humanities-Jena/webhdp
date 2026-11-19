@@ -22,17 +22,19 @@ export function linkProgressPhase(run) {
   return Object.hasOwn(phases, phase) ? phases[phase] : { label: 'Job in progress', detail: 'WebHDP is managing this job. Detailed processing phase is not available.' }
 }
 
-export function linkLoginDestination(value) {
+export function linkLoginDestination(value, fallback = '/workflow/upload') {
   // Resume only known workflow pages. Never accept an external URL.
-  if (typeof value !== 'string' || /[\\\r\n]/.test(value)) return '/workflow/upload'
+  if (typeof value !== 'string' || /[\\\r\n]/.test(value)) return fallback
   try {
     const destination = new URL(value, 'https://webhdp.invalid')
-    const allowed = destination.pathname === '/model-publication' || (destination.pathname === '/link/authorize' && value.startsWith('/link/authorize?')) || /^\/link\/jobs(?:\/[A-Za-z0-9_-]{1,80})?$/.test(destination.pathname)
+    const allowed = ['/model-publication', '/onboarding', '/tutorial/3d', '/institution-invitation', '/account/setup'].includes(destination.pathname)
+      || (destination.pathname === '/link/authorize' && value.startsWith('/link/authorize?'))
+      || /^\/link\/jobs(?:\/[A-Za-z0-9_-]{1,80})?$/.test(destination.pathname)
     if (destination.origin === 'https://webhdp.invalid' && value.startsWith('/') && allowed) {
       return destination.pathname + destination.search
     }
   } catch { /* Fall through to the standard signed-in destination. */ }
-  return '/workflow/upload'
+  return fallback
 }
 
 export function authorizationParameters(query) {

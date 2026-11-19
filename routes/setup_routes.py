@@ -10,7 +10,9 @@ from flask_jwt_extended import jwt_required, get_jwt_identity, verify_jwt_in_req
 from api_utils import APIResponse
 from database.database import db
 from database.models import SystemConfig, User, UserRole
+from exceptions import ValidationError
 from services.fast_renderer_service import FastRendererService
+from services.user_service import UserService
 
 logger = logging.getLogger(__name__)
 setup_bp = Blueprint("setup", __name__)
@@ -252,7 +254,9 @@ def run_test_render():
 @require_setup_authorization
 def create_admin():
     """Create the initial admin user."""
-    data = request.json or {}
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return APIResponse.validation_error("Provide a JSON object.")
     email = data.get("email")
     password = data.get("password")
 
@@ -266,29 +270,15 @@ def create_admin():
         return APIResponse.validation_error("Setup already completed")
 
     try:
-        existing_user = User.query.filter_by(email=email).first()
-        if existing_user:
-            # If user exists, update to admin and set password
-            existing_user.role = UserRole.ADMIN
-            existing_user.set_password(password)
-            existing_user.is_verified = True
-            existing_user.verification_token = None
-        else:
-            new_user = User(
-                email=email,
-                role=UserRole.ADMIN,
-                is_verified=True,
-                verification_token=None
-            )
-            new_user.set_password(password)
-            db.session.add(new_user)
-
-        db.session.commit()
+        UserService().set_initial_admin_credentials(email, password)
         return APIResponse.success(message="Admin user created")
-    except Exception as e:
+    except ValidationError as exc:
         db.session.rollback()
-        logger.error(f"Failed to create admin: {e}")
-        return APIResponse.server_error(f"Failed to create admin: {str(e)}")
+        return APIResponse.validation_error(exc.message)
+    except Exception as exc:
+        db.session.rollback()
+        logger.error("Could not initialize administrator credentials (%s).", type(exc).__name__)
+        return APIResponse.server_error("Could not initialize administrator credentials.")
 
 @setup_bp.route("/complete", methods=["POST"])
 @require_setup_authorization

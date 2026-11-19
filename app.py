@@ -13,7 +13,10 @@ import tempfile
 import fcntl
 from pathlib import Path
 import json
+import signal
+from threading import Event
 
+import click
 import requests
 from dotenv import load_dotenv
 from flask import Flask, g, has_request_context, jsonify, request, send_from_directory, session
@@ -21,7 +24,6 @@ from flask_cors import CORS
 from flask_jwt_extended import JWTManager, get_jwt_identity, jwt_required
 from flask_migrate import Migrate
 from flask_session import Session
-from flask_mail import Mail
 from sqlalchemy.exc import OperationalError
 
 from api_utils import APIResponse
@@ -49,7 +51,7 @@ from services.fast_renderer_service import FastRendererService
 from services.any_to_usdz_service import AnyToUsdzService
 from services.edm_service import EdmService
 from services.msf_service import MSFService
-from services.email_service import EmailService
+from services.email_service import EmailService, WebHdpMail
 from services.iiif_service import IiifService
 from services.mets_service import MetsService
 from services.credential_crypto import validate_encryption_configuration
@@ -230,7 +232,7 @@ def check_if_token_revoked(jwt_header, jwt_payload):
         return True
 
     user = db.session.get(User, user_id)
-    if not user:
+    if not user or not user.is_verified:
         return True
 
     if is_demo(user) and not demo_sign_in_allowed(user):
@@ -280,7 +282,7 @@ def initialize_database():
 initialize_database()
 
 # Initialize Mail
-mail = Mail(app)
+mail = WebHdpMail(app)
 
 
 # --- Create Default Admin ---
@@ -306,22 +308,12 @@ def create_default_admin(app_instance):
                 app_instance.logger.info("An admin user already exists. Skipping.")
                 return
 
-            app_instance.logger.info(f"No admin user found. Attempting to create default admin: {admin_email}")
+            administrator = user_service.set_initial_admin_credentials(admin_email, admin_password)
+            app_instance.logger.info("Initialized default administrator user ID %s.", administrator.id)
 
-            # Check if the user email exists but with a different role
-            existing_user = user_service.get_by_email(admin_email)
-            if existing_user:
-                existing_user.role = UserRole.ADMIN
-                db.session.commit()
-                app_instance.logger.info(f"Promoted existing user {admin_email} to ADMIN.")
-            else:
-                # Create a new admin user
-                user_service.create_user(email=admin_email, password=admin_password, role=UserRole.ADMIN)
-                app_instance.logger.info(f"Successfully created default admin user: {admin_email}")
-
-        except Exception as e:
+        except Exception as exc:
             # Catch exceptions (like DB not ready on first-ever run)
-            app_instance.logger.error(f"Error during default admin creation: {e}")
+            app_instance.logger.error("Could not initialize default administrator credentials (%s).", type(exc).__name__)
             db.session.rollback()
 
 
@@ -478,12 +470,14 @@ def readiness_check():
 
 
 from routes.single_file_routes import api_start_session_file
+from services.single_upload_recovery import single_upload_request
 
 
 
 
 @app.route("/start-session-file", methods=["POST"])
 @jwt_required()
+@single_upload_request(SINGLE_FILE_ALLOWED_EXTENSIONS)
 @validate_file_upload(required=True, field_name="file")
 def start_session_file():
     """
@@ -524,6 +518,9 @@ def start_session_file():
         scan_options=SHARED_SCAN_OPTIONS,
         provenance=build_hdpc_provenance(user=current_user, session=db_session),
     )
+    if db_session:
+        db_session.status = "scanned"
+        db.session.commit()
 
     return APIResponse.success(
         data={"foundFiles": scan_data.get("foundFiles", []), "session_id": db_session_id, "file_id": db_file.id},
@@ -539,14 +536,18 @@ def start_pipeline():
     """
     Compatibility entrypoint for starting the predefined native pipeline on session files.
     """
-    from database.models import Submission
+    from database.models import PipelineRun, Submission
+    from routes.access_helpers import get_session_with_permission
+    from services.pipeline_run_recovery import resolve_dispatch_failure
     from services.submission_pipeline_service import execute_submission_pipeline
 
     app.logger.info("Pipeline execution requested for %s", PREDEFINED_PIPELINE_ID)
     db_session_id = session.get("db_session_id")
-    db_session = db.session.get(DBSession, db_session_id) if db_session_id else None
-    if not db_session:
+    if not db_session_id:
         raise FileProcessingError("Session not found in database")
+    db_session, user, invalid_access = get_session_with_permission(db_session_id, permission="edit", require_mutable=True)
+    if invalid_access:
+        return invalid_access
     if not db_session.hdpc_path:
         raise FileProcessingError("Session has no .hdpc file path")
 
@@ -555,25 +556,46 @@ def start_pipeline():
     if not local_file_paths:
         raise FileProcessingError("No files specified for processing")
 
-    db_session.status = normalize_session_state("submitting")
-
-    submission = Submission(session_id=db_session_id, pipeline_id=PREDEFINED_PIPELINE_ID, status="processing")
-    db.session.add(submission)
-    submission.result = json.dumps(
-        {
-            "status": "processing",
-            "progress": {
-                "current_stage": "queued",
-                "status_message": "Pipeline job queued",
-                "current_index": 0,
-                "total_files": len(local_file_paths),
-                "processed_count": 0,
-                "failed_count": 0,
-                "abort_on_critical_error": False,
-            },
-        }
+    pending_run = app.native_pipeline_service.create_pending_run(
+        PREDEFINED_PIPELINE_ID,
+        session_id=db_session_id,
+        initiated_by_user_id=user.id,
+        request_payload={
+            "pipeline_identifier": PREDEFINED_PIPELINE_ID,
+            "session_id": db_session_id,
+            "local_file_paths": local_file_paths,
+            "record_ids": [],
+            "execution_items": [],
+            "is_sandbox": True,
+            "abort_on_critical_error": False,
+        },
     )
-    db.session.commit()
+    run_id = pending_run["run_id"]
+
+    try:
+        submission = Submission(session_id=db_session_id, pipeline_id=PREDEFINED_PIPELINE_ID, status="processing")
+        db.session.add(submission)
+        db.session.flush()
+        submission.result = json.dumps(
+            {
+                "status": "processing",
+                "progress": {
+                    "current_stage": "queued",
+                    "status_message": "Pipeline job queued",
+                    "current_index": 0,
+                    "total_files": len(local_file_paths),
+                    "processed_count": 0,
+                    "failed_count": 0,
+                    "abort_on_critical_error": False,
+                },
+            }
+        )
+        PipelineRun.query.filter_by(public_id=run_id).one().submission_id = submission.id
+        db_session.status = normalize_session_state("submitting")
+        db.session.commit()
+    except Exception:
+        resolve_dispatch_failure(run_id)
+        raise
 
     try:
         execution_output = execute_submission_pipeline(
@@ -581,6 +603,7 @@ def start_pipeline():
             local_file_paths=local_file_paths,
             db_session_id=db_session_id,
             is_sandbox=True,
+            precreated_run_public_id=run_id,
         )
         result_success = bool(execution_output.get("result", {}).get("success", True))
         submission.status = "completed" if result_success else "failed"
@@ -604,6 +627,7 @@ def start_pipeline():
         return APIResponse.success(data=response_data, message="Pipeline executed successfully")
 
     except Exception as exc:
+        resolve_dispatch_failure(run_id)
         submission_to_update = db.session.get(Submission, submission.id)
         if submission_to_update:
             submission_to_update.status = "failed"
@@ -629,6 +653,35 @@ def init_data():
     seed_iiif_templates()
     seed_mets_templates()
     print("Initial data seeded successfully.")
+
+
+@app.cli.command("hpc-queue")
+@click.option("--once", is_flag=True, help="Refresh the allocation queue once.")
+@click.option("--interval", type=click.IntRange(min=5, max=300), default=30, show_default=True)
+def hpc_queue(once, interval):
+    """Advance HPC requests independently of browser polling."""
+    from services.maintenance_service import maintenance_status
+
+    if once:
+        if not maintenance_status()["enabled"]:
+            app.hpc_allocation_service.process_queue()
+        return
+
+    stopping = Event()
+
+    def stop(*_):
+        stopping.set()
+
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGINT, stop)
+    while not stopping.is_set():
+        with app.app_context():
+            try:
+                if not maintenance_status()["enabled"]:
+                    app.hpc_allocation_service.process_queue()
+            except Exception:
+                app.logger.exception("Could not refresh the HPC allocation queue")
+        stopping.wait(interval)
 
 
 # --- Main Entry Point ---

@@ -12,6 +12,7 @@ from database.database import db
 from database.models import Session, UserMetadata
 from exceptions import ValidationError
 from security import SecurityValidator, sanitize_upload_filename
+from services.account_upload_quota import admit_upload
 from services.registry_lock import OperationConflict, registry_lock
 
 IDENTITY_FIELD = 'single_upload_identity'
@@ -76,7 +77,8 @@ def single_upload_request(allowed_extensions):
             SecurityValidator().validate_file_size(size, current_app.config['MAX_CONTENT_LENGTH'])
             token = _normalize_submit_token(request.form.get('submit_token'))
             if not token:
-                return function(*args, **kwargs)
+                with admit_upload(int(get_jwt_identity()), size):
+                    return function(*args, **kwargs)
             content_hash = hashlib.sha256()
             for chunk in iter(lambda: file.read(1024 * 1024), b''):
                 content_hash.update(chunk)
@@ -92,7 +94,8 @@ def single_upload_request(allowed_extensions):
                     return APIResponse.success(data=previous)
                 g.single_upload_identity = {'token': token, 'fingerprint': fingerprint}
                 try:
-                    response = make_response(function(*args, **kwargs))
+                    with admit_upload(user_id, size):
+                        response = make_response(function(*args, **kwargs))
                     payload = response.get_json(silent=True) or {}
                     data = payload.get('data') or {}
                     if response.status_code < 300 and data.get('session_id'):

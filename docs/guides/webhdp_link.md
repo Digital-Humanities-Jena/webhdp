@@ -249,8 +249,8 @@ origins and connected to one actual WebHDP API:
 
 | Application | Address | Real processing |
 | --- | --- | --- |
-| Photo Lab | `http://127.0.0.1:5191/photo-lab/` | Photo decoding/orientation, contact sheet, checksummed reconstruction handoff |
-| Roll Studio | `http://127.0.0.1:5192/roll-studio/` | Existing HMSM optical processor and MIDI generation |
+| Reconstruction Testlab | `http://127.0.0.1:5191/photo-lab/` | Photo decoding/orientation, contact sheet, checksummed reconstruction handoff |
+| MMIC-Transformer | `http://127.0.0.1:5192/roll-studio/` | Existing HMSM optical processor and MIDI generation |
 | Model Depot | `http://127.0.0.1:5193/model-depot/` | Geometry-only OBJ validation, normalization, GLB and repository package |
 
 Install the examples' small additional dependency and configure an existing HMSM
@@ -272,21 +272,37 @@ Use a development account and fixture data; the launcher stays on loopback.
 
 Select **Connect with WebHDP**, sign in on WebHDP, review the requested access,
 and approve. Back in the prototype, choose **Use sample data**, set parameters,
-and run the pipeline. Roll Studio and Model Depot also support one job per file.
+and run the pipeline. MMIC-Transformer and Model Depot also support one job per file.
 
-In this default mode, the samples are synthetic fixtures. Photo Lab's
+In this default mode, the samples are synthetic fixtures. Reconstruction Testlab's
 `link-photo-preparation` publication creates a contact sheet, without
 photogrammetry. Model Depot's `link-model-deposit` prepares files without a Zenodo
 upload. These base publications remain separate from the live pipelines below.
 
+### Test dataset galleries
+
+Reconstruction Testlab and MMIC-Transformer can show a gallery from the
+`datasets` array in their static `/config.json`. Each dataset has an `id`,
+`title`, `summary`, a `preview` with `url` and `alt`, an array of `facts`
+with `label` and `value`, a `credit` with a label and optional HTTPS source
+link, and a `files` array. List each input with its `name`, same-origin
+`url`, size in `bytes`, and lowercase `sha256`. Keep dataset assets under
+`/datasets/` or `/fixtures/` and include source attribution and any
+modifications required by the dataset's license.
+
+**Load dataset** verifies the files and selects them in the form. The browser
+remembers the selected dataset ID for the return from WebHDP sign-in. **Run
+pipeline** uploads the selection to WebHDP. The file picker can replace the
+selection with a user's own files.
+
 ## Isolated Draco and Sandbox validation
 
 Live mode uses the same three applications and API, but registers dedicated
-clients `photo-lab-draco` and `model-depot-sandbox`. Photo Lab selects
+clients `photo-lab-draco` and `model-depot-sandbox`. Reconstruction Testlab selects
 `link-photogrammetry`: genuine COLMAP reconstruction through the centrally
 configured HPC-Link gateway on Draco. Model Depot selects
 `link-model-sandbox-draft`: OBJ preparation followed by a real **unpublished**
-Zenodo Sandbox draft upload and download verification. Roll Studio retains its
+Zenodo Sandbox draft upload and download verification. MMIC-Transformer retains its
 HMSM pipeline. Starting the launcher installs definitions; a processing job is
 submitted only through the application or validation script.
 
@@ -319,7 +335,7 @@ Create a private `instance/link-draco/live-settings.json`, for example:
 Replace every placeholder with the paths and digests from the reviewed remote
 installation; `gpu_type` is an optional trusted photogrammetry setting. The sample
 directory must contain 3–30 intended JPEG/PNG photographs. Its selected images
-are served by the local Photo Lab fixture endpoint for browser submission, so use
+are served by the local Reconstruction Testlab fixture endpoint for browser submission, so use
 a dedicated dataset directory. The private directory path is excluded from the
 prototype's public `/config.json`.
 
@@ -376,7 +392,7 @@ allocation. While resources are pending, `status` may be `running` with
 
 ### Verify a live run
 
-1. Connect Photo Lab as the verified development user. Upload an authorized,
+1. Connect Reconstruction Testlab as the verified development user. Upload an authorized,
    overlapping scene and submit it once. While Slurm is pending, check that
    hosted progress says **Waiting for resources**. If browser observation
    stops, reconnect with the same account and reopen the run instead of
@@ -412,7 +428,7 @@ Resume requires the existing database, secrets, verified account, publications
 and exact client registrations. It does not change accounts, resource settings,
 credentials or component/pipeline versions. A normal fresh-install startup still
 refuses to replace a pinned version when scientific source bytes have changed.
-In this development configuration the Roll Studio prototype now selects the
+In this development configuration the MMIC-Transformer prototype now selects the
 frozen central `link-hmsm-roll-vis` publication via the new `roll-studio-vis`
 client. Optional private settings `roll_publication_id` and `roll_client_id`
 select that already registered contract; the older local publication is retained

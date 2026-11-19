@@ -1,8 +1,8 @@
 cff-version: 1.2.0
 message: "If you use WebHDP, please cite this software using the metadata from this file."
 title: "WebHDP"
-version: "0.1.0-alpha.3"
-date-released: "2026-11-17"
+version: "0.1.0-alpha.4"
+date-released: "2026-11-19"
 license: "EUPL-1.2"
 repository-code: "https://github.com/Digital-Humanities-Jena/webhdp"
 url: "https://github.com/Digital-Humanities-Jena/webhdp"

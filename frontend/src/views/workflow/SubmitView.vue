@@ -192,6 +192,15 @@
                     {{ hpcPreflightState }}
                   </span>
                 </div>
+                <PipelineGpuStatus
+                  v-if="requiredGpuCount && workflowStore.sessionId"
+                  ref="gpuStatusPanel"
+                  class="mt-3"
+                  :session-id="workflowStore.sessionId"
+                  :gpu-count="requiredGpuCount"
+                  :component-keys="hpcComponentKeys"
+                  :allocation="hpcAllocation"
+                />
                 <ProgressBar v-if="hpcPreflightState === 'checking'" class="mt-3" :label="componentPreflightTitle" :show-label="false" />
                 <ReservedGpuAccess
                   v-if="workflowStore.sessionId"
@@ -524,6 +533,7 @@
 
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import PipelineGpuStatus from '@/components/hpc/PipelineGpuStatus.vue'
 import ReservedGpuAccess from '@/components/hpc/ReservedGpuAccess.vue'
 import SubmissionOutcomes from '@/components/workflow/SubmissionOutcomes.vue'
 import { isPermanentProgressError, progressRetryDelay } from '@/utils/progressMonitoring'
@@ -538,6 +548,8 @@ import StepIndicator from '@/components/workflow/StepIndicator.vue'
 import ProgressBar from '@/components/ui/ProgressBar.vue'
 import LoadingSpinner from '@/components/ui/LoadingSpinner.vue'
 import { persistWorkflowState, restoreWorkflowContext, shouldRestoreWorkflowContext } from '@/utils/workflowState'
+import { pendingGpuMessage } from '@/utils/gpuAvailability'
+import { pipelineGpuCount } from '@/utils/pipelineGuidance'
 import {
   applyTerminalProgressState,
   deriveSubmissionPlan,
@@ -578,6 +590,8 @@ const recordResolutionState = ref(null)
 const recordResolutionLoading = ref(false)
 const hpcPreflightState = ref('idle')
 const hpcPreflightMessage = ref('HDP Component runtimes will be checked before processing starts.')
+const gpuStatusPanel = ref(null)
+const selectedPipelineSummary = ref(null)
 const monitorUnavailable = ref(false)
 const monitoringStopped = ref(false)
 let monitorFailures = 0
@@ -645,7 +659,7 @@ async function submitPendingRun() {
     } else {
       const code = err?.error?.code || err?.response?.data?.error?.code
       const status = err?.status || err?.response?.status
-      if (['VALIDATION_ERROR', 'OPERATION_CONFLICT', 'SECURITY_ERROR', 'FORBIDDEN'].includes(code) || [400, 401, 403, 404, 409, 422].includes(status)) {
+      if (['VALIDATION_ERROR', 'OPERATION_CONFLICT', 'SECURITY_ERROR', 'FORBIDDEN', 'NATIVE_PROCESSING_QUOTA'].includes(code) || [400, 401, 403, 404, 409, 422].includes(status)) {
         const details = err?.error?.details || err?.response?.data?.error?.details || {}
         readinessResult.value = details.readiness || null
         readinessError.value = err?.error?.message || err?.message || 'Review the submission and check readiness again.'
@@ -685,7 +699,7 @@ const readinessProgress = ref(null)
 let readinessController
 let readinessGeneration = 0
 let readinessTimer
-const readinessArea = (path) => ({ '/workflow/files': 'files and record decisions', '/workflow/metadata': 'metadata', '/workflow/edm-selection': 'metadata mappings', '/workflow/pipeline': 'pipeline', '/workflow/submit': 'run status' }[path?.split('?')[0]] || 'settings')
+const readinessArea = (path) => ({ '/workflow/files': 'files and record decisions', '/workflow/metadata': 'metadata', '/workflow/edm-selection': 'metadata mappings', '/workflow/pipeline': 'pipeline', '/workflow/submit': 'run status', '/account/configuration': 'Zenodo credentials' }[path?.split('?')[0]] || 'settings')
 const readinessInputs = computed(() => JSON.stringify({
   session: workflowStore.sessionId,
   files: workflowStore.selectedFiles, pipeline: workflowStore.selectedPipeline,
@@ -783,6 +797,8 @@ const isUsdzDisabled = computed(() => {
 })
 
 const hpcComponentKeys = computed(() => {
+  const reportedKeys = selectedPipelineSummary.value?.guidance?.hpc_component_keys
+  if (Array.isArray(reportedKeys)) return reportedKeys
   const keys = []
   if (!isRendererDisabled.value) keys.push('fast_renderer')
   if (!isUsdzDisabled.value) keys.push('any_to_usdz')
@@ -791,6 +807,10 @@ const hpcComponentKeys = computed(() => {
     if ((step.execution_profile_ref === 'hpc_singularity' || key === 'mesh_optimizer') && !keys.includes(key)) keys.push(key)
   }
   return keys
+})
+const requiredGpuCount = computed(() => {
+  const pipeline = selectedPipelineSummary.value
+  return pipeline ? pipelineGpuCount(pipeline) : 0
 })
 
 const componentPreflightTitle = computed(() => {
@@ -846,8 +866,8 @@ const workspaceSummaryLabel = computed(() => {
   return 'Personal'
 })
 const credentialSourceLabel = computed(() => {
-  const source = String(sessionContext.value?.publishing_context?.effective_credential_source || 'system').trim()
-  if (!source) return 'System'
+  const source = String(sessionContext.value?.publishing_context?.effective_credential_source || '').trim()
+  if (!source || source === 'none') return 'No Zenodo credential'
   return `${source.charAt(0).toUpperCase()}${source.slice(1)}`
 })
 const defaultEnvironmentLabel = computed(() => (
@@ -860,6 +880,7 @@ const effectiveExecutionEnvironmentIsSandbox = computed(() => (
 ))
 const publishingContextBadge = computed(() => {
   const source = credentialSourceLabel.value
+  if (source === 'No Zenodo credential') return source
   return `${source} credentials`
 })
 const selectedRecordResolutionPlan = computed(() => (
@@ -1698,6 +1719,11 @@ onMounted(async () => {
     pipelineVersion.value = res.data.pipeline?.version || res.data.pipeline?.active_version || null
     const fullPipeline = res.data.pipeline?.config || res.data.pipeline
 
+    selectedPipelineSummary.value = {
+      ...match,
+      config: fullPipeline,
+      guidance: res.data.pipeline?.guidance || match.guidance,
+    }
     pipelineConfig.value = fullPipeline
 
     try { pendingRun.value = JSON.parse(sessionStorage.getItem(pendingRunKey()) || 'null') } catch { pendingRun.value = null }
@@ -1865,9 +1891,7 @@ const resolveRerunRecordIds = async (sessionId, selectedFiles) => {
 const sleep = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms))
 
 const waitForHpcAllocation = async (allocationId) => {
-  let attempt = 0
-
-  while (true) {
+  while (!disposed) {
     const response = await hpcLinkService.getAllocation(allocationId)
     const allocation = response.data?.allocation || null
     hpcAllocation.value = allocation
@@ -1880,12 +1904,12 @@ const waitForHpcAllocation = async (allocationId) => {
       throw new Error(allocation?.last_error || `HPC-Link allocation ${status}.`)
     }
 
-    attempt += 1
-    hpcPreflightMessage.value = status === 'queued'
+    hpcPreflightMessage.value = requiredGpuCount.value ? pendingGpuMessage(allocation) : status === 'queued'
       ? 'Waiting for an HPC allocation slot...'
       : 'Allocating HPC resources...'
     await sleep(3000)
   }
+  throw new Error('Returned before the HPC allocation was ready.')
 }
 
 const ensureHpcAllocationAndPreflight = async (sessionId) => {
@@ -1919,42 +1943,56 @@ const ensureHpcAllocationAndPreflight = async (sessionId) => {
 
   const activeHpcRuntime = Boolean(hpcStatus.active_hpc_allocation || hpcStatus.activeAllocation)
     || selectedRuntime.some((entry) => entry.active_hpc_allocation)
-  if (activeHpcRuntime) {
+  const gpuCount = requiredGpuCount.value
+  const hasOwnRequest = hpcStatus.gpu_allocation_id && ['queued', 'allocating', 'running'].includes(hpcStatus.gpu_allocation_status)
+  const sharedGpuReady = !hasOwnRequest && hpcStatus.active_hpc_gpu_count >= gpuCount
+  if (activeHpcRuntime && (!gpuCount || sharedGpuReady)) {
     hpcPreflightState.value = 'ready'
     hpcPreflightMessage.value = `An active HPC-Link allocation is available for ${components.join(', ')}.`
     return
   }
 
-  const allocationRequired = selectedRuntime.length === 0 || selectedRuntime.some((entry) => entry.allocation_required || entry.status === 'hpc_required')
+  const allocationRequired = gpuCount > 0 || selectedRuntime.length !== components.length
+    || selectedRuntime.some((entry) => entry.allocation_required || entry.status === 'hpc_required')
   if (!allocationRequired) {
     hpcPreflightState.value = 'ready'
     hpcPreflightMessage.value = 'Compute-backed HDP Component runtime is ready.'
     return
   }
 
-  if (!hpcStatus.available) {
-    const message = selectedRuntime.find((entry) => entry.message)?.message
-    throw new Error(message || 'HPC-Link is not available. Server/VPS deployments require an HPC allocation for compute-backed HDP Component steps.')
-  }
-  if (!hpcStatus.can_allocate) {
-    throw new Error(hpcStatus.permission_reason || 'Your account cannot allocate HPC-Link resources.')
+  let allocationId = hpcStatus.gpu_allocation_id
+  let requestedAllocation = null
+  if (hasOwnRequest) {
+    if (gpuCount && hpcStatus.gpu_allocation_gpu_count != null && hpcStatus.gpu_allocation_gpu_count < gpuCount) {
+      throw new Error(`This pipeline requires ${gpuCount} ${gpuCount === 1 ? 'GPU' : 'GPUs'}. Release the current allocation and request the required resources.`)
+    }
+  } else {
+    if (!hpcStatus.available) {
+      throw new Error(gpuCount ? 'This pipeline needs a GPU. HPC-Link is unavailable on this WebHDP instance.'
+        : 'HPC-Link is unavailable on this WebHDP instance. This pipeline needs an HPC allocation.')
+    }
+    if (!hpcStatus.can_allocate) {
+      throw new Error(gpuCount ? 'This pipeline needs a GPU. Request HPC access before processing.'
+        : hpcStatus.permission_reason || 'Your account cannot allocate HPC-Link resources.')
+    }
+    hpcPreflightMessage.value = gpuCount ? 'Requesting a GPU…' : 'Requesting reusable HPC allocation...'
+    const allocationResponse = await hpcLinkService.requestAllocation({
+      purpose: 'workflow',
+      session_id: sessionId,
+      ...(gpuCount ? { gpu_count: Math.max(gpuCount, hpcStatus.config?.default_gpu_count || 0) } : {}),
+    })
+    requestedAllocation = allocationResponse.data?.allocation || null
+    hpcAllocation.value = requestedAllocation
+    allocationId = requestedAllocation?.allocation_id
+    if (!allocationId) throw new Error('HPC-Link allocation response did not include an allocation ID.')
   }
 
-  hpcPreflightMessage.value = 'Requesting reusable HPC allocation...'
-  const allocationResponse = await hpcLinkService.requestAllocation({
-    purpose: 'workflow',
-    session_id: sessionId
-  })
-  const requestedAllocation = allocationResponse.data?.allocation || null
-  const allocationId = requestedAllocation?.allocation_id
-  if (!allocationId) {
-    throw new Error('HPC-Link allocation response did not include an allocation ID.')
-  }
-
-  hpcAllocation.value = requestedAllocation
-  const activeAllocation = requestedAllocation.status === 'running'
+  const activeAllocation = requestedAllocation?.status === 'running'
     ? requestedAllocation
     : await waitForHpcAllocation(allocationId)
+  if (gpuCount && activeAllocation.requested_gpu_count != null && activeAllocation.requested_gpu_count < gpuCount) {
+    throw new Error(`The allocation has fewer than the ${gpuCount} ${gpuCount === 1 ? 'GPU' : 'GPUs'} this pipeline requires.`)
+  }
 
   hpcPreflightMessage.value = 'Validating HDP Component runtimes on the allocated node...'
   const preflightResponse = await hpcLinkService.preflightAllocation(activeAllocation.allocation_id, components)
@@ -1970,6 +2008,7 @@ const ensureHpcAllocationAndPreflight = async (sessionId) => {
 
 const onReservedGpuChanged = (allocation) => {
   hpcAllocation.value = allocation
+  if (!allocation) gpuStatusPanel.value?.refresh()
   hpcPreflightState.value = 'idle'
   hpcPreflightMessage.value = 'HDP Component runtimes will be checked before processing starts.'
   checkReadiness()
@@ -2001,6 +2040,7 @@ const handleSubmit = async () => {
     if (!prepared) return
     // Local blockers are resolved before any allocation request.
     await ensureHpcAllocationAndPreflight(prepared.sessionId)
+    if (disposed) return
     processing.value = true
     statusMessage.value = 'Processing the checked submission…'
     pendingRun.value = {
@@ -2011,6 +2051,7 @@ const handleSubmit = async () => {
     await submitPendingRun()
 
   } catch (err) {
+    if (disposed) return
     console.error('Pipeline execution failed:', err)
     stopProgressPolling()
     processing.value = false

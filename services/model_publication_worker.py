@@ -192,8 +192,9 @@ def process(app, base, job):
     prepared = workspace / "prepared"
     destination = workspace / "results"
     parameters = json.loads(job["input_json"])
+    practice = parameters.get("run_mode") == "practice"
     mode = parameters["metadata_source"]
-    sample_id = parameters["sample_id"]
+    sample_id = parameters["practice_sample_id"] if practice else parameters["sample_id"]
     is_batch = parameters.get("model_count", 1) > 1
     result = {"sample_id": sample_id}
     if is_batch:
@@ -204,9 +205,10 @@ def process(app, base, job):
 
     try:
         with app.app_context():
-            token = sandbox_token(job["user_id"], bool(job["demo_window"]))
-            if not token:
-                raise ValueError("The active Zenodo Sandbox credential is missing.")
+            if not practice:
+                token = sandbox_token(job["user_id"], bool(job["demo_window"]))
+                if not token:
+                    raise ValueError("The active Zenodo Sandbox credential is missing.")
             library = {entry["id"]: entry for entry in sample_catalog()}
             entry = library[sample_id] if sample_id else None
             archive = LIBRARY / entry["filename"] if entry else workspace / ("model" + parameters["extension"])
@@ -247,8 +249,19 @@ def process(app, base, job):
                     record = result
                 report("mapping_metadata")
                 mapped = read_deposit_metadata(source, msf_path=msf, form_metadata=parameters["metadata"])
-                record["metadata"] = _record_metadata(mapped["zenodo"], mode, source, msf)
+                mapped_fields = mapped["formats"]["jsonld"] if practice else mapped["zenodo"]
+                record["metadata"] = _record_metadata(mapped_fields, mode, source, msf)
+                if practice:
+                    report("preparing_downloads")
+                    shutil.copyfile(msf, record_dir / "metadata.csv")
+                    save_json(record_dir / "metadata.json", record["metadata"])
+                    files.extend([_file(record_dir, "metadata.csv", "Source spreadsheet"),
+                                  _file(record_dir, "metadata.json", "Mapped metadata")])
                 mapped_records.append((mapped, record, record_dir, relative))
+
+            if practice:
+                report("completed")
+                return
 
             client = DraftClient(token)
             try:
@@ -290,12 +303,14 @@ def run_worker(app, base, *, stop):
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         queue.recover(base)
         beat = base / ".heartbeat"
+        practice_beat = base / queue.PRACTICE_HEARTBEAT
         try:
             with ThreadPoolExecutor(max_workers=queue.WORKER_CAPACITY) as executor:
                 running = set()
                 cleanup_at = 0
                 while not stop.is_set():
                     beat.touch()
+                    practice_beat.touch()
                     if time.monotonic() >= cleanup_at:
                         queue.expire(base)
                         cleanup_at = time.monotonic() + 60
@@ -307,4 +322,5 @@ def run_worker(app, base, *, stop):
                         running.add(executor.submit(process, app, base, job))
                     stop.wait(0.5)
         finally:
+            practice_beat.unlink(missing_ok=True)
             beat.unlink(missing_ok=True)

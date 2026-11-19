@@ -36,7 +36,7 @@ def playground(tmp_path):
     app.native_pipeline_service = service
     with app.app_context():
         db.create_all()
-        users = [User(email=f'{name}@example.com', password_hash='test-only-hash')
+        users = [User(email=f'{name}@example.com', password_hash='test-only-hash', is_verified=True)
                  for name in ('owner', 'other')]
         db.session.add_all(users)
         db.session.flush()
@@ -79,6 +79,7 @@ def _hpc_artifact_fixture(p, path_field="path", remote_path=None):
                                status="running", requested_partition="vis", remote_session_id="owned-test-session",
                                remote_session_dir="/remote/owned-test-session")
     db.session.add(allocation)
+    p.users[0].set_capabilities(["hpc_link_access"])
     profile = ComponentProfile.query.one()
     profile.adapter = "hpc_link"
     db.session.commit()

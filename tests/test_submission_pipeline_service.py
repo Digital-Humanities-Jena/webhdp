@@ -532,7 +532,7 @@ class TestSubmissionPipelineNativeHdpcContext(unittest.TestCase):
         _resolve_token,
         _describe_session,
     ):
-        self.app.native_pipeline_service.get_pipeline.return_value = {"config": {"steps": []}}
+        self.app.native_pipeline_service.get_pipeline.return_value = {"config": {"steps": [{"id": "zenodo_draft"}]}}
         self.app.native_pipeline_service.resolve_pipeline_identifier.return_value = "render"
         self.app.native_pipeline_service.execute_registered_submission.return_value = {
             "success": True,
@@ -730,6 +730,8 @@ class TestSubmissionPipelineNativeHdpcContext(unittest.TestCase):
         self.app.project_service.inspect.assert_not_called()
         self.app.project_service.get_file_id_map.assert_not_called()
 
+    @patch("services.submission_pipeline_service.publishing_context_service.resolve_token_for_session",
+           return_value={"token": "fixture-token"})
     @patch("services.submission_pipeline_service.create_local_record_with_metadata")
     @patch("services.submission_pipeline_service._resolve_version_target_record")
     @patch("services.submission_pipeline_service.analyze_session_record_resolution")
@@ -738,6 +740,7 @@ class TestSubmissionPipelineNativeHdpcContext(unittest.TestCase):
         analyze_resolution,
         resolve_target_record,
         create_record_mock,
+        _resolve_token,
     ):
         self.app.native_pipeline_service.get_pipeline.return_value = {"config": {"steps": []}}
         self.app.native_pipeline_service.resolve_pipeline_identifier.return_value = "render"

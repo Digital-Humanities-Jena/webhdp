@@ -33,6 +33,7 @@ test.describe('Firefox onboarding and HPC access request flow', () => {
 
     let userOnboardingRequired = true
     let userHasAccess = false
+    const onboardingActions: string[] = []
     let latestRequest: null | {
       id: number
       full_name: string
@@ -92,6 +93,7 @@ test.describe('Firefox onboarding and HPC access request flow', () => {
     })
 
     await page.route(apiV1('/auth/me/onboarding'), async (route) => {
+      onboardingActions.push(route.request().postDataJSON().action)
       userOnboardingRequired = false
       activeUser = makeUser()
       await fulfillJson(route, {
@@ -99,6 +101,16 @@ test.describe('Firefox onboarding and HPC access request flow', () => {
           user: activeUser,
         },
       })
+    })
+
+    await page.route(apiV1('/auth/me/zenodo-credentials'), async (route) => {
+      await fulfillJson(route, { data: { credentials: [], active: {} } })
+    })
+    await page.route(apiV1('/auth/me/recovery-codes'), async (route) => {
+      await fulfillJson(route, { data: { recovery_codes: { configured: false } } })
+    })
+    await page.route(apiV1('/institutions/workspace-requests'), async (route) => {
+      await fulfillJson(route, { data: { requests: [], pagination: { total: 0 } } })
     })
 
     await page.route(apiV1('/hpc-resource-requests/me'), async (route) => {
@@ -195,8 +207,25 @@ test.describe('Firefox onboarding and HPC access request flow', () => {
     await page.getByTestId('login-submit').click()
 
     await expect(page).toHaveURL(/\/onboarding$/)
-    await expect(page.getByRole('heading', { name: 'Set up your WebHDP workspace' })).toBeVisible()
-    await expect(page.getByText('Request access to remote computing for rendering.', { exact: false })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Get started with WebHDP' })).toBeVisible()
+    await expect(page.getByRole('link', { name: 'Start 3D tutorial' })).toHaveAttribute('href', '/tutorial/3d')
+    await page.getByRole('button', { name: 'Take the tour' }).focus()
+    await page.keyboard.press('Enter')
+    await expect(page.getByRole('heading', { name: 'Find your work' })).toBeFocused()
+    await page.getByRole('button', { name: 'Next' }).click()
+    await expect(page.getByRole('heading', { name: 'Add files and describe your assets' })).toBeFocused()
+    await page.getByRole('button', { name: 'Pause tour' }).click()
+    await expect(page.getByRole('button', { name: 'Continue the tour' })).toBeFocused()
+    await page.reload()
+    await expect(page.getByRole('button', { name: 'Continue the tour' })).toBeVisible()
+    await page.getByRole('link', { name: 'Open account setup' }).click()
+    await expect(page).toHaveURL(/\/account\/setup$/)
+    await expect(page.getByRole('heading', { name: 'Set up your account' })).toBeVisible()
+    await expect(page.getByRole('link', { name: 'Add Sandbox key' })).toHaveAttribute('href', '/account/configuration?zenodo=sandbox#zenodo-keys')
+    await page.getByRole('link', { name: 'Add Production key' }).click()
+    await expect(page.getByTestId('zenodo-key-environment')).toHaveValue('production')
+    await page.getByRole('link', { name: 'Account setup', exact: true }).click()
+    await expect(page.getByText('Request access to remote computing for pipelines that need it.', { exact: false })).toBeVisible()
 
     await page.getByRole('link', { name: 'Open HPC access' }).click()
     await expect(page).toHaveURL(/\/hpc-resources$/)
@@ -230,9 +259,19 @@ test.describe('Firefox onboarding and HPC access request flow', () => {
     await page.getByTestId('login-submit').click()
 
     await expect(page).toHaveURL(/\/onboarding$/)
+    await page.getByRole('link', { name: 'Open account setup' }).click()
     await expect(page.getByText('HPC access is enabled for this account.')).toBeVisible()
+    await page.goBack()
+    await page.getByRole('button', { name: 'Continue the tour' }).click()
+    await expect(page.getByRole('heading', { name: 'Add files and describe your assets' })).toBeVisible()
+    await page.getByRole('button', { name: 'Next' }).click()
+    await page.getByRole('button', { name: 'Next' }).click()
+    await page.getByRole('button', { name: 'Finish tour' }).click()
+    await expect(page.getByRole('button', { name: 'Replay the tour' })).toBeVisible()
+    expect(onboardingActions).toEqual(['complete'])
     await page.getByRole('button', { name: 'Continue to upload' }).click()
     await expect(page).toHaveURL(/\/workflow\/upload$/)
+    await expect(page.getByRole('link', { name: 'Getting started' })).toBeVisible()
     await page.getByRole('link', { name: 'HPC Access' }).click()
     await expect(page.getByText('Access: Enabled')).toBeVisible()
     await expect(page.getByText('HPC access is enabled')).toBeVisible()

@@ -34,7 +34,7 @@
                 {{ currentSession.workspace.institution.name }}
               </span>
               <span class="rounded-full border border-amber-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-amber-700">
-                {{ currentSession?.publishing_context?.effective_credential_source || 'system' }}
+                {{ credentialSourceLabel }}
               </span>
               <span
                 v-if="currentSession?.access_mode === 'explorer_only'"
@@ -71,7 +71,8 @@
 
           <section class="rounded-2xl border border-slate-200 p-5">
             <h3 class="text-sm font-semibold text-slate-900">Workspace Settings</h3>
-            <div class="mt-4 inline-flex rounded-xl border border-slate-200 bg-slate-50 p-1">
+            <p v-if="!canChangeVisibility" class="mt-2 text-sm text-slate-600">The session owner manages the workspace and its visibility.</p>
+            <div v-if="canChangeVisibility" class="mt-4 inline-flex rounded-xl border border-slate-200 bg-slate-50 p-1">
               <button
                 type="button"
                 class="rounded-lg px-4 py-2 text-sm font-medium"
@@ -95,7 +96,7 @@
                 Institution
                 <select
                   :value="form.institutionId"
-                  :disabled="form.workspaceType !== 'institution'"
+                  :disabled="!canChangeVisibility || form.workspaceType !== 'institution'"
                   class="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-normal normal-case tracking-normal text-slate-900 disabled:bg-slate-100"
                   @change="handleInstitutionChange($event.target.value)"
                 >
@@ -110,7 +111,7 @@
                 Sharing Scope
                 <select
                   v-model="form.sharingScope"
-                  :disabled="form.workspaceType !== 'institution'"
+                  :disabled="!canChangeVisibility || form.workspaceType !== 'institution'"
                   class="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-normal normal-case tracking-normal text-slate-900 disabled:bg-slate-100"
                 >
                   <option v-for="item in sharingScopeOptions" :key="item.value" :value="item.value">{{ item.label }}</option>
@@ -145,7 +146,7 @@
                   class="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-normal normal-case tracking-normal text-slate-900"
                 >
                   <option v-for="candidate in publishingUserCandidates" :key="candidate.id" :value="String(candidate.id)">
-                    {{ candidate.full_name || candidate.display_name || candidate.email }}{{ candidate.institution_role ? ` (${candidate.institution_role})` : '' }}
+                    {{ candidate.full_name || candidate.display_name || candidate.email || `User #${candidate.id}` }}{{ candidate.institution_role ? ` (${candidate.institution_role})` : '' }}
                   </option>
                 </select>
               </label>
@@ -256,6 +257,11 @@ const form = reactive({
 
 const sessionId = computed(() => Number(props.session?.id || 0))
 const currentSession = computed(() => details.value?.session || props.session || null)
+const canChangeVisibility = computed(() => currentSession.value?.permissions?.can_change_visibility === true)
+const credentialSourceLabel = computed(() => {
+  const source = currentSession.value?.publishing_context?.effective_credential_source
+  return !source || source === 'none' ? 'No Zenodo credential' : `${source} credentials`
+})
 const institutionCandidates = computed(() => details.value?.target_institutions || [])
 const sharingScopeOptions = computed(() => details.value?.options?.sharing_scopes || [])
 const credentialPreferenceOptions = computed(() => details.value?.options?.credential_preferences || [])

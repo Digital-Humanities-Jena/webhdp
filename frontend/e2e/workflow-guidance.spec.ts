@@ -24,6 +24,31 @@ async function seedWorkflow(page: Page, batch = false, files = [file], pipeline:
   } }))
 }
 
+test('explains GPU requirements before processing and leaves CPU pipelines unaffected', async ({ page }) => {
+  await seedWorkflow(page)
+  await page.route(apiV2('/pipelines'), route => fulfillJson(route, { data: { pipelines: [
+    { identifier: 'metadata_only', name: 'Metadata only', config: { steps: [] } },
+    { identifier: 'gpu_test', name: 'GPU pipeline', guidance: { requires_gpu: true, requires_hpc: true, requirements: [], hpc_component_keys: ['compute'], largest_step_resources: { gpu_count: 2 } } },
+  ] } }))
+  let canAllocate = false
+  await page.route(apiV1('/hpc-link/status'), route => fulfillJson(route, { data: {
+    available: true, can_allocate: canAllocate,
+  } }))
+
+  await page.goto('/workflow/pipeline')
+  await expect(page.getByText('Requires 2 GPUs')).toBeVisible()
+  await expect(page.getByRole('radio', { name: 'Metadata only' })).toBeChecked()
+  await expect(page.getByRole('button', { name: 'Check GPU status again' })).toHaveCount(0)
+
+  await page.getByRole('radio', { name: 'GPU pipeline' }).check()
+  await expect(page.getByText('Your account needs HPC access to request a GPU.')).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Request HPC access' })).toHaveAttribute('href', '/hpc-resources')
+  canAllocate = true
+  await page.getByRole('button', { name: 'Check GPU status again' }).click()
+  await expect(page.getByText(/No GPU is allocated to this session/)).toBeVisible()
+  await expect(page.getByTestId('pipeline-continue')).toBeEnabled()
+})
+
 test('flushes edits when leaving metadata through the sidebar', async ({ page }) => {
   await seedWorkflow(page)
   let title = 'Original title'
@@ -36,7 +61,7 @@ test('flushes edits when leaving metadata through the sidebar', async ({ page })
   })
   await page.goto('/workflow/metadata')
   await page.getByRole('textbox', { name: /^Title/ }).fill('Latest title')
-  await page.locator('a[href="/dashboard"]').click()
+  await page.getByRole('link', { name: 'Dashboard', exact: true }).click()
   await expect(page).toHaveURL(/\/dashboard$/)
   expect(writes).toBe(1)
   await page.goto('/workflow/metadata')
@@ -80,7 +105,7 @@ test('retains the metadata view when both server and browser draft storage fail'
   await page.route(apiV1('/metadata/user/42/draft'), route => fulfillJson(route, { error: { message: 'Storage unavailable' } }, 503))
   await page.goto('/workflow/metadata')
   await page.getByRole('textbox', { name: /^Title/ }).fill('Unsent title')
-  await page.locator('a[href="/dashboard"]').click()
+  await page.getByRole('link', { name: 'Dashboard', exact: true }).click()
   await expect(page.getByText('Draft save failed.', { exact: false })).toBeVisible()
   await expect(page).toHaveURL(/\/workflow\/metadata$/)
   await expect(page.getByRole('textbox', { name: /^Title/ })).toHaveValue('Unsent title')
@@ -197,8 +222,11 @@ for (const width of [320, 1280]) {
     let checks = 0
     let resourceRequests = 0
     await page.route(apiV2('/pipelines/render/readiness'), route => fulfillJson(route, { data: ++checks === 1 ? localReady : blocked }))
-    await page.route(apiV1('/hpc-link/status'), route => { resourceRequests++; return fulfillJson(route, { data: {} }) })
-    await page.route(apiV1('/hpc-link/allocations'), route => { resourceRequests++; return fulfillJson(route, { data: {} }) })
+    await page.route(apiV1('/hpc-link/status'), route => fulfillJson(route, { data: {} }))
+    await page.route(apiV1('/hpc-link/allocations'), route => {
+      if (route.request().method() === 'POST') resourceRequests++
+      return fulfillJson(route, { data: {} })
+    })
     await page.route(apiV2('/pipelines/render/execute'), route => { resourceRequests++; return fulfillJson(route, { data: {} }) })
     await page.goto('/workflow/submit')
     await expect(page.getByTestId('submit-confirm')).toBeEnabled()

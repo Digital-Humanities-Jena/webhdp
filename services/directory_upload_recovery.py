@@ -10,6 +10,9 @@ from api_utils import APIResponse
 from constants import UPLOAD_SUBMIT_TOKEN_FIELD, UPLOAD_PROGRESS_FIELD
 from database.database import db
 from database.models import Session, UserMetadata
+from exceptions import SecurityError
+from services.account_upload_quota import admit_upload, batch_input_size
+from services.cloud_upload_service import read_stream_receipt
 from services.registry_lock import OperationConflict, registry_lock
 from services.pipeline_execution_lock import PipelineAlreadyRunning, session_pipeline_lock
 
@@ -40,8 +43,21 @@ def directory_upload_request(function):
         payload = dict(request.get_json(silent=True) or {}) if request.is_json else request.form.to_dict(flat=False)
         raw_token = payload.get('submit_token') or request.headers.get('X-Upload-Submit-Token')
         token = _normalize_submit_token(raw_token[0] if isinstance(raw_token, list) else raw_token)
+        user_id = int(get_jwt_identity())
+
+        def process_upload():
+            size = batch_input_size(request.files.get('zip_file'), request.files.get('msf_file'))
+            receipt = request.form.get('cloud_upload_receipt') if not request.is_json else payload.get('cloud_upload_receipt')
+            if receipt:
+                try:
+                    size += read_stream_receipt(receipt, user_id).get('size_bytes', 0)
+                except SecurityError as exc:
+                    return APIResponse.error('CLOUD_UPLOAD_RECEIPT_REQUIRED', str(exc), 403)
+            with admit_upload(user_id, size):
+                return function(*args, **kwargs)
+
         if not token or str(request.args.get('validate_only', '')).lower() == 'true':
-            return function(*args, **kwargs)
+            return process_upload()
         files = []
         for key in sorted(request.files):
             for file in request.files.getlist(key):
@@ -52,7 +68,6 @@ def directory_upload_request(function):
                 files.append([key, file.filename, digest.hexdigest()])
         payload.pop('submit_token', None)
         fingerprint = hashlib.sha256(json.dumps([payload, files], sort_keys=True).encode()).hexdigest()
-        user_id = int(get_jwt_identity())
         with registry_lock(f'single-upload:{user_id}:{token}'):
             context = _get_upload_submission_context(user_id, token)
             if context:
@@ -64,7 +79,7 @@ def directory_upload_request(function):
                 return APIResponse.accepted(data=_build_upload_recovery_payload(context), message='Reconnected to the saved upload')
             setattr(g, IDENTITY_FIELD, {'token': token, 'fingerprint': fingerprint})
             try:
-                return function(*args, **kwargs)
+                return process_upload()
             finally:
                 g.pop(IDENTITY_FIELD, None)
     return wrapped

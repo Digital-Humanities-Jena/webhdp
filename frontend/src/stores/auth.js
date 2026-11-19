@@ -181,18 +181,8 @@ export const useAuthStore = defineStore('auth', () => {
     return authService.resendLoginCode(mfaToken)
   }
 
-  async function register(email, password) {
-    try {
-      const response = await authService.register(email, password)
-      // Do not log in immediately after registration as email verification is required
-      // user.value = response.data.user
-      // token.value = response.data.access_token
-      console.log('Registration successful - Verification required')
-      return response
-    } catch (error) {
-      console.error('Registration failed:', error)
-      throw error
-    }
+  async function register(email) {
+    return authService.register(email)
   }
 
   function logout({ preserveDrafts = false } = {}) {

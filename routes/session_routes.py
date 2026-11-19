@@ -15,6 +15,7 @@ from sqlalchemy import func
 
 from api_utils import APIResponse
 from constants import (
+    CLOUD_BATCH_INPUT_DIR,
     MSF_ALLOWED_EXTENSIONS,
     RECORD_RESOLUTION_STATE_FIELD,
     SHARED_SCAN_OPTIONS,
@@ -27,13 +28,14 @@ from constants import (
 )
 from database.database import db
 from database.models import BatchFileMetadata, CloudMirrorObject, File, Institution, PipelineRun, Session as DBSession, Submission, User, UserMetadata
-from exceptions import SecurityError, ValidationError
+from exceptions import AppException, SecurityError, ValidationError
 from routes.access_helpers import get_current_user_from_jwt, get_session_with_permission
 from security import resolve_child_path, safe_extract_zip, sanitize_upload_filename
+from services.account_upload_quota import UploadQuotaError, archive_input_size, reserve_cloud_batch_expansion
 from services.audit_service import list_audit_events, record_audit_event
 from services.directory_upload_recovery import directory_upload_request
 from services.notification_service import notify_admins
-from services.institution_service import InstitutionService
+from services.institution_service import InstitutionService, serialize_member_identity
 from services.hdpc_import_service import import_hdpc_for_user
 from services.hdpc_local_service import (
     classify_hdpc_record_inventory,
@@ -83,9 +85,12 @@ from services.dataset_integrity_service import (
 )
 from services.publishing_context_service import PublishingContextService
 from services.session_access_service import (
+    MOUNTED_INPUT_ORIGIN,
     build_session_permissions,
+    can_change_session_visibility,
     can_download_hdpc,
     can_download_shared_hdpc,
+    can_use_mounted_inputs,
     can_view_session,
     get_accessible_sessions,
     is_platform_moderator_or_admin,
@@ -224,19 +229,14 @@ def _parse_positive_int_arg(name: str, default: int) -> int:
 def _serialize_user_workspace_option(
     user: User,
     *,
+    viewer: User,
     institution_role: str | None = None,
     eligible: bool = True,
     reason: str | None = None,
     is_current: bool = False,
 ) -> dict[str, Any]:
     return {
-        "id": user.id,
-        "public_id": user.public_id,
-        "slug": user.slug,
-        "email": user.email,
-        "display_name": user.display_name,
-        "full_name": user.full_name,
-        "affiliation": user.affiliation,
+        **serialize_member_identity(user, viewer=viewer),
         "institution_role": institution_role,
         "eligible": bool(eligible),
         "reason": reason,
@@ -265,6 +265,8 @@ def _list_workspace_institution_candidates(user: User, session_row: DBSession | 
         for membership in institution_service.list_manageable_for_user(user.id, required_role="curator")
         if membership.institution
     ]
+    if session_row and not can_change_session_visibility(session_row, user):
+        return [item for item in candidates if int(item["id"]) == int(session_row.institution_id or 0)]
     if session_row and getattr(session_row, "institution", None):
         current_id = int(session_row.institution_id or 0)
         if current_id and not any(int(item["id"]) == current_id for item in candidates):
@@ -296,6 +298,9 @@ def _resolve_workspace_preview_institution(
     if not institution_id:
         return None, None
 
+    if (not can_change_session_visibility(session_row, user)
+            and int(session_row.institution_id or 0) != int(institution_id)):
+        raise SecurityError("Only the session owner can move this workspace")
     institution = institution_service.get_by_id(int(institution_id))
     if is_platform_moderator_or_admin(user):
         return int(institution_id), institution
@@ -311,12 +316,17 @@ def _resolve_workspace_preview_institution(
 def _list_publishing_user_candidates(
     session_row: DBSession,
     preview_institution_id: int | None,
+    viewer: User,
 ) -> list[dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
     seen_user_ids: set[int] = set()
     current_publishing_user_id = int(getattr(session_row, "publishing_user_id", None) or getattr(session_row, "user_id", 0) or 0)
 
-    if preview_institution_id:
+    can_view_roster = preview_institution_id and (
+        is_platform_moderator_or_admin(viewer)
+        or institution_service.get_membership(preview_institution_id, viewer.id)
+    )
+    if can_view_roster:
         memberships = institution_service.list_members(int(preview_institution_id))
         for membership in memberships:
             if not membership.user:
@@ -325,6 +335,7 @@ def _list_publishing_user_candidates(
             candidates.append(
                 _serialize_user_workspace_option(
                     membership.user,
+                    viewer=viewer,
                     institution_role=membership.role.value if membership.role else None,
                     is_current=int(membership.user.id) == current_publishing_user_id,
                 )
@@ -336,6 +347,7 @@ def _list_publishing_user_candidates(
             candidates.append(
                 _serialize_user_workspace_option(
                     owner,
+                    viewer=viewer,
                     institution_role="owner",
                     is_current=int(owner.id) == current_publishing_user_id,
                 )
@@ -347,6 +359,7 @@ def _list_publishing_user_candidates(
             0,
             _serialize_user_workspace_option(
                 current_publishing_user,
+                viewer=viewer,
                 institution_role=None,
                 eligible=False if preview_institution_id else True,
                 reason="Current publishing user is not available for the selected workspace."
@@ -377,9 +390,10 @@ def _build_session_workspace_payload(
     )
     return {
         "session": session_payload,
-        "owner_user": _serialize_user_workspace_option(owner_user, institution_role="owner") if owner_user else None,
+        "owner_user": _serialize_user_workspace_option(owner_user, viewer=user, institution_role="owner") if owner_user else None,
         "current_publishing_user": _serialize_user_workspace_option(
             current_publishing_user,
+            viewer=user,
             is_current=True,
         )
         if current_publishing_user
@@ -395,7 +409,7 @@ def _build_session_workspace_payload(
         "preview_institution_id": preview_institution_id,
         "preview_institution": preview_institution.to_dict() if preview_institution else None,
         "target_institutions": _list_workspace_institution_candidates(user, session_row=session_row),
-        "publishing_user_candidates": _list_publishing_user_candidates(session_row, preview_institution_id),
+        "publishing_user_candidates": _list_publishing_user_candidates(session_row, preview_institution_id, user),
         "options": {
             "sharing_scopes": [
                 {"value": "private", "label": "Private"},
@@ -425,10 +439,12 @@ def _serialize_session_context(
     display_name: str | None = None,
     institution_payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    publishing_context = publishing_context or publishing_context_service.describe_session(session_row)
+    acting_user = acting_user or get_current_user_from_jwt()
+    publishing_context = publishing_context or publishing_context_service.describe_session(
+        session_row, actor_user_id=acting_user.id if acting_user else None,
+    )
     if institution_payload is None and getattr(session_row, "institution", None):
         institution_payload = session_row.institution.to_dict()
-    acting_user = acting_user or get_current_user_from_jwt()
     session_state, workflow_phase, upload_stage = _resolve_session_state(session_row, metadata_fields)
     payload = {
         "id": session_row.id,
@@ -531,7 +547,7 @@ def _normalize_session_workspace_options(
     allow_publishing_user_override: bool = False,
     existing_session: DBSession | None = None,
 ) -> dict[str, Any]:
-    raw_institution_id = payload.get("institution_id")
+    raw_institution_id = payload.get("institution_id", existing_session.institution_id if existing_session else None)
     institution_id = None
     institution = None
     if raw_institution_id not in (None, ""):
@@ -545,7 +561,10 @@ def _normalize_session_workspace_options(
             if not institution_service.has_role(membership, "curator"):
                 raise SecurityError("Institution curator access required to create or update shared sessions")
 
-    default_scope = "institution" if institution_id else "private"
+    same_workspace = existing_session is not None and existing_session.institution_id == institution_id
+    default_scope = (existing_session.sharing_scope or "private") if same_workspace else (
+        "institution" if institution_id else "private"
+    )
     sharing_scope = _normalize_choice(
         payload.get("sharing_scope"),
         allowed=VALID_SHARING_SCOPES,
@@ -558,7 +577,8 @@ def _normalize_session_workspace_options(
     credential_preference = _normalize_choice(
         payload.get("credential_preference"),
         allowed=VALID_CREDENTIAL_PREFERENCES,
-        default="institution" if institution_id else "user",
+        default=(existing_session.credential_preference if same_workspace else None)
+        or ("institution" if institution_id else "user"),
         field_name="credential_preference",
     )
     if not institution_id and credential_preference == "institution":
@@ -567,17 +587,21 @@ def _normalize_session_workspace_options(
     default_zenodo_environment = _normalize_choice(
         payload.get("default_zenodo_environment"),
         allowed={"sandbox", "production"},
-        default="sandbox",
+        default=(existing_session.default_zenodo_environment if existing_session else None) or "sandbox",
         field_name="default_zenodo_environment",
     )
 
     use_institution_default_communities = _coerce_bool(payload.get("use_institution_default_communities"))
     if use_institution_default_communities is None:
-        use_institution_default_communities = bool(institution_id)
+        use_institution_default_communities = (
+            bool(existing_session.use_institution_default_communities) if same_workspace else bool(institution_id)
+        )
     if not institution_id:
         use_institution_default_communities = False
 
-    publishing_user_id = existing_session.publishing_user_id if existing_session else user.id
+    publishing_user_id = (existing_session.publishing_user_id if same_workspace else None) or (
+        existing_session.user_id if existing_session else user.id
+    )
     raw_publishing_user_id = payload.get("publishing_user_id")
     if raw_publishing_user_id not in (None, ""):
         if not allow_publishing_user_override:
@@ -928,6 +952,8 @@ def _get_upload_submission_context(user_id: int, submit_token: str) -> dict | No
         return None
 
     _, session_row = token_row
+    if not can_view_session(session_row, db.session.get(User, user_id)):
+        raise SecurityError("You no longer have access to this upload")
     from services.directory_upload_recovery import reconcile_preparing_upload
     reconcile_preparing_upload(user_id, submit_token, session_row.id)
     task_meta = (
@@ -2059,12 +2085,13 @@ def get_session(session_id):
 @session_bp.route("/<int:session_id>/audit-events", methods=["GET"])
 @jwt_required()
 def get_session_audit_events(session_id):
-    session_row, _, error_response = get_session_with_permission(session_id, permission="manage")
+    session_row, user, error_response = get_session_with_permission(session_id, permission="manage")
     if error_response:
         return error_response
 
     payload = list_audit_events(
         session_id=session_row.id,
+        actor_serializer=lambda actor: serialize_member_identity(actor, viewer=user),
         event_type=request.args.get("event_type"),
         entity_type=request.args.get("entity_type"),
         page=_parse_positive_int_arg("page", 1),
@@ -2106,6 +2133,10 @@ def update_session_workspace(session_id):
         allow_publishing_user_override=True,
         existing_session=session_row,
     )
+    if (not can_change_session_visibility(session_row, user)
+            and (options["institution_id"] != session_row.institution_id
+                 or options["sharing_scope"] != session_row.sharing_scope)):
+        raise SecurityError("Only the session owner can move the workspace or change its visibility")
     _apply_session_workspace_options(session_row, options)
     db.session.commit()
 
@@ -2116,7 +2147,7 @@ def update_session_workspace(session_id):
         event_type="session_workspace_updated",
         entity_type="session",
         entity_id=session_row.id,
-        details=publishing_context_service.describe_session(session_row),
+        details=publishing_context_service.describe_session(session_row, actor_user_id=user.id),
     )
     db.session.commit()
 
@@ -2149,7 +2180,7 @@ def list_sessions():
     )
     file_count_map = _get_session_file_counts(session_ids)
     first_filename_map = dict(db.session.query(File.session_id, func.min(File.filename)).filter(File.session_id.in_(session_ids)).group_by(File.session_id).all()) if session_ids else {}
-    publishing_context_map = publishing_context_service.describe_sessions(sessions)
+    publishing_context_map = publishing_context_service.describe_sessions(sessions, actor_user_id=user.id)
     institution_payload_map = {
         row.id: row.to_dict()
         for row in Institution.query.filter(Institution.id.in_(institution_ids)).all()
@@ -2363,7 +2394,7 @@ def list_upload_operations():
     )
     file_counts = _get_upload_file_counts(session_ids)
     session_file_counts = _get_session_file_counts(session_ids)
-    publishing_context_map = publishing_context_service.describe_sessions(sessions)
+    publishing_context_map = publishing_context_service.describe_sessions(sessions, actor_user_id=user.id)
     institution_payload_map = {
         row.id: row.to_dict()
         for row in Institution.query.filter(Institution.id.in_(institution_ids)).all()
@@ -2425,13 +2456,17 @@ def import_hdpc():
     try:
         user_id = int(get_jwt_identity())
         uploaded_file = request.files.get("hdpc_file")
-        result = import_hdpc_for_user(user_id=user_id, uploaded_file=uploaded_file, actor_user_id=user_id)
+        from services.account_upload_quota import admit_upload, upload_size
+        with admit_upload(user_id, upload_size(uploaded_file)):
+            result = import_hdpc_for_user(user_id=user_id, uploaded_file=uploaded_file, actor_user_id=user_id)
         return APIResponse.created(
             data=result,
             message="HDPC file imported successfully. Records are now available in Records Explorer.",
         )
     except ValidationError as exc:
         return APIResponse.validation_error(str(exc))
+    except AppException:
+        raise
     except Exception as exc:
         logger.error("Failed to import .hdpc for current user: %s", exc, exc_info=True)
         return APIResponse.server_error("Failed to import .hdpc file")
@@ -2444,7 +2479,9 @@ def list_local_msf():
     from services.cloud_upload_service import CloudUploadService, STORAGE_MODE_LOCAL
 
     if CloudUploadService.get_storage_mode() != STORAGE_MODE_LOCAL:
-        return APIResponse.error("Local storage mode is not active", 403)
+        return APIResponse.forbidden("Local storage mode is not active")
+    if not can_use_mounted_inputs(get_current_user_from_jwt()):
+        return APIResponse.forbidden("Mounted input access is required")
 
     input_dir = current_app.config.get("LOCAL_INPUT_PATH", "/data/local_input")
     if not os.path.exists(input_dir):
@@ -2538,6 +2575,11 @@ def start_session_directory():
 
     storage_mode = CloudUploadService.get_storage_mode()
     storage_type, storage_message = CloudUploadService.get_available_storage()
+    if storage_mode == STORAGE_MODE_LOCAL and not can_use_mounted_inputs(get_current_user_from_jwt()):
+        if (data.get("msf_path") or request.form.get("msf_path") or data.get("directory_path")
+                or request.form.get("directory_path") or "zip_file" not in request.files):
+            return APIResponse.forbidden("Mounted input access is required")
+        storage_mode, storage_type, storage_message = STORAGE_MODE_SERVER_ONLY, STORAGE_SERVER, "Server storage is available"
 
     # For pure_cloud and cloud_backup modes, cloud storage must be available
     if storage_mode in [STORAGE_MODE_PURE_CLOUD, STORAGE_MODE_CLOUD_BACKUP]:
@@ -2620,6 +2662,7 @@ def start_session_directory():
     input_directory_path = None
     msf_path = None
     original_zip_path = None
+    prepared_cloud_input = None
     extract_dir_to_cleanup = None
     msf_uploaded = False
     msf_preflight_report = None
@@ -2654,8 +2697,11 @@ def start_session_directory():
 
             from utils.remote_storage import RemoteStorageFile
             remote_file = RemoteStorageFile(download_url)
+            compressed_bytes = remote_file.seek(0, os.SEEK_END)
 
             with zipfile.ZipFile(remote_file, 'r') as zip_ref:
+                source_bytes = archive_input_size(zip_ref, compressed_bytes) + os.path.getsize(msf_path)
+                reserve_cloud_batch_expansion(user_id, source_bytes)
                 all_zip_paths = zip_ref.namelist()
                 file_map = {os.path.basename(p): p for p in all_zip_paths if not p.endswith('/') and not p.startswith('__MACOSX')}
                 zip_filenames = list(file_map.keys())
@@ -2681,13 +2727,10 @@ def start_session_directory():
                     msf_uploaded = True
                     msf_parse_options = {}
 
-                validation_payload = msf_preflight_report.get("validation") or {}
-                matched_filenames = validation_payload.get("matched_files") or []
-                if matched_filenames:
-                    # Extract the full bundle to preserve dependencies (OBJ/MTL/textures, etc.).
-                    safe_extract_zip(zip_ref, extract_dir)
-
-            input_directory_path = extract_dir
+                prepared_cloud_input = os.path.join(extract_dir, CLOUD_BATCH_INPUT_DIR)
+                os.makedirs(prepared_cloud_input, mode=0o700)
+                # Keep archive members separate from the uploaded MSF and preserve model dependencies.
+                safe_extract_zip(zip_ref, prepared_cloud_input)
 
         # 2. Handle Local ZIP Upload or Local Storage Mode
         elif 'zip_file' in request.files or storage_mode == STORAGE_MODE_LOCAL:
@@ -2936,6 +2979,7 @@ def start_session_directory():
             publishing_user_id=session_workspace_options["publishing_user_id"],
             default_zenodo_environment=session_workspace_options["default_zenodo_environment"],
             use_institution_default_communities=session_workspace_options["use_institution_default_communities"],
+            origin_type=MOUNTED_INPUT_ORIGIN if storage_mode == STORAGE_MODE_LOCAL else "workflow",
         )
         db_session_id = flask_session.get("db_session_id")
         if not db_session_id:
@@ -2981,6 +3025,8 @@ def start_session_directory():
             final_zip_path = os.path.join(uploads_path, "upload.zip")
             shutil.move(original_zip_path, final_zip_path)
             original_zip_path = final_zip_path
+        if prepared_cloud_input:
+            shutil.move(prepared_cloud_input, os.path.join(uploads_path, CLOUD_BATCH_INPUT_DIR))
 
         # In local mode, keep explicit msf_path selections in LOCAL_INPUT_PATH unchanged.
         if msf_path and os.path.exists(msf_path) and (storage_mode != STORAGE_MODE_LOCAL or msf_uploaded):
@@ -3073,6 +3119,7 @@ def start_session_directory():
                 'session_id': db_session_id, 'zip_path': original_zip_path,
                 'msf_path': msf_path, 'storage_mode': storage_mode,
                 'msf_parse_options': msf_parse_options, 'input_directory_path': input_directory_path,
+                **({'requested_by_user_id': user_id} if storage_mode == STORAGE_MODE_LOCAL else {}),
             }, task_id=task_id)
             from services.directory_upload_recovery import mark_upload_dispatched
             mark_upload_dispatched(db_session_id)
@@ -3103,6 +3150,8 @@ def start_session_directory():
             }
         )
 
+    except UploadQuotaError:
+        raise
     except (SecurityError, ValidationError, zipfile.BadZipFile) as e:
         logger.warning(f"Rejected unsafe session upload: {e}")
         if extract_dir_to_cleanup:
@@ -3125,9 +3174,14 @@ def start_session_directory():
 @session_bp.route("/tasks/<task_id>", methods=["GET"])
 @jwt_required()
 def get_task_status(task_id):
-    """
-    Get the status of a background task.
-    """
+    """Get the status of an upload task in a session the caller can view."""
+    user = get_current_user_from_jwt()
+    session_row = DBSession.query.join(UserMetadata, UserMetadata.session_id == DBSession.id).filter(
+        UserMetadata.field_name == UPLOAD_TASK_ID_FIELD, UserMetadata.field_value == task_id,
+    ).first()
+    if not can_view_session(session_row, user):
+        return APIResponse.not_found("Upload task not found")
+
     from celery_app import celery
     task = celery.AsyncResult(task_id)
 
@@ -3147,12 +3201,12 @@ def get_task_status(task_id):
             'result': info.get('result'),
         }
     else:
-        # something went wrong in the background job
+        message = 'Upload processing failed. Open the upload session to check its saved progress.'
         response = {
             'state': task.state,
             'progress': 100,
-            'status': str(task.info),  # this is the exception raised
-            'error': str(task.info)
+            'status': message,
+            'error': message,
         }
 
     return APIResponse.success(data=response)
@@ -3673,7 +3727,7 @@ def get_session_uploads_by_tab(session_id):
 @jwt_required()
 def discard_session_draft(session_id, local_record_id):
     try:
-        session, _, error_response = get_session_with_permission(
+        session, user, error_response = get_session_with_permission(
             session_id,
             permission="edit",
             require_mutable=True,
@@ -3689,11 +3743,13 @@ def discard_session_draft(session_id, local_record_id):
                 details={"session_id": session_id, "source_state": "hdpc_unavailable"},
             )
 
-        environment = session.default_zenodo_environment or "sandbox"
-        raw_is_sandbox = request.args.get("is_sandbox")
-        if raw_is_sandbox is not None:
-            environment = "sandbox" if str(raw_is_sandbox).strip().lower() == "true" else "production"
-        token_context = publishing_context_service.resolve_token_for_session(session, environment)
+        context = read_hdpc_record_context(resolved_hdpc_path, local_record_id)
+        if not context:
+            return APIResponse.not_found("Record not found in this session")
+        environment = "sandbox" if context["traceability"]["record"].get("is_sandbox") else "production"
+        token_context = publishing_context_service.resolve_token_for_session(
+            session, environment, actor_user_id=user.id, require_credential=True,
+        )
         result = discard_local_zenodo_draft(
             resolved_hdpc_path,
             local_record_id,
@@ -3708,6 +3764,8 @@ def discard_session_draft(session_id, local_record_id):
             return APIResponse.server_error(result.get("error") or "Failed to discard draft")
 
         return APIResponse.success(data=result)
+    except SecurityError:
+        raise
     except Exception as exc:
         logger.error(
             "Failed to discard draft for session %s record %s: %s",
@@ -3723,7 +3781,7 @@ def discard_session_draft(session_id, local_record_id):
 @jwt_required()
 def reconcile_session_record(session_id, local_record_id):
     """Verify an uncertain Zenodo operation using the record's own environment."""
-    session, _, error_response = get_session_with_permission(session_id, permission='edit', require_mutable=True)
+    session, user, error_response = get_session_with_permission(session_id, permission='edit', require_mutable=True)
     if error_response is not None:
         return error_response
     hdpc_path = _resolve_existing_hdpc_path(session.hdpc_path)
@@ -3734,7 +3792,9 @@ def reconcile_session_record(session_id, local_record_id):
         return APIResponse.not_found('Record not found in this session')
     record = context['traceability']['record']
     environment = 'sandbox' if record.get('is_sandbox') else 'production'
-    token_context = publishing_context_service.resolve_token_for_session(session, environment)
+    token_context = publishing_context_service.resolve_token_for_session(
+        session, environment, actor_user_id=user.id, require_credential=True,
+    )
     payload = request.get_json(silent=True) or {}
     if not isinstance(payload, dict) or any(not isinstance(payload.get(key, False), bool) for key in ('confirmed_not_created', 'confirmed_not_published')):
         return APIResponse.validation_error('Expected a draft ID or an explicit absence confirmation.')
@@ -3914,6 +3974,10 @@ def create_session_batch_operation(session_id):
                 details={"invalid_target_ids": invalid_ids},
             )
 
+        publishing_context_service.resolve_token_for_session(
+            session, "sandbox" if is_sandbox else "production", actor_user_id=user.id, require_credential=True,
+        )
+
         from tasks import execute_session_batch_operation_task
 
         task = execute_session_batch_operation_task.delay(
@@ -3942,6 +4006,8 @@ def create_session_batch_operation(session_id):
             },
             message="Session batch operation queued",
         )
+    except SecurityError:
+        raise
     except Exception as exc:
         logger.error("Failed to queue session batch operation for session %s: %s", session_id, exc, exc_info=True)
         return APIResponse.server_error("Failed to queue session batch operation")
@@ -4188,7 +4254,7 @@ def get_session_record_detail(session_id, local_record_id):
 def create_session_record_version(session_id, local_record_id):
     """Create a new Zenodo version for a published session record using the complete local file set."""
     try:
-        session, _, error_response = get_session_with_permission(
+        session, user, error_response = get_session_with_permission(
             session_id,
             permission="edit",
             require_mutable=True,
@@ -4261,6 +4327,8 @@ def create_session_record_version(session_id, local_record_id):
         token_context = publishing_context_service.resolve_token_for_session(
             session,
             "sandbox" if bool(record.get("is_sandbox")) else "production",
+            actor_user_id=user.id,
+            require_credential=True,
         )
 
         version_result = current_app.project_service.create_new_version_with_files(
@@ -4283,6 +4351,8 @@ def create_session_record_version(session_id, local_record_id):
             },
             message="New Zenodo version created successfully" if version_result.get("success") else "Version creation completed with warnings",
         )
+    except SecurityError:
+        raise
     except Exception as exc:
         logger.error(
             "Failed to create new version for session %s record %s: %s",
@@ -4451,7 +4521,10 @@ def get_cross_session_records_explorer():
         owners = {}
         if owner_ids:
             owner_rows = User.query.filter(User.id.in_(owner_ids)).all()
-            owners = {owner.id: owner.email for owner in owner_rows}
+            owners = {
+                owner.id: owner.email if is_privileged else serialize_member_identity(owner, viewer=user).get("email")
+                for owner in owner_rows
+            }
 
         explorer_records = []
         session_warnings = []

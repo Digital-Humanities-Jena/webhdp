@@ -24,7 +24,8 @@ This documentation is organized by audience and task:
 - [Zenodo account deep retrieval](guides/zenodo_account_retrieval.md)
 - [Zenodo OAI harvest](guides/zenodo_oai_harvest.md)
 - [Operations and setup guide](guides/operations_and_setup_guide.md)
-- [Upgrade to v0.1.0-alpha.3](guides/upgrade_alpha3.md)
+- [Upgrade to v0.1.0-alpha.4](guides/upgrade_alpha4.md)
+- [Historical alpha.3 upgrade guide](guides/upgrade_alpha3.md)
 - [HPC local-mode setup](guides/hpc_local_mode_setup.md)
 - [Run a live demo with a pre-reserved GPU](guides/prereserved_gpu_demo.md)
 - [Troubleshooting guide](guides/troubleshooting.md)
@@ -62,7 +63,7 @@ This documentation is organized by audience and task:
 | Account security | Zenodo keys, encrypted storage, sharing, password changes, and recovery codes | [Zenodo API Keys](guides/zenodo_api_keys.md), [Security and Credentials](guides/security_and_credentials.md) |
 | Video guides | Accepted release recordings that show real, replayable workflows | [Release Walkthrough Videos](guides/video_guides/release_walkthroughs.md) |
 | Operations | Setup, environment, modes, admin runbook, and HPC local-mode setup | [Operations and Setup Guide](guides/operations_and_setup_guide.md), [HPC Local-Mode Setup](guides/hpc_local_mode_setup.md), [Troubleshooting Guide](guides/troubleshooting.md) |
-| Alpha upgrade | Database and worker upgrade, component pins, staging checks and restore | [Upgrade to v0.1.0-alpha.3](guides/upgrade_alpha3.md) |
+| Alpha upgrade | Database and worker upgrade, component pins, staging checks and restore | [Upgrade to v0.1.0-alpha.4](guides/upgrade_alpha4.md) |
 | Pre-reserved GPUs | Share one operator-held Slurm GPU job with named users and rehearse the public site | [Pre-reserved GPU demo](guides/prereserved_gpu_demo.md) |
 | Connected applications | Register an application, publish a pinned pipeline, and operate the Link worker | [WebHDP-Link integration](guides/webhdp_link.md), [WebHDP-Link deployment](guides/webhdp_link_deployment.md) |
 | Reference | System boundaries, API contracts, schemas, and shared vocabulary | [System Architecture](architecture/system_architecture.md), [WebHDP API Reference](api/webhdp_api_reference.md), [HDPC Schema](architecture/hdpc_schema.md) |

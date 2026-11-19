@@ -64,6 +64,7 @@ def _create_session_dirs(
     publishing_user_id=None,
     default_zenodo_environment=None,
     use_institution_default_communities=None,
+    origin_type="workflow",
 ):
     """
     Creates temporary directories for a user session and saves to database.
@@ -98,7 +99,7 @@ def _create_session_dirs(
         publishing_user_id=publishing_user_id or user_id,
         default_zenodo_environment=default_zenodo_environment or "sandbox",
         use_institution_default_communities=bool(use_institution_default_communities) if institution_id else False,
-        origin_type="workflow",
+        origin_type=origin_type,
         access_mode="full",
     )
     db.session.add(db_session)
@@ -106,6 +107,8 @@ def _create_session_dirs(
     persist_single_upload_identity(db_session)
     from services.directory_upload_recovery import persist_directory_upload_identity
     persist_directory_upload_identity(db_session)
+    from services.account_upload_quota import attach_upload_to_session
+    attach_upload_to_session(db_session)
     db.session.commit()
 
     # Store in Flask session

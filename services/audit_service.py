@@ -1,6 +1,8 @@
 import json
 from typing import Any
 
+from sqlalchemy import or_
+
 from database.database import db
 from database.models import AuditEvent
 
@@ -28,10 +30,10 @@ def record_audit_event(
     return event
 
 
-def serialize_audit_event(event: AuditEvent) -> dict[str, Any]:
+def serialize_audit_event(event: AuditEvent, *, actor_serializer=None) -> dict[str, Any]:
     payload = event.to_dict()
     actor = getattr(event, "actor", None)
-    payload["actor"] = (
+    payload["actor"] = actor_serializer(actor) if actor_serializer else (
         {
             "id": actor.id,
             "email": actor.email,
@@ -51,6 +53,8 @@ def list_audit_events(
     session_id: int | None = None,
     event_type: str | None = None,
     entity_type: str | None = None,
+    visible_session_ids=None,
+    actor_serializer=None,
     page: int = 1,
     per_page: int = 25,
 ) -> dict[str, Any]:
@@ -62,6 +66,8 @@ def list_audit_events(
         query = query.filter(AuditEvent.institution_id == int(institution_id))
     if session_id is not None:
         query = query.filter(AuditEvent.session_id == int(session_id))
+    if visible_session_ids is not None:
+        query = query.filter(or_(AuditEvent.session_id.is_(None), AuditEvent.session_id.in_(visible_session_ids)))
     normalized_event_type = str(event_type or "").strip()
     if normalized_event_type:
         query = query.filter(AuditEvent.event_type == normalized_event_type)
@@ -77,7 +83,7 @@ def list_audit_events(
         .all()
     )
     return {
-        "audit_events": [serialize_audit_event(row) for row in rows],
+        "audit_events": [serialize_audit_event(row, actor_serializer=actor_serializer) for row in rows],
         "pagination": {
             "page": normalized_page,
             "per_page": normalized_per_page,

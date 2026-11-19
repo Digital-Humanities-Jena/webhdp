@@ -398,6 +398,15 @@
                     />
                     <span>hpc_link_access</span>
                   </label>
+                  <label class="inline-flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      :checked="Array.isArray(user.capabilities) && user.capabilities.includes('mounted_input_access')"
+                      :disabled="user.role === 'admin'"
+                      @change="updateCapability(user.id, 'mounted_input_access', $event.target.checked)"
+                    />
+                    <span>Mounted input access</span>
+                  </label>
                 </div>
               </td>
               <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">

@@ -19,6 +19,7 @@ from services.registry_lock import OperationConflict
 from services.historic_reconstruction_templates import HISTORIC_COMPONENT_KEYS
 from services.zenodo_component_templates import ZENODO_COMPONENT_KEYS
 from services.lod_reliability import capture_session_lod
+from services.publishing_context_service import PublishingContextService, pipeline_needs_zenodo
 from services.dataset_integrity_service import (
     analyze_session_record_resolution, read_session_records, ensure_fresh_record_creation_allowed, ensure_record_operation_allowed, RecordInventorySnapshot,
 )
@@ -29,7 +30,8 @@ from services.submission_pipeline_service import (
 
 
 ROUTES = {'files': '/workflow/files', 'metadata': '/workflow/metadata',
-          'mapping': '/workflow/edm-selection', 'pipeline': '/workflow/pipeline', 'review': '/workflow/submit'}
+          'mapping': '/workflow/edm-selection', 'pipeline': '/workflow/pipeline', 'review': '/workflow/submit',
+          'credentials': '/account/configuration'}
 
 
 def fingerprint(value):
@@ -147,6 +149,12 @@ class SubmissionReadiness:
         items = payload.get('execution_items') or []
         if items and bool(payload.get('is_sandbox', True)) != (session.default_zenodo_environment != 'production'):
             issue("Batch plans must use this session's default Zenodo environment.", 'review')
+        uses_zenodo = pipeline_needs_zenodo(steps) or any(item.get('action') == 'create_version' for item in items)
+        if uses_zenodo:
+            environment = 'sandbox' if payload.get('is_sandbox', True) else 'production'
+            publishing = PublishingContextService().describe_session(session, actor_user_id=user_id, environment=environment)
+            if publishing['effective_credential_source'] == 'none':
+                issue(f'Select an authorized Zenodo {environment.title()} credential for this workflow.', 'credentials')
         target_keys = [item['decision_key'] for item in items] if items else record_ids if record_ids else paths
         if not target_keys:
             issue('Select at least one source to process.', 'files')
@@ -176,7 +184,6 @@ class SubmissionReadiness:
         reusable_records = reusable_local_processing_records(session, payload.get('is_sandbox', True)) if paths and not items and not record_ids and not require_metadata else {}
         selected = items or ([{'record_id': rid, 'source_file_path': records.get(rid, {}).get('source_file_path')} for rid in record_ids] if record_ids else [{'source_file_path': path} for path in paths])
         skipped = 0
-        uses_zenodo = any((step.get('component_ref') or step['id']) in {'zenodo_draft', 'zenodo_upload'} for step in steps)
         for index, selection in enumerate(selected, 1):
             yield {'type': 'progress', 'checked': index - 1, 'total': len(selected)}
             if selection.get('action') == 'skip':
@@ -347,7 +354,7 @@ class SubmissionReadiness:
         if selected and skipped == len(selected):
             issue('All selected sources are marked as skip. Choose at least one source to process.', 'files')
         if uses_zenodo:
-            deferred.append({'message': 'Zenodo connectivity, credentials and remote acceptance are checked during processing.'})
+            deferred.append({'message': 'Zenodo connectivity, key validity and remote acceptance are checked during processing.'})
         if any((step.get('component_ref') or step['id']) == 'lod_generation' for step in steps):
             deferred.append({'message': 'Generated exports and required external validators are checked after generation; a preview covers only its selected record.'})
         from services.lod_artifact_service import validation_policy

@@ -15,6 +15,7 @@ import pytest
 from flask import Flask
 from flask_jwt_extended import JWTManager, create_access_token
 
+from constants import CLOUD_BATCH_INPUT_DIR
 from database.database import db
 from database.models import File, Session as DBSession, User, UserMetadata, UserRole
 from routes.session_routes import session_bp
@@ -257,7 +258,7 @@ def _native_pipeline_test_context():
     temp_dir.cleanup()
 
 
-def _build_native_execution_context(context: dict, *, access_token: str | None = None) -> dict:
+def _build_native_execution_context(context: dict, *, access_token: str = "authorized-test-token") -> dict:
     outputs_dir = Path(context["outputs_dir"])
     outputs_dir.mkdir(parents=True, exist_ok=True)
 
@@ -317,7 +318,8 @@ def _build_native_execution_context(context: dict, *, access_token: str | None =
     }
 
 
-def test_upload_coordinator_does_not_create_local_records_during_upload(monkeypatch, tmp_path):
+@pytest.mark.parametrize("storage_mode", [tasks.STORAGE_MODE_LOCAL, tasks.STORAGE_MODE_PURE_CLOUD])
+def test_upload_coordinator_does_not_create_local_records_during_upload(monkeypatch, tmp_path, storage_mode):
     app = Flask(__name__)
     app.config["TESTING"] = True
     app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///:memory:"
@@ -329,10 +331,11 @@ def test_upload_coordinator_does_not_create_local_records_during_upload(monkeypa
     session_dir = tmp_path / "session"
     uploads_dir = session_dir / "uploads"
     uploads_dir.mkdir(parents=True, exist_ok=True)
-    input_dir = tmp_path / "input"
+    cloud_batch = storage_mode == tasks.STORAGE_MODE_PURE_CLOUD
+    input_dir = uploads_dir / CLOUD_BATCH_INPUT_DIR if cloud_batch else tmp_path / "input"
     input_dir.mkdir(parents=True, exist_ok=True)
     (input_dir / "artifact.glb").write_text("glb", encoding="utf-8")
-    msf_path = input_dir / "upload.msf.csv"
+    msf_path = uploads_dir / "upload.msf.csv"
     msf_path.write_text("filename\na rtifact.glb\n".replace(" ", ""), encoding="utf-8")
 
     app.project_service = MagicMock()
@@ -376,6 +379,7 @@ def test_upload_coordinator_does_not_create_local_records_during_upload(monkeypa
     with app.app_context():
         db.create_all()
         user = User(email="upload-coordinator@example.com", role=UserRole.USER, is_verified=True)
+        user.set_capabilities(["mounted_input_access"])
         user.set_password("password")
         db.session.add(user)
         db.session.flush()
@@ -393,12 +397,13 @@ def test_upload_coordinator_does_not_create_local_records_during_upload(monkeypa
             session_row.id,
             None,
             str(msf_path),
-            tasks.STORAGE_MODE_LOCAL,
-            input_directory_path=str(input_dir),
+            storage_mode,
+            input_directory_path=None if cloud_batch else str(input_dir),
         )
 
         assert result["status"] == "coordinator_completed"
         assert result["worker_group_id"] is None
+        assert File.query.filter_by(session_id=session_row.id).one().path == str(input_dir / "artifact.glb")
         create_record_mock.assert_not_called()
 
 

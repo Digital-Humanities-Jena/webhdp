@@ -58,7 +58,7 @@ describe('router pipeline author guard', () => {
     expect(mocked.api.get).not.toHaveBeenCalled()
   })
 
-  it('redirects authenticated root-route visits to the upload workflow', async () => {
+  it('redirects authenticated root-route visits to the dashboard', async () => {
     const authStore = useAuthStore()
     authStore.token = 'token'
     authStore.setUser({
@@ -68,7 +68,7 @@ describe('router pipeline author guard', () => {
 
     const route = await navigateTo('/')
 
-    expect(route.fullPath).toBe('/workflow/upload')
+    expect(route.fullPath).toBe('/dashboard')
   })
 
   it('redirects onboarding-required users to first steps from protected routes', async () => {
@@ -83,6 +83,21 @@ describe('router pipeline author guard', () => {
     const route = await navigateTo('/workflow/upload')
 
     expect(route.fullPath).toBe('/onboarding')
+  })
+
+  it('keeps first-visit links through sign-in and allows setup and practice before completing onboarding', async () => {
+    expect((await navigateTo('/onboarding?tour=1')).query.redirect).toBe('/onboarding?tour=1')
+    expect((await navigateTo('/tutorial/3d')).query.redirect).toBe('/tutorial/3d')
+    expect((await navigateTo('/account/setup')).query.redirect).toBe('/account/setup')
+
+    const authStore = useAuthStore()
+    authStore.token = 'token'
+    authStore.setUser({ id: 18, role: 'user', onboarding_required: true })
+
+    expect((await navigateTo('/tutorial/3d')).name).toBe('ModelPublicationTutorial')
+    expect((await navigateTo('/account/setup')).name).toBe('AccountSetup')
+    expect(authStore.user.onboarding_required).toBe(true)
+    expect((await navigateTo('/dashboard')).name).toBe('Onboarding')
   })
 
   it('requires authentication for internal profile routes', async () => {
@@ -170,7 +185,7 @@ describe('router pipeline author guard', () => {
 
     const route = await navigateTo('/setup')
 
-    expect(route.fullPath).toBe('/workflow/upload')
+    expect(route.fullPath).toBe('/dashboard')
   })
 
   it('allows pipeline authors provided via capabilities_json into the constructor route', async () => {

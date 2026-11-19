@@ -41,7 +41,7 @@ export function attachInterceptors(client, {
     (error) => {
       const suppressError = error.config?.suppressGlobalError
       const requestUrl = String(error.config?.url || '')
-      const isInteractiveAuthRequest = requestUrl.includes('/auth/login') || requestUrl.includes('/auth/register')
+      const isInteractiveAuthRequest = /^\/auth\/(?:login(?:\/|$)|register$|resend-verification$|verify-email$)/.test(requestUrl)
       let responseData = error.response?.data
       if (typeof responseData === 'string') {
         try { responseData = JSON.parse(responseData) } catch { /* Non-JSON errors use the transport message. */ }

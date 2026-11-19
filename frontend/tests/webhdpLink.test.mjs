@@ -5,6 +5,7 @@ import { authorizationParameters, linkLoginDestination, navigateLinkCallback, ve
 describe('WebHDP-Link redirect boundaries', () => {
   it('preserves local consent requests and rejects external redirects', () => {
     expect(linkLoginDestination('/link/jobs')).toBe('/link/jobs')
+    expect(linkLoginDestination('/account/setup')).toBe('/account/setup')
     expect(linkLoginDestination('/link/jobs/run-123')).toBe('/link/jobs/run-123')
     expect(linkLoginDestination('/link/jobs/run-123/artifacts')).toBe('/workflow/upload')
     expect(linkLoginDestination('/link/authorize?client_id=piano&state=abc')).toBe('/link/authorize?client_id=piano&state=abc')

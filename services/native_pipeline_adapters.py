@@ -633,6 +633,7 @@ class HpcLinkExecutionAdapter(BaseExecutionAdapter):
 
     def execute(self, request: AdapterExecutionRequest) -> Dict[str, Any]:
         from flask import current_app
+        from services.hdp_component_policy import component_gpu_count
 
         execution_context = request.metadata.get("execution_context") or {}
         session_id = (
@@ -649,7 +650,8 @@ class HpcLinkExecutionAdapter(BaseExecutionAdapter):
             }
 
         user_id = execution_context.get("initiated_by_user_id") or request.metadata.get("initiated_by_user_id")
-        allocation = current_app.hpc_allocation_service.get_active_for_session(int(session_id), user_id=user_id)
+        allocation = current_app.hpc_allocation_service.get_active_for_session(
+            int(session_id), user_id=user_id, purpose=execution_context.get("hpc_purpose", "workflow"))
         if allocation is None:
             return {
                 "success": False,
@@ -665,6 +667,14 @@ class HpcLinkExecutionAdapter(BaseExecutionAdapter):
             or step.get("component_ref")
             or request.step_id
         )
+        gpu_count = component_gpu_count(component_key, request.profile.get("resources") or {})
+        if type(gpu_count) is int and gpu_count > 0 and (allocation.requested_gpu_count or 0) < gpu_count:
+            return {
+                "success": False,
+                "status": "failed",
+                "error": f"This step needs an active HPC-Link allocation with at least {gpu_count} GPU(s).",
+                "command": ["hpc_link", str(component_key)],
+            }
         payload = {
             "component_key": component_key,
             "component_version": step.get("component_version") or request.profile.get("version"),

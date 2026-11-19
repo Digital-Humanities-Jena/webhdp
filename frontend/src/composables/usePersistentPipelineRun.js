@@ -72,7 +72,7 @@ export function usePersistentPipelineRun(userId, options = {}) {
       const details = err?.error?.details || err?.details || {}
       const existing = !details.run_kind || details.run_kind === (options.runKind || 'pipeline') ? details.run_id : null
       if (existing) { pending.value = { runId: existing, startedAt: pending.value.startedAt }; persist(); await refresh() }
-      else if (['VALIDATION_ERROR', 'OPERATION_CONFLICT', 'PIPELINE_ALREADY_RUNNING', 'SECURITY_ERROR', 'FORBIDDEN', 'RESOURCE_NOT_FOUND'].includes(err?.error?.code)) {
+      else if (['VALIDATION_ERROR', 'OPERATION_CONFLICT', 'PIPELINE_ALREADY_RUNNING', 'SECURITY_ERROR', 'FORBIDDEN', 'RESOURCE_NOT_FOUND', 'NATIVE_PROCESSING_QUOTA'].includes(err?.error?.code)) {
         pending.value = null
         persist()
       }

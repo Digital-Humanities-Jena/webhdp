@@ -87,12 +87,31 @@ def check(workspace, identifier='guarded_lod', **changes):
     return native.check_submission_readiness(identifier, session.id, {**payload, **changes}, user.id)
 
 
-def test_default_render_readiness_uses_selected_files_instead_of_directory_default(workspace):
+def test_default_render_readiness_uses_selected_files_instead_of_directory_default(workspace, monkeypatch):
+    monkeypatch.setenv('ZENODO_SANDBOX_API_KEY', 'authorized-test-token')
     report = check(workspace, 'render')
     assert report['ready'], report
     assert report['readiness_token']
     assert any('Compute connectivity' in item['message'] for item in report['unverified'])
     assert PipelineRun.query.count() == 0
+
+
+def test_submission_readiness_reports_missing_credential_for_selected_environment(workspace, monkeypatch):
+    from services.zenodo_credential_service import ZenodoCredentialService
+
+    monkeypatch.delenv('ZENODO_SANDBOX_API_KEY', raising=False)
+    monkeypatch.setenv('ZENODO_API_KEY', 'fixture-production-credential')
+    _, _, _, user, _, _, _, _ = workspace
+    report = check(workspace, 'metadata_only')
+    assert not report['ready']
+    assert any(issue['route'] == '/account/configuration' and 'Sandbox' in issue['message']
+               for issue in report['blockers'])
+
+    credentials = ZenodoCredentialService()
+    key = credentials.create_credential(user_id=user.id, environment='sandbox', token='authorized-test-token',
+                                         name='Sandbox test', actor_user_id=user.id)
+    credentials.set_active_credential(user_id=user.id, environment='sandbox', credential_id=key.id)
+    assert check(workspace, 'metadata_only')['ready']
 
 
 @pytest.mark.parametrize('identifier', ['guarded_lod', 'guarded_mesh'])

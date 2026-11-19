@@ -517,6 +517,14 @@ class TestSubmissionRecordAccounting(unittest.TestCase):
         )
 
     def test_create_version_uses_complete_local_file_set(self):
+        from services.zenodo_credential_service import ZenodoCredentialService
+
+        with self.app.app_context():
+            ZenodoCredentialService().upsert_credential(
+                owner_type="user", owner_id=self.user_id, environment="sandbox",
+                token="test-sandbox-token", actor_user_id=self.user_id,
+            )
+
         class StubProjectService:
             def __init__(self):
                 self.calls = []

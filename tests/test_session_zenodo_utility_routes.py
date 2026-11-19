@@ -588,6 +588,13 @@ class TestSessionZenodoUtilityRoutes(unittest.TestCase):
         self.assertEqual(published_items[0]["zenodo_doi"], "10.5072/zenodo.9401")
 
     def test_discard_draft_route_restores_local_state(self):
+        from services.zenodo_credential_service import ZenodoCredentialService
+
+        with self.app.app_context():
+            ZenodoCredentialService().upsert_credential(
+                owner_type="user", owner_id=self.user_id, environment="sandbox",
+                token="test-sandbox-token", actor_user_id=self.user_id,
+            )
         with patch(
             "services.hdpc_zenodo_service.requests.post",
             return_value=_DummyResponse(204, {}),

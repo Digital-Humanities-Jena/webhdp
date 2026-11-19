@@ -165,7 +165,8 @@ describe('auth store', () => {
     mocked.authService.updatePassword.mockResolvedValue({ data: { ok: true } })
 
     const store = useAuthStore()
-    await store.register('user@example.com', 'secret')
+    await store.register('user@example.com')
+    expect(mocked.authService.register).toHaveBeenCalledWith('user@example.com')
     expect(store.token).toBeNull()
 
     await store.updateCurrentUser({ email: 'updated@example.com' })

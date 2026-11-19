@@ -2,7 +2,7 @@
 
 This guide is for administrators and operators preparing WebHDP for production or a public scientific demonstration.
 
-For an existing deployment, start with the [alpha.3 upgrade checklist](upgrade_alpha3.md).
+For an existing deployment, start with the [alpha.4 upgrade checklist](upgrade_alpha4.md).
 For a public presentation, use the [pre-reserved GPU runbook](prereserved_gpu_demo.md).
 For external applications, use the separate [WebHDP-Link deployment runbook](webhdp_link_deployment.md).
 
@@ -42,6 +42,32 @@ Start from `.env.example` and define at least:
 
 User and institution Zenodo keys configured through the UI are stored encrypted and shown only as masked previews. Personal keys may be named, shared by invitation, accepted by recipients, and selected as the active Sandbox or Production key for uploads. Sharing grants use of the encrypted credential record; it does not expose the cleartext token.
 
+### Registration and invitation delivery
+
+Set `FRONTEND_URL` to the public HTTPS origin for links in verification and
+invitation emails. Configure the mail host, sender, and TLS or SSL mode for
+your provider. `MAIL_TIMEOUT` limits SMTP socket operations. Test registration,
+resend, and an invitation using an operator-controlled mailbox before inviting
+users. Check the institution’s spam and quarantine handling during that test.
+
+The API workers share authentication throttling through
+`auth-throttle.sqlite3` in the writable instance directory. Keep that directory
+shared across API workers on the host. `AUTH_THROTTLE_DB_PATH` can point to a
+different shared local file. The stored keys are hashes keyed with the
+application secret. If the store is unavailable, the API temporarily rejects
+the protected public authentication requests.
+
+`AUTH_TRUSTED_PROXY_HOPS` defaults to zero for a directly reached API. Compose
+defaults to one for a private API reached through its nginx frontend. When
+another proxy also appends addresses in front of nginx, set the count to
+match the deployed chain. Keep the API reachable only through that chain.
+
+Registration and resend share a five-minute window and a default limit of ten
+requests per email address. The default IP limit is four times the address limit
+so people sharing an institutional network can register. Configure this policy
+with `REGISTER_RATE_LIMIT_ATTEMPTS`, `AUTH_RATE_LIMIT_IP_MULTIPLIER`,
+`AUTH_RATE_LIMIT_WINDOW_SECONDS`, and `AUTH_RATE_LIMIT_LOCKOUT_SECONDS`.
+
 Archived legacy fallback details live in `hdp_server_integration_guide.md`, but they are not part of the standard deployment template.
 
 ### Important operational paths
@@ -78,6 +104,20 @@ Operational guidance:
 - Direct Cloud Storage downloads for uploaded source artifacts are available only for new sessions with active `pure_cloud` or `cloud_backup` mirroring. `server_only` and `local`/HPC sessions intentionally report cloud download unavailable in the file review UI.
 
 Detailed behavior: `../storage_modes_architecture.md`.
+
+### Account upload allowances
+
+Apply revision `e2f1a3b4c567` before starting the new API. It adds an upload admission table and reads older source usage from existing file records. New installations use the same default limits.
+
+| Environment setting | Default | Scope |
+|---|---:|---|
+| `ACCOUNT_UPLOAD_STORAGE_BYTES` | 50 GiB | Source data attached to an ordinary account's sessions and source bytes reserved by current uploads. ZIP accounting uses the larger of its compressed and expanded size, plus the uploaded metadata spreadsheet. For cloud archives, WebHDP reserves the size from the signed receipt first and checks the archive's actual size before extracting it. |
+| `ACCOUNT_UPLOAD_MAX_ACTIVE` | 3 | Ordinary account's receiving uploads and queued scans. |
+| `ACCOUNT_UPLOAD_STREAM_DAILY_BYTES` | 50 GiB | Ordinary account's cloud transfer allowance over a rolling 24-hour window. |
+
+Administrators are exempt from these per-account upload caps. The existing HTTP request size and provider limits still apply. Standalone spreadsheet tools use a private temporary workspace per account with a 16 MiB file limit and 64 MiB retained workspace limit. Scratch spreadsheets expire after 24 hours. Re-upload a spreadsheet to use it in the new workspace if it was staged before this upgrade.
+
+These allowances measure admitted source data and cloud transfer. HPC allocation limits and generated artifacts have separate checks. Uploads that fail before they create a session release their reservations. Quota reporting can retain charges for sessions that still have source records.
 
 ## 5. Pipeline Configuration
 Admins can:

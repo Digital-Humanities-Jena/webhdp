@@ -584,8 +584,10 @@ class CommunityMigrationService:
                 db.session.commit()
                 self._update_job_progress(job, current_record=record.to_dict())
                 continue
-            token_context = self.publishing_context_service.resolve_token_for_session(session, job.environment)
             try:
+                token_context = self.publishing_context_service.resolve_token_for_session(
+                    session, job.environment, actor_user_id=job.requested_by_user_id, require_credential=True,
+                )
                 if record.append_status not in {"succeeded", "unchanged"}:
                     api_response = current_app.project_service.append_community_to_record(
                         local_record_id=int(record.local_record_id),

@@ -2,9 +2,9 @@
   <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
     <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between mb-6">
       <div>
-        <h1 class="text-2xl font-bold text-gray-900">Upload Operations</h1>
+        <h1 class="text-2xl font-bold text-gray-900">Uploads</h1>
         <p class="mt-1 text-sm text-gray-600">
-          Monitor background uploads and reopen them later without keeping the workflow page open. Upload completion means scan and metadata registration are done; local records are still created later at submit.
+          Check whether files are ready, then resume an upload to review metadata and choose a pipeline. Records are created when you start processing.
         </p>
       </div>
       <button
@@ -20,12 +20,16 @@
       Loading upload operations...
     </div>
 
-    <div v-else-if="error" class="bg-white shadow rounded-lg p-6 text-sm text-red-600">
+    <div v-else-if="error" role="alert" class="bg-white shadow rounded-lg p-6 text-sm text-red-600">
       {{ error }}
     </div>
 
     <div v-else-if="operations.length === 0" class="bg-white shadow rounded-lg p-6 text-center text-sm text-gray-500">
-      No upload operations found.
+      <p>Your uploads will appear here.</p>
+      <div class="mt-3 flex flex-wrap justify-center gap-4">
+        <router-link to="/workflow/upload" class="font-semibold text-indigo-700 underline">Upload files</router-link>
+        <router-link :to="{ name: 'ModelPublicationTutorial' }" class="font-semibold text-indigo-700 underline">Try the 3D tutorial</router-link>
+      </div>
     </div>
 
     <div v-else class="space-y-4">
@@ -41,7 +45,7 @@
                 Session #{{ operation.session_id }}
               </h2>
               <span :class="statusClass(operation.progress?.current_stage)" class="px-2.5 py-1 text-xs font-medium rounded-full">
-                {{ operation.progress?.current_stage || operation.status }}
+                {{ uploadStatusLabel(operation.progress?.current_stage || operation.status) }}
               </span>
               <span class="px-2.5 py-1 text-xs font-medium rounded-full bg-gray-100 text-gray-700">
                 {{ operation.workspace?.type === 'institution' ? 'Institution workspace' : 'Personal workspace' }}
@@ -145,7 +149,7 @@ const loadOperations = async () => {
     operations.value = response.data?.operations || []
   } catch (err) {
     console.error('Failed to load upload operations:', err)
-    error.value = err?.error || 'Failed to load upload operations.'
+    error.value = err?.error?.message || 'Could not load uploads. Use Refresh to try again.'
   } finally {
     loading.value = false
     scheduleRefresh()
@@ -162,6 +166,11 @@ const formatMode = (value) => {
   return value.replace(/_/g, ' ')
 }
 
+const uploadStatusLabel = (status) => ({
+  completed: 'Ready to review', awaiting_scan_start: 'Ready to check files', scanning: 'Checking files',
+  processing: 'Checking files', failed: 'Needs attention', cancelled: 'Cancelled', pending: 'Waiting',
+}[status] || (status ? status.replace(/_/g, ' ') : 'Waiting'))
+
 const statusClass = (status) => {
   if (status === 'completed') return 'bg-green-100 text-green-800'
   if (status === 'failed') return 'bg-red-100 text-red-800'
@@ -170,7 +179,7 @@ const statusClass = (status) => {
 }
 
 const formatCredentialSource = (source) => {
-  if (!source) return 'System credentials'
+  if (!source || source === 'none') return 'No Zenodo credential'
   return `${source.charAt(0).toUpperCase()}${source.slice(1)} credentials`
 }
 

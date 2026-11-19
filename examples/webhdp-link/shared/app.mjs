@@ -1,4 +1,5 @@
 import { WebHdpLink } from '/sdk/client.mjs'
+import { loadDatasetFiles, renderDatasetCard } from './datasets.mjs'
 import { applyPresentation, renderSandboxReceipt, linkProgressPhase } from './presentation.mjs'
 const $ = id => document.getElementById(id)
 const app = document.body.dataset.app
@@ -9,6 +10,9 @@ const config = await fetch('/config.json', { cache: 'no-store' }).then(r => {
 applyPresentation(document, config)
 const link = new WebHdpLink({ baseUrl: config.base_url, clientId: config.client_id })
 let pipeline, selectedFiles = [], activeRun, polling, objectUrls = [], submitting = false
+let datasetSelection, loadingDataset
+const datasetButtons = new Map()
+const datasetStorageKey = `webhdp-link:dataset:${config.client_id}`
 function message(text, error = false) { $('message').hidden = !text; $('message').textContent = text; $('message').classList.toggle('error', error) }
 function reportError(error) {
   if (error?.status === 401) {
@@ -24,14 +28,54 @@ function setFiles(files) {
   selectedFiles = [...files]; $('file-list').replaceChildren()
   for (const file of selectedFiles) { const li = document.createElement('li'); li.textContent = `${file.name} · ${(file.size / 1024).toFixed(1)} KB`; $('file-list').append(li) }
 }
+function showDatasetSelection() {
+  for (const [id, button] of datasetButtons) {
+    const selected = id === datasetSelection?.id
+    button.setAttribute('aria-pressed', String(selected))
+    button.textContent = selected ? 'Loaded' : 'Load dataset'
+    button.disabled = submitting || !!loadingDataset
+  }
+  const status = $('dataset-status')
+  if (status) {
+    status.textContent = loadingDataset
+      ? `Loading ${loadingDataset.dataset.title}…`
+      : datasetSelection
+        ? `${datasetSelection.title} loaded · ${selectedFiles.length} ${selectedFiles.length === 1 ? 'file' : 'files'}`
+        : ''
+  }
+}
+async function selectDataset(dataset) {
+  loadingDataset?.controller.abort()
+  const request = { dataset, controller: new AbortController() }
+  loadingDataset = request
+  updateConnection()
+  try {
+    const files = await loadDatasetFiles(dataset.files, request.controller.signal)
+    if (loadingDataset !== request) return
+    $('files').value = ''
+    setFiles(files)
+    datasetSelection = dataset
+    sessionStorage.setItem(datasetStorageKey, dataset.id)
+    message('')
+  } catch (error) {
+    if (!request.controller.signal.aborted) message(error.message, true)
+  } finally {
+    if (loadingDataset === request) {
+      loadingDataset = null
+      updateConnection()
+    }
+  }
+}
 function updateConnection() {
   const connected = !!link.accessToken
   $('connection-status').classList.toggle('connected', connected)
   $('connection-status').replaceChildren(Object.assign(document.createElement('i'), { className: 'dot' }), document.createTextNode(connected ? 'Connected to WebHDP' : 'WebHDP not connected'))
   $('connect').textContent = connected ? 'Disconnect' : 'Connect with WebHDP'
-  $('run').disabled = !connected || !pipeline || submitting
+  $('run').disabled = !connected || !pipeline || submitting || !!loadingDataset
+  $('files').disabled = submitting
   $('cancel').disabled = !connected
   for (const button of $('recent-list').querySelectorAll('button')) button.disabled = !connected
+  showDatasetSelection()
 }
 function parameterSchema() { return pipeline.parameters_schema || pipeline.parameter_schema || pipeline.parameters || { properties: {} } }
 function renderPipeline() {
@@ -41,7 +85,10 @@ function renderPipeline() {
   const input = pipeline.input || pipeline.inputs || {}
   $('files').accept = (input.extensions || []).join(',')
   $('files').multiple = input.max_files !== 1
-  $('file-hint').textContent = `${(input.extensions || []).join(', ').toUpperCase()} · ${input.min_files || 1}–${input.max_files || 1} file(s) per job`
+  const minFiles = input.min_files || 1
+  const maxFiles = input.max_files || 1
+  const fileCount = minFiles === maxFiles ? String(minFiles) : `${minFiles}–${maxFiles}`
+  $('file-hint').textContent = `${(input.extensions || []).join(', ').toUpperCase()} · ${fileCount} ${maxFiles === 1 ? 'file' : 'files'} per job`
   $('batch-label').hidden = app === 'photo-lab'
   const schema = parameterSchema(); $('parameters').replaceChildren()
   for (const [name, def] of Object.entries(schema.properties || {})) {
@@ -157,19 +204,36 @@ async function submit() {
   } finally { submitting = false; updateConnection() }
 }
 $('connect').onclick = () => connect().catch(reportError)
-$('files').onchange = event => setFiles(event.target.files)
+$('files').onchange = event => {
+  loadingDataset?.controller.abort()
+  loadingDataset = null
+  datasetSelection = null
+  sessionStorage.removeItem(datasetStorageKey)
+  setFiles(event.target.files)
+  updateConnection()
+}
 $('run').onclick = () => submit().catch(error => { reportError(error); updateConnection() })
 $('cancel').onclick = async () => { try { showRun(await link.cancel(activeRun.id)); message('Cancellation requested; a running step may finish before the job stops.') } catch (error) { reportError(error) } }
-$('sample').onclick = async () => {
+const sampleButton = $('sample')
+sampleButton.hidden = !config.samples?.length
+sampleButton.onclick = async () => {
   try {
-    const files = await Promise.all(config.samples.map(async sample => {
-      const response = await fetch(sample.url); if (!response.ok) throw new Error('Sample data is unavailable')
-      return new File([await response.blob()], sample.name, { type: response.headers.get('Content-Type') || '' })
-    }))
+    const files = await loadDatasetFiles(config.samples)
     setFiles(files); message('Sample data selected. You can adjust the parameters before submitting.')
   } catch (error) { message(error.message, true) }
 }
+if ($('datasets') && config.datasets?.length) {
+  sampleButton.hidden = true
+  for (const dataset of config.datasets) {
+    const { card, button } = renderDatasetCard(dataset, selectDataset)
+    datasetButtons.set(dataset.id, button)
+    $('dataset-list').append(card)
+  }
+  $('datasets').hidden = false
+  const savedDataset = config.datasets.find(dataset => dataset.id === sessionStorage.getItem(datasetStorageKey))
+  if (savedDataset) void selectDataset(savedDataset)
+}
 $('api-docs').href = `${config.base_url}/openapi.json`
-window.addEventListener('pagehide', () => { polling?.abort(); objectUrls.forEach(url => URL.revokeObjectURL(url)) })
+window.addEventListener('pagehide', () => { polling?.abort(); loadingDataset?.controller.abort(); objectUrls.forEach(url => URL.revokeObjectURL(url)) })
 try { if (await link.completeAuthorization()) { message('Connection approved. Only this application’s permitted pipelines and jobs are available.'); await load() } } catch (error) { reportError(error) }
 updateConnection()

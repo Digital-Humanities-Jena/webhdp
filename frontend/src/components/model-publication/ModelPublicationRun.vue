@@ -10,7 +10,7 @@
           <p aria-live="polite" class="mt-2 text-sm leading-6 text-slate-700">
             {{ progressText }}
           </p>
-          <div class="mt-3"><ModelPublicationDetails :job="job" /></div>
+          <div class="mt-3"><ModelPublicationDetails :job="job" :practice="practice" /></div>
           <p v-if="job.status === 'running' && job.detail" class="mt-1 text-xs font-medium text-slate-600">{{ job.detail }}</p>
           <div v-if="refreshError" role="status" class="mt-3 rounded-md bg-amber-50 p-3 text-sm text-amber-950">
             {{ refreshError }}
@@ -55,7 +55,7 @@
       </label>
     </section>
 
-    <section v-if="job.draft" aria-labelledby="draft-heading" class="rounded-xl border border-teal-200 bg-teal-50 p-4 text-teal-950 sm:p-6">
+    <section v-if="!practice && job.draft" aria-labelledby="draft-heading" class="rounded-xl border border-teal-200 bg-teal-50 p-4 text-teal-950 sm:p-6">
       <h3 id="draft-heading" class="text-lg font-semibold">Zenodo Sandbox draft</h3>
       <p class="mt-1 text-sm">
         Draft {{ job.draft.id }} · {{ draftFileCount }} {{ draftFileCount === 1 ? 'file' : 'files' }} uploaded
@@ -81,7 +81,7 @@
     </section>
 
     <section v-if="job.metadata" aria-labelledby="mapped-metadata-heading" class="rounded-xl border border-slate-200 bg-white p-4 sm:p-6">
-      <h3 id="mapped-metadata-heading" class="text-lg font-semibold">Metadata used in this draft</h3>
+      <h3 id="mapped-metadata-heading" class="text-lg font-semibold">{{ practice ? 'Metadata matched to your model' : 'Metadata used in this draft' }}</h3>
       <dl class="mt-3 grid gap-3 text-sm sm:grid-cols-2">
         <div>
           <dt class="font-semibold text-slate-800">Source</dt>
@@ -128,6 +128,7 @@
 
     <section v-if="job.files?.length" aria-labelledby="files-heading" class="rounded-xl border border-slate-200 bg-white p-4 sm:p-6">
       <h3 id="files-heading" class="text-lg font-semibold">Prepared files</h3>
+      <p v-if="practice" class="mt-1 text-sm text-slate-700">Download the GLB to inspect the repaired model. Compare the spreadsheet with the mapped JSON to see how WebHDP used the source metadata.</p>
       <ul class="mt-2 divide-y divide-slate-100">
         <li v-for="file in job.files" :key="file.name" class="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 py-2">
           <div class="min-w-0">
@@ -157,7 +158,8 @@ const props = defineProps({
   job: { type: Object, required: true },
   refreshError: { type: String, default: '' },
   publishedExample: { type: String, default: '' },
-  demoAccount: { type: Boolean, default: false }
+  demoAccount: { type: Boolean, default: false },
+  practice: { type: Boolean, default: false },
 })
 defineEmits(['refresh'])
 
@@ -168,16 +170,16 @@ const job = computed(() => {
 })
 
 
-const steps = ['Check and repair model', 'Map metadata and generate files', 'Create Sandbox draft']
-const formatLabels = { edm: 'EDM', iiif: 'IIIF', mets: 'METS/MODS', cidoc_crm: 'CIDOC CRM', jsonld: 'JSON-LD' }
-const stageIndex = { preparing_model: 0, mapping_metadata: 1, creating_draft: 1, generating_metadata: 1, uploading: 2 }
+const steps = computed(() => props.practice ? ['Check and repair model', 'Match metadata', 'Prepare downloads'] : ['Check and repair model', 'Map metadata and generate files', 'Create Sandbox draft'])
+const formatLabels = { edm: 'EDM', iiif: 'IIIF', mets: 'METS/MODS', cidoc_crm: 'CIDOC CRM', jsonld: 'JSON-LD', msf: 'Source metadata spreadsheet', metadata: 'Mapped metadata' }
+const stageIndex = { preparing_model: 0, mapping_metadata: 1, creating_draft: 1, generating_metadata: 1, uploading: 2, preparing_downloads: 2 }
 const currentStep = computed(() => props.job.status === 'completed'
-  ? steps.length
+  ? steps.value.length
   : (props.job.status === 'queued' ? -1 : (stageIndex[props.job.stage] ?? 0)))
 const statusText = computed(() => ({
   queued: 'In the queue',
   running: 'Processing model',
-  completed: props.job.model_count > 1 ? 'Drafts ready' : 'Draft ready',
+  completed: props.practice ? 'Practice results ready' : props.job.model_count > 1 ? 'Drafts ready' : 'Draft ready',
   failed: 'This request needs attention',
 }[props.job.status] || 'Waiting for an update'))
 const stageText = {
@@ -186,6 +188,7 @@ const stageText = {
   creating_draft: 'Reserving a Sandbox draft to identify your linked data files.',
   generating_metadata: 'Generating and validating the linked data files.',
   uploading: 'Uploading the prepared files to Zenodo Sandbox.',
+  preparing_downloads: 'Preparing the GLB and metadata files for download.',
 }
 const progressText = computed(() => {
   if (props.job.status === 'queued') {
@@ -195,9 +198,10 @@ const progressText = computed(() => {
     }
     return 'WebHDP accepted your request. Processing will start automatically.'
   }
-  if (props.job.status === 'completed') return props.job.model_count > 1
-    ? 'Each model has its own Sandbox draft. Choose a model to review below.'
-    : 'Your model and linked data files are ready to review and download.'
+  if (props.job.status === 'completed') {
+    if (props.practice) return 'Inspect the texture repairs, review the mapped metadata, and download your prepared files below.'
+    return props.job.model_count > 1 ? 'Each model has its own Sandbox draft. Choose a model to review below.' : 'Your model and linked data files are ready to review and download.'
+  }
   if (props.job.status === 'failed') return 'Review the details below and prepare another request when ready.'
   return stageText[props.job.stage] || 'WebHDP is preparing your files.'
 })

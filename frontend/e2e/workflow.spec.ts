@@ -28,6 +28,7 @@ test.describe('Workflow browser happy paths', () => {
     })
 
     await loginThroughUi(page)
+    await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: /new upload/i }).click()
     await page.locator('#file-upload').setInputFiles({
       name: 'manual.glb',
       mimeType: 'model/gltf-binary',
@@ -52,6 +53,7 @@ test.describe('Workflow browser happy paths', () => {
     })
 
     await loginThroughUi(page)
+    await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: /new upload/i }).click()
     await page.locator('#file-upload').setInputFiles({
       name: 'broken.glb',
       mimeType: 'model/gltf-binary',
@@ -174,6 +176,7 @@ test.describe('Workflow browser happy paths', () => {
     })
 
     await loginThroughUi(page)
+    await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: /new upload/i }).click()
     await page.getByTestId('upload-path-batch').click()
     await expect(page.getByText('Cloud storage ready')).toBeVisible()
     await page.getByTestId('upload-zip-input').setInputFiles({

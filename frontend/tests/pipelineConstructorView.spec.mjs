@@ -21,6 +21,10 @@ const mocked = vi.hoisted(() => ({
     getNodes: vi.fn(),
     listSessions: vi.fn().mockResolvedValue({ data: { sessions: [{ id: 42, name: 'Test session' }] } }),
   },
+  hpcLinkService: {
+    getStatus: vi.fn(),
+    listReservations: vi.fn(),
+  },
   toast: {
     success: vi.fn(),
     error: vi.fn(),
@@ -34,6 +38,7 @@ const mocked = vi.hoisted(() => ({
 
 vi.mock('@/services/pipeline.service', () => ({ default: mocked.pipelineService }))
 vi.mock('@/services/file.service', () => ({ default: mocked.fileService }))
+vi.mock('@/services/hpcLink.service', () => ({ default: mocked.hpcLinkService }))
 vi.mock('@/composables/useToast', () => ({ useToast: () => mocked.toast }))
 vi.mock('vue-router', () => ({ useRoute: () => mocked.route, onBeforeRouteLeave: vi.fn() }))
 
@@ -169,12 +174,15 @@ function resetServiceMocks() {
 
 async function mountConstructorView({
   pipelineConfig,
+  guidance,
   components = Object.values(componentsFixture),
   user = { id: 1, role: 'admin', capabilities: ['native_pipeline_author'] },
   routePath = '/admin/pipelines',
 }) {
   resetServiceMocks()
   mocked.fileService.listSessions.mockResolvedValue({ data: { sessions: [{ id: 42, name: 'Test session' }] } })
+  mocked.hpcLinkService.getStatus.mockReset().mockResolvedValue({ data: { available: true, can_allocate: true } })
+  mocked.hpcLinkService.listReservations.mockReset().mockResolvedValue({ data: { reservations: [] } })
   mocked.route.path = routePath
   mocked.pipelineService.listPipelines.mockResolvedValue({
     data: {
@@ -193,6 +201,7 @@ async function mountConstructorView({
     data: {
       pipeline: {
         config: pipelineConfig,
+        guidance,
       },
     },
   })
@@ -309,6 +318,39 @@ describe('PipelineConfigView constructor interactions', () => {
   sessionStorage.clear()
   mocked.fileService.listSessions.mockResolvedValue({ data: { sessions: [{ id: 42, name: 'Test session' }] } })
     mocked.route.path = '/admin/pipelines'
+  })
+
+  it('shows the GPU requirement and checks the chosen session for a saved custom HPC profile', async () => {
+    const wrapper = await mountConstructorView({
+      pipelineConfig: {
+        identifier: 'gpu_pipeline',
+        name: 'GPU Pipeline',
+        version: '1.0.0',
+        steps: [{ id: 'convert', component_ref: 'convert_model', execution_profile_ref: 'custom_gpu' }],
+      },
+      guidance: {
+        requires_hpc: true,
+        requires_gpu: true,
+        largest_step_resources: { gpu_count: 2 },
+        hpc_component_keys: ['convert_model'],
+      },
+    })
+
+    expect(wrapper.text()).toContain('This pipeline requires 2 GPUs.')
+    expect(wrapper.text()).toContain('Choose a session to check its GPU allocation.')
+    await wrapper.get('[data-testid="preflight-session-id"]').setValue('42')
+    await flushPromises()
+    expect(mocked.hpcLinkService.getStatus).toHaveBeenCalledWith({ purpose: 'workflow', session_id: '42' }, expect.any(Object))
+    expect(mocked.hpcLinkService.listReservations).toHaveBeenCalledWith('workflow')
+    expect(wrapper.text()).toContain('Assign a GPU allocation before running this pipeline.')
+
+    mocked.hpcLinkService.getStatus.mockResolvedValue({ data: {
+      available: true, can_allocate: true, gpu_allocation_status: 'running', gpu_allocation_gpu_count: 2,
+    } })
+    await wrapper.findAll('button').find(button => button.text() === 'Check GPU status again').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('A GPU allocation is ready for this session.')
+    wrapper.unmount()
   })
 
   it('filters mapping source steps and outputs by compatibility in the rendered view', async () => {

@@ -1,10 +1,13 @@
 import unittest
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
+from uuid import uuid4
 from fastapi import Request
 from fastapi.testclient import TestClient
 from app.auth_store import AuthenticatedUser
 from app.main import app
 from app.limiter import limiter
+from app.schemas.apps import WebHdpSessionCreateResponse
 from app.security import get_api_key
 
 
@@ -74,6 +77,38 @@ class TestSecurityHardening(unittest.TestCase):
             )
             self.assertEqual(response.status_code, 403)
             self.assertIn("limited to WebHDP", response.json()["detail"])
+
+    @patch('app.security.get_settings')
+    def test_legacy_key_authenticates_only_the_exact_allocation_recovery_routes(self, mock_settings):
+        mock_settings.return_value.api_key = "test-recovery-key"
+        mock_settings.return_value.legacy_api_key_auth_enabled = True
+        mock_settings.return_value.legacy_api_key_allowed_partitions = ["gpu"]
+        headers = {"X-API-Key": "test-recovery-key"}
+        path = "/api/apps/webhdp/sessions/requests"
+        request_id = str(uuid4())
+        now = datetime.now(timezone.utc)
+        session = WebHdpSessionCreateResponse(
+            session_id=request_id, app_id="webhdp", job_id="12345", partition="gpu", gpu_count=1,
+            remote_session_dir="/work/session", input_dir="/work/session/inputs", output_dir="/work/session/outputs",
+            status="queued", created_at=now, expires_at=now,
+        )
+        service = "app.routers.apps.hpc_application_service"
+
+        with (patch(f"{service}.create_webhdp_session", new_callable=AsyncMock, return_value=session) as submit,
+              patch(f"{service}.get_webhdp_session_request", new_callable=AsyncMock, return_value=session) as recover):
+            self.assertEqual(self.client.post(path, json={"request_id": request_id, "partition": "gpu"},
+                                              headers=headers).status_code, 200)
+            self.assertEqual(self.client.get(f"{path}/{request_id}", headers=headers).status_code, 200)
+            self.assertEqual(self.client.get(f"{path}/not-a-uuid", headers=headers).status_code, 403)
+            self.assertEqual(self.client.get(f"{path}/{request_id}").status_code, 403)
+
+        submit.assert_awaited_once()
+        recover.assert_awaited_once()
+        principal = submit.call_args.args[1]
+        self.assertEqual(principal.username, "service-api-key")
+        self.assertFalse(principal.is_admin)
+        self.assertEqual(principal.allowed_partitions, ["gpu"])
+        self.assertEqual(recover.call_args.args, (request_id, principal))
 
     @patch('app.security.get_settings')
     def test_health_check_bypass(self, mock_settings):

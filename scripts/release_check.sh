@@ -87,8 +87,15 @@ compose_config_quiet
 echo "==> Docker Compose production validation"
 compose_config_quiet -f docker-compose.prod.yml
 
+echo "==> Docker Compose model publication overlay validation"
+compose_config_quiet -f docker-compose.prod.yml -f docker-compose.model-publication.yml
+
 echo "==> Docker Compose local EDM validator overlay validation"
 compose_config_quiet -f docker-compose.yml -f docker-compose.edm-validator.yml
+
+echo "==> Docker Compose model publication with local EDM validator validation"
+LOCAL_EDM_VALIDATOR_URL=http://local-edm-validator:8080 \
+compose_config_quiet -f docker-compose.prod.yml -f docker-compose.model-publication.yml -f docker-compose.edm-validator.yml
 
 echo "==> Docker Compose HPC overlay validation"
 compose_config_quiet -f docker-compose.yml -f docker-compose.hpc.yml
@@ -139,5 +146,6 @@ bash -n scripts/release_check.sh
 bash -n scripts/scheduled_backup.sh
 bash -n scripts/pre_update.sh
 bash -n scripts/build_images.sh
+bash -n scripts/setup_local_edm_validator.sh
 
 echo "Release check completed successfully."

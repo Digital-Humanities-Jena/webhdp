@@ -249,7 +249,9 @@
           :validation-result="validationResult"
           :preflight-result="preflightResult"
           :preflight-session-id="preflightSessionId"
-          :uses-hpc="editor.steps.some(step => step.enabled !== false && step.execution_profile_ref === 'hpc_singularity')"
+          :uses-hpc="usesHpc"
+          :gpu-count="requiredGpuCount"
+          :hpc-component-keys="selectedGuidance?.hpc_component_keys"
           :preflight-file-paths-text="preflightFilePathsText"
           :constructor-session-files="constructorSessionFiles"
           :constructor-session-directories="constructorSessionDirectories"
@@ -412,11 +414,18 @@ const editor = reactive(createEmptyEditor())
 const cleanEditorSnapshot = ref(JSON.stringify(editor))
 const savedEditorSnapshot = ref('')
 const loadedPipelineConfig = ref(null)
+const loadedPipelineGuidance = ref(null)
 const loadedPipelineId = ref('')
 const loadFailed = ref(false)
 let pipelineLoadToken = 0
 const busy = computed(() => loading.value || saving.value || validating.value || preflighting.value || persistentRun.submitting.value || importingComponent.value || validatingComponent.value)
 const isDirty = computed(() => JSON.stringify(editor) !== cleanEditorSnapshot.value)
+const selectedGuidance = computed(() => isDirty.value ? null : loadedPipelineGuidance.value)
+const requiredGpuCount = computed(() => selectedGuidance.value?.largest_step_resources?.gpu_count
+  || Number(Boolean(selectedGuidance.value?.requires_gpu)))
+const usesHpc = computed(() => selectedGuidance.value?.requires_hpc ?? editor.steps.some(step =>
+  step.enabled !== false && (step.execution_profile_ref === 'hpc_singularity'
+    || getComponentProfiles(step).some(profile => profile.id === step.execution_profile_ref && profile.adapter === 'hpc_link'))))
 const executionBlockedReason = computed(() => {
   if (executingPipeline.value) return 'A run is active. Follow its progress below; you can leave and reconnect later.'
   if (busy.value) return 'Wait for the current operation to finish.'
@@ -748,6 +757,7 @@ function resetEditor() {
   savedEditorSnapshot.value = ''
   loadedPipelineId.value = ''
   loadedPipelineConfig.value = null
+  loadedPipelineGuidance.value = null
   pipelineExecutionResult.value = null
   undoSteps.value = null
 }
@@ -856,6 +866,7 @@ async function loadPipeline(identifier) {
   savedComponents.value = response.data.pipeline.components || []
   hydrateEditor(config)
   loadedPipelineConfig.value = clone(config)
+  loadedPipelineGuidance.value = response.data.pipeline.guidance || null
   loadedPipelineId.value = identifier
   selectedPipelineId.value = identifier
 }

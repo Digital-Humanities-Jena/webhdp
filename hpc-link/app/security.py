@@ -23,6 +23,8 @@ SERVICE_PRINCIPAL_ID = -1
 LEGACY_API_KEY_ALLOWED_ROUTES = (
     ("GET", re.compile(r"^/api/apps$")),
     ("POST", re.compile(r"^/api/apps/webhdp/sessions$")),
+    ("POST", re.compile(r"^/api/apps/webhdp/sessions/requests$")),
+    ("GET", re.compile(r"^/api/apps/webhdp/sessions/requests/[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$")),
     ("GET", re.compile(r"^/api/apps/webhdp/sessions/[^/]+$")),
     ("GET", re.compile(r"^/api/apps/webhdp/sessions/[^/]+/logs$")),
     ("POST", re.compile(r"^/api/apps/webhdp/sessions/[^/]+/stage/cloud$")),

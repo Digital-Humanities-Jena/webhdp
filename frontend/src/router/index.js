@@ -9,7 +9,7 @@ const routes = [
     path: '/',
     name: 'Landing',
     component: () => import('@/views/public/LandingView.vue'),
-    meta: { publicRoute: true, redirectAuthenticated: '/workflow/upload' }
+    meta: { publicRoute: true, redirectAuthenticated: '/dashboard' }
   },
   {
     path: '/setup',
@@ -27,9 +27,14 @@ const routes = [
     component: () => import('@/views/auth/RegisterView.vue')
   },
   {
-    path: '/verify-email/:token',
+    path: '/verify-email/:token?',
     name: 'VerifyEmail',
     component: () => import('@/views/auth/VerifyEmailView.vue')
+  },
+  {
+    path: '/institution-invitation',
+    name: 'InstitutionInvitation',
+    component: () => import('@/views/account/InstitutionInvitationView.vue')
   },
   {
     path: '/docs',
@@ -93,6 +98,11 @@ const routes = [
         path: 'model-publication',
         name: 'ModelPublication',
         component: () => import('@/views/workflow/ModelPublicationView.vue'),
+      },
+      {
+        path: 'tutorial/3d',
+        name: 'ModelPublicationTutorial',
+        component: () => import('@/views/workflow/ModelPublicationTutorialView.vue'),
       },
       {
         path: 'link/jobs',
@@ -453,9 +463,19 @@ const routes = [
         component: () => import('@/views/link/ConnectedApplicationsView.vue'),
       },
       {
+        path: 'account/setup',
+        name: 'AccountSetup',
+        component: () => import('@/views/account/AccountSetupView.vue'),
+      },
+      {
         path: 'account/configuration',
         name: 'AccountConfiguration',
         component: () => import('@/views/account/AccountConfigurationView.vue'),
+      },
+      {
+        path: 'account/usage',
+        name: 'AccountUsage',
+        component: () => import('@/views/account/AccountUsageView.vue'),
       },
       {
         path: 'account/institutions',
@@ -477,11 +497,14 @@ const router = createRouter({
   routes,
   scrollBehavior(to, from, savedPosition) {
     if (savedPosition) return savedPosition
-    if (to.hash) return { el: to.hash, top: 16 }
+    if (to.hash && !['VerifyEmail', 'InstitutionInvitation'].includes(to.name)) return { el: to.hash, top: 16 }
     if (to.path === from.path) return false
     return { top: 0, left: 0 }
   }
 })
+
+const loginReturnRoutes = new Set(['LinkAuthorize', 'LinkedProcessing', 'LinkedProcessingDetail', 'ModelPublication', 'ModelPublicationTutorial', 'Onboarding', 'AccountSetup'])
+const firstVisitRoutes = new Set(['Onboarding', 'ModelPublicationTutorial', 'ModelPublication', 'AccountSetup', 'AccountConfiguration', 'AccountUsage', 'InstitutionWorkspace', 'HpcResources', 'LinkAuthorize', 'ConnectedApplications', 'LinkedProcessing', 'LinkedProcessingDetail'])
 
 // Navigation guard
 router.beforeEach(async (to, from, next) => {
@@ -515,7 +538,7 @@ router.beforeEach(async (to, from, next) => {
   }
 
   if (to.meta.requiresAuth && !authStore.isAuthenticated) {
-    next(['LinkAuthorize', 'LinkedProcessing', 'LinkedProcessingDetail', 'ModelPublication'].includes(to.name) ? { path: '/login', query: { redirect: to.fullPath } } : '/login')
+    next(loginReturnRoutes.has(to.name) ? { path: '/login', query: { redirect: to.fullPath } } : '/login')
   } else if (to.meta.requiresAuth) {
     if (!authStore.user) {
       await authStore.fetchCurrentUser()
@@ -528,7 +551,7 @@ router.beforeEach(async (to, from, next) => {
       next(to.name === 'ModelPublication' ? undefined : '/model-publication')
       return
     }
-    if (authStore.user?.onboarding_required && to.name !== 'Onboarding' && to.name !== 'AccountConfiguration' && to.name !== 'HpcResources' && to.name !== 'LinkAuthorize' && to.name !== 'ConnectedApplications' && !['LinkedProcessing', 'LinkedProcessingDetail'].includes(to.name)) {
+    if (authStore.user?.onboarding_required && !firstVisitRoutes.has(to.name)) {
       next('/onboarding')
       return
     }

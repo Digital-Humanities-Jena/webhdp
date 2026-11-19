@@ -22,6 +22,7 @@ import yaml
 from flask import current_app
 from itsdangerous import URLSafeTimedSerializer, BadSignature
 from services.registry_lock import serialize_registry, OperationConflict, registry_lock
+from services.native_run_quota import admit_native_run
 
 from constants import (
     HMSM_COMPONENT_KEYS,
@@ -59,7 +60,7 @@ from database.models import (
     User,
     UserRole,
 )
-from exceptions import FileProcessingError, ResourceNotFoundError, ValidationError
+from exceptions import FileProcessingError, ResourceNotFoundError, SecurityError, ValidationError
 from schemas.native_pipeline_schemas import (
     ComponentManifestSchema,
     PipelineConstructorPreflightRequestSchema,
@@ -796,7 +797,7 @@ class NativePipelineSystemService:
             raise ResourceNotFoundError("Session not found")
         user = db.session.get(User, int(user_id)) if user_id is not None else None
         permission = can_edit_session if edit else can_view_session
-        if not permission(session_row, user):
+        if not user or not user.is_verified or user.force_password_change or not permission(session_row, user):
             raise ResourceNotFoundError("Requested session resource was not found")
         if edit and not is_session_mutable(session_row):
             raise OperationConflict("Explorer-only sessions cannot run components.")
@@ -1109,8 +1110,9 @@ class NativePipelineSystemService:
                                      "_readiness_state": readiness['_state'], "_dispatch": {"state": "preparing", "owner": process_owner()}}),
             started_at=datetime.utcnow(),
         )
-        db.session.add(pipeline_run)
-        db.session.commit()
+        with admit_native_run(initiated_by_user_id):
+            db.session.add(pipeline_run)
+            db.session.commit()
         return {
             "run_id": pipeline_run.public_id,
             "pipeline_identifier": canonical_identifier,
@@ -1172,14 +1174,16 @@ class NativePipelineSystemService:
                 ),
                 started_at=datetime.utcnow(),
             )
-            db.session.add(pipeline_run)
+            with admit_native_run(pipeline_run.initiated_by_user_id):
+                db.session.add(pipeline_run)
+                db.session.commit()
         else:
             pipeline_run.status = PipelineRunStatus.RUNNING
             pipeline_run.pipeline_definition_id = definition.id
             pipeline_run.pipeline_version_id = version_row.id
             pipeline_run.session_id = execution_context.get("db_session_id")
             pipeline_run.started_at = pipeline_run.started_at or datetime.utcnow()
-        db.session.commit()
+            db.session.commit()
 
         try:
             result = self._run_native_pipeline(config, version_row, pipeline_run, execution_context)
@@ -1272,8 +1276,9 @@ class NativePipelineSystemService:
                     status=PipelineRunStatus.PENDING, request_json=_json_dumps(request_payload),
                     started_at=datetime.utcnow(),
                 )
-                db.session.add(run)
-                db.session.commit()
+                with admit_native_run(user_id):
+                    db.session.add(run)
+                    db.session.commit()
                 return self._serialize_playground_run(run)
 
     def execute_playground(self, payload: Dict[str, Any], user_id: Optional[int] = None) -> Dict[str, Any]:
@@ -1329,8 +1334,9 @@ class NativePipelineSystemService:
         workdir = os.path.join(session_row.session_dir, "playground", run_id)
         os.makedirs(workdir, exist_ok=True)
         adapter_name = profile.adapter
-        execution_context = {"db_session_id": session_row.id, "initiated_by_user_id": user_id, "outputs_dir": workdir}
-        if self._should_route_component_to_hpc_link(component_definition.key, session_row.id, user_id):
+        execution_context = {"db_session_id": session_row.id, "initiated_by_user_id": user_id, "outputs_dir": workdir,
+                             "hpc_purpose": "playground"}
+        if self._should_route_component_to_hpc_link(component_definition.key, session_row.id, user_id, purpose="playground"):
             adapter_name = "hpc_link"
         elif adapter_name == "hpc_link":
             self._ensure_component_runtime_available(
@@ -1351,7 +1357,7 @@ class NativePipelineSystemService:
             inputs=payload['inputs'],
             parameters=payload['parameters'],
             metadata={"manifest": manifest, "timeout_seconds": component_execution_timeout(manifest, payload.get('timeout_seconds', 3600)),
-                      "session_id": session_row.id, "initiated_by_user_id": user_id},
+                      "session_id": session_row.id, "initiated_by_user_id": user_id, "execution_context": execution_context},
         )
         adapter = self._adapter_registry.get(adapter_name)
         if adapter is None:
@@ -1687,16 +1693,19 @@ class NativePipelineSystemService:
         config = _json_loads(version_row.config_json, {}) if version_row else {}
         from services.pipeline_guidance import pipeline_guidance
         manifests = {}
+        selected_profiles = {}
         persisted_steps = {step.step_key: step for step in version_row.steps} if version_row else {}
         for step in config.get('steps', []):
             if not step.get('enabled', True):
                 continue
-            key = step.get('component_ref') or step.get('id')
             try:
                 persisted = persisted_steps.get(step.get('id'))
                 component_version = db.session.get(ComponentVersion, persisted.component_version_id) if persisted and persisted.component_version_id else None
-                manifests[step['id']] = _json_loads(component_version.manifest_json, {}) if component_version else self._get_component_manifest_by_key(key, step.get('component_version'))
-            except ValidationError:
+                component_version = component_version or self._step_component_version(step)
+                manifests[step['id']] = _json_loads(component_version.manifest_json, {})
+                profile = self._get_profile_row(component_version, step.get('execution_profile_ref'))
+                selected_profiles[step['id']] = {**self._profile_payload(profile), 'runtime': profile.runtime}
+            except (ValidationError, ResourceNotFoundError, OperationConflict):
                 continue
         return {
             "identifier": definition.identifier,
@@ -1708,7 +1717,7 @@ class NativePipelineSystemService:
             "version": version_row.version if version_row else None,
             "tags": _json_loads(definition.tags_json, []),
             "config": config,
-            "guidance": pipeline_guidance(config, manifests),
+            "guidance": pipeline_guidance(config, manifests, selected_profiles),
         }
 
     def _serialize_pipeline_definition(self, definition: PipelineDefinition) -> Dict[str, Any]:
@@ -3905,15 +3914,15 @@ class NativePipelineSystemService:
     def _component_can_use_hpc_link(self, component_key: str) -> bool:
         return hpc_required_component(component_key)
 
-    def _has_active_hpc_allocation(self, session_id: Any, user_id=None) -> bool:
+    def _has_active_hpc_allocation(self, session_id: Any, user_id=None, *, purpose="workflow") -> bool:
         try:
             if session_id in (None, "") or not hasattr(current_app, "hpc_allocation_service"):
                 return False
-            return current_app.hpc_allocation_service.get_active_for_session(int(session_id), user_id=user_id) is not None
+            return current_app.hpc_allocation_service.get_active_for_session(int(session_id), user_id=user_id, purpose=purpose) is not None
         except Exception:
             return False
 
-    def _should_route_component_to_hpc_link(self, component_key: str, session_id: Any, user_id=None) -> bool:
+    def _should_route_component_to_hpc_link(self, component_key: str, session_id: Any, user_id=None, *, purpose="workflow") -> bool:
         if not self._component_can_use_hpc_link(component_key):
             return False
         try:
@@ -3922,7 +3931,7 @@ class NativePipelineSystemService:
                 return False
         except Exception:
             return False
-        return self._has_active_hpc_allocation(session_id, user_id)
+        return self._has_active_hpc_allocation(session_id, user_id, purpose=purpose)
 
     def _local_component_health(self, component_key: str) -> bool:
         try:
@@ -3943,7 +3952,8 @@ class NativePipelineSystemService:
     ) -> None:
         if not hpc_only and not self._component_can_use_hpc_link(component_key):
             return
-        if self._has_active_hpc_allocation(execution_context.get("db_session_id"), execution_context.get("initiated_by_user_id")):
+        if self._has_active_hpc_allocation(execution_context.get("db_session_id"), execution_context.get("initiated_by_user_id"),
+                                           purpose=execution_context.get("hpc_purpose", "workflow")):
             return
         hpc_link_available = False
         try:
@@ -4837,7 +4847,7 @@ class NativePipelineSystemService:
 
         db_session_id = execution_context.get("db_session_id")
         allocation = current_app.hpc_allocation_service.get_active_for_session(
-            int(db_session_id), user_id=execution_context.get("initiated_by_user_id"),
+            int(db_session_id), user_id=execution_context.get("initiated_by_user_id"), purpose=execution_context.get("hpc_purpose", "workflow"),
         ) if db_session_id else None
         if allocation is None:
             raise FileProcessingError("Cannot materialize HPC artifacts without an active HPC-Link allocation.")
@@ -5349,11 +5359,14 @@ class NativePipelineSystemService:
                 "outputs": {"draft": prepared_draft},
                 "command": ["builtin_webhdp", "zenodo_draft"],
             }
+        access_token = str(execution_context.get("access_token") or "").strip()
+        if not access_token:
+            raise SecurityError("An authorized Zenodo credential is required to create a draft.")
         try:
             draft_result = create_local_zenodo_draft(
                 execution_context["hdpc_path"],
                 record_context["record_id"],
-                access_token=execution_context.get("access_token"),
+                access_token=access_token,
             )
         except Exception as exc:
             raise FileProcessingError(
@@ -5587,13 +5600,16 @@ class NativePipelineSystemService:
                 allow_allowed_versioning=resolution_action == "create_version",
                 exclude_current_record=True,
             )
+        access_token = str(execution_context.get("access_token") or "").strip()
+        if not access_token:
+            raise SecurityError("An authorized Zenodo credential is required to upload files.")
         try:
             upload_result = upload_local_zenodo_files(
                 execution_context["hdpc_path"],
                 record_context["record_id"],
                 publish=bool(step_config.get("parameters", {}).get("publish", False)),
                 prune_inherited_files=resolution_action == "create_version",
-                access_token=execution_context.get("access_token"),
+                access_token=access_token,
             )
         except Exception as exc:
             raise FileProcessingError(

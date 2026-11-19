@@ -33,6 +33,7 @@ class TestNativePipelineRoutes(unittest.TestCase):
         setup_error_handlers(self.app)
 
         self.app.native_pipeline_service = MagicMock()
+        self.app.native_pipeline_service.create_pending_run.return_value = {"run_id": "run-123"}
         self.app.component_installer_service = MagicMock()
         self.app.register_blueprint(pipeline_bp, url_prefix="/api/v1/pipelines")
         self.app.register_blueprint(pipeline_v2_bp, url_prefix="/api/v2")
@@ -161,7 +162,7 @@ class TestNativePipelineRoutes(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.get_json()
         self.assertEqual(payload["data"]["run_id"], "run-123")
-        self.app.native_pipeline_service.get_pipeline_run.assert_called_once_with("run-123")
+        self.app.native_pipeline_service.get_pipeline_run.assert_called_once_with("run-123", self.user_id)
 
     def test_v1_execution_status_route_returns_404_for_unknown_native_run(self):
         self.app.native_pipeline_service.get_pipeline_run.side_effect = ResourceNotFoundError("missing")
@@ -199,6 +200,20 @@ class TestNativePipelineRoutes(unittest.TestCase):
         self.assertTrue(payload["success"])
         self.assertEqual(payload["data"]["result"]["run_id"], "run-123")
         self.assertEqual(payload["data"]["result"]["pipeline_version"], "1.1.0")
+        self.assertEqual(execute_submission_pipeline.call_args.kwargs['precreated_run_public_id'], 'run-123')
+
+    def test_v1_and_v2_reject_account_processing_quota_before_dispatch(self):
+        from database.models import Submission
+        from services.native_run_quota import NativeRunQuotaExceeded
+
+        self.app.native_pipeline_service.create_pending_run.side_effect = NativeRunQuotaExceeded(details={'active': 3, 'active_limit': 3})
+        body = {'session_id': self.session_id, 'local_file_paths': ['/tmp/session-routes/uploads/model.glb'], 'async_execution': True}
+        for endpoint in ('/api/v1/pipelines/render/execute_on_local_files', '/api/v2/pipelines/render/execute'):
+            response = self.client.post(endpoint, json=body, headers=self._headers())
+            self.assertEqual(response.status_code, 429)
+            self.assertEqual(response.get_json()['error']['code'], 'NATIVE_PROCESSING_QUOTA')
+        with self.app.app_context():
+            self.assertEqual(Submission.query.count(), 0)
 
     @patch("services.submission_pipeline_service.execute_submission_pipeline")
     def test_v1_concurrent_execution_returns_conflict_without_failing_active_session(self, execute):

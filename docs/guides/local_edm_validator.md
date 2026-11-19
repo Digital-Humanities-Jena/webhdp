@@ -90,9 +90,23 @@ docker compose -f docker-compose.yml -f docker-compose.edm-validator.yml up -d -
 ```
 
 The setup script checks out upstream commit
-`b1ba67802ae1581c88ba8ea0ae9740cf663a0176` and applies the tracked WebHDP patch
-`patches/local-edm-validator/webhdp-dockerfile-local.patch`. This keeps the
-release reproducible without vendoring the upstream validator source.
+`b1ba67802ae1581c88ba8ea0ae9740cf663a0176` and applies the Docker build and
+EDM resource patches in [`patches/local-edm-validator`](../../patches/local-edm-validator).
+Run setup again before rebuilding an existing checkout of that commit. It
+keeps an applied Dockerfile patch and upgrades the resource URLs independently.
+
+The resource patch pairs the validator's bundled 2024 schema with the official
+2024-11-27 schema archive, April 2026 sorter and a transformation pinned to
+Europeana Metis commit `cb34feb8e328c37ac5986d11095cf72da90a43cf`.
+The validator reads both complete schema entries, including their root XSD
+and Schematron paths. Use the full entries if you mirror the archives. A newer
+transformation may add terms that the bundled schema rejects.
+
+| Resource | SHA-256 |
+| --- | --- |
+| `europeana_schemas-20241127.zip` | `722cfb4092aacb2866800f524d9a28b6a620bd15d674f645ff30db43ab8e07e8` |
+| `edm_sorter-20260409.xsl` | `e4f45fb040399f1641cc981cb6df5da91e5a9091da738329b52367e97eb01d2e` |
+| `default_transformation.xslt` | `1237d3379ad121046578394d8dc29be730e648169a1b89e2b417e2090e2fdb4e` |
 
 Production deployments should use the same overlay with `docker-compose.prod.yml` or provide an equivalent always-on validator endpoint:
 
@@ -167,7 +181,7 @@ Expected status response shape:
 - Keep `LOCAL_EDM_VALIDATOR_REQUIRED=true` in deployments. With required validation, EDM output is not considered successfully generated unless the local validator accepts it.
 - Keep `EMIT_EUROPEANA_3D_ADVISORY_FIELDS=false` until the active local validator schema accepts the newer Europeana 3D advisory fields (`schema:digitalSourceType`, `edm:intendedUsage`, and 3D count properties). WebHDP still emits validator-compatible 3D identifiers such as `edm:type` and `dc:type`.
 - `ENABLE_LOCAL_EDM_VALIDATION=false` is only for isolated developer troubleshooting; deployments should leave it enabled and run the managed validator overlay.
-- The UI status card proves reachability and metadata visibility, but the strongest functional check is a template validation run from Settings -> EDM Templates.
+- Check reachability in **Settings → EDM Config**. Before rollout, generate a representative EDM attachment with the target WebHDP worker and confirm `VALIDATE_EXTERNAL` and `VALIDATE_INTERNAL` both pass. Check that an invalid fixture is rejected.
 
 ## Troubleshooting
 

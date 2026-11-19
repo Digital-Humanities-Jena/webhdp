@@ -1,7 +1,7 @@
 """Application gateway endpoints for pre-specified app integrations."""
 from uuid import UUID
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from app.limiter import limiter
 from app.schemas.apps import (
@@ -270,6 +270,22 @@ async def stop_marker_session(request: Request, session_id: str):
 async def create_webhdp_session(request: Request, payload: WebHdpSessionCreateRequest):
     """Create a reusable allocation for WebHDP component execution."""
     return await hpc_application_service.create_webhdp_session(payload, get_request_user(request))
+
+
+@router.post("/webhdp/sessions/requests", response_model=WebHdpSessionCreateResponse)
+@limiter.limit("5/minute")
+async def submit_webhdp_session_request(request: Request, payload: WebHdpSessionCreateRequest):
+    """Submit a WebHDP allocation with a durable request identity."""
+    if payload.request_id is None:
+        raise HTTPException(status_code=422, detail="Allocation request ID is required")
+    return await hpc_application_service.create_webhdp_session(payload, get_request_user(request))
+
+
+@router.get("/webhdp/sessions/requests/{request_id}", response_model=WebHdpSessionCreateResponse | None)
+@limiter.limit("30/minute")
+async def get_webhdp_session_request(request: Request, request_id: UUID):
+    """Recover the handle for an allocation whose submit response was lost."""
+    return await hpc_application_service.get_webhdp_session_request(str(request_id), get_request_user(request))
 
 
 @router.post("/webhdp/reservations/inspect", response_model=WebHdpReservationFacts)

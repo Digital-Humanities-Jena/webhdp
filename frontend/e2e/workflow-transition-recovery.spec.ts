@@ -33,6 +33,7 @@ for (const width of [375, 1280]) {
   test(`lost single-file acknowledgement recovers once at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1000 })
     await shell(page)
+    await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: /new upload/i }).click()
     let uploads = 0
     let token = ''
     await page.route(apiV1('/sessions/file'), async route => {

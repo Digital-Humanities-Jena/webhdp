@@ -5,8 +5,8 @@ export default {
     return api.get('/institutions', { params })
   },
 
-  suggestInstitutions(query, params = {}) {
-    return api.get('/institutions/suggestions', { params: { ...params, q: query } })
+  suggestInstitutions(query, params = {}, options = {}) {
+    return api.get('/institutions/suggestions', { ...options, params: { ...params, q: query } })
   },
 
   configureAffiliation(payload) {
@@ -27,6 +27,38 @@ export default {
 
   listMemberships(institutionId) {
     return api.get(`/institutions/${institutionId}/memberships`)
+  },
+
+  listInvitations(institutionId, params = {}) {
+    return api.get(`/institutions/${institutionId}/invitations`, { params, suppressGlobalError: true })
+  },
+
+  sendInvitation(institutionId, payload) {
+    return api.post(`/institutions/${institutionId}/invitations`, payload, { suppressGlobalError: true })
+  },
+
+  revokeInvitation(institutionId, invitationId) {
+    return api.delete(`/institutions/${institutionId}/invitations/${invitationId}`, { suppressGlobalError: true })
+  },
+
+  acceptInvitation(token) {
+    return api.post('/institutions/invitations/accept', { token }, { suppressGlobalError: true })
+  },
+
+  previewInvitation(token) {
+    return api.post('/institutions/invitations/preview', { token }, { suppressGlobalError: true })
+  },
+
+  listWorkspaceRequests(params = {}) {
+    return api.get('/institutions/workspace-requests', { params, suppressGlobalError: true })
+  },
+
+  requestWorkspace(payload) {
+    return api.post('/institutions/workspace-requests', payload, { suppressGlobalError: true })
+  },
+
+  decideWorkspaceRequest(requestId, payload) {
+    return api.patch(`/institutions/workspace-requests/${requestId}/decision`, payload, { suppressGlobalError: true })
   },
 
   listAuditEvents(institutionId, params = {}) {

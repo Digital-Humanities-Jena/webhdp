@@ -1,17 +1,28 @@
 import logging
 import re
-import secrets
 from typing import Optional
 
+from sqlalchemy import func, or_
+
 from database.database import db
-from database.models import InstitutionMembership, User, UserRole
+from database.models import InstitutionMembership, User, UserMfaChallenge, UserRole
 from exceptions import ValidationError, ResourceNotFoundError
+from services.email_identity import email_for_delivery, normalize_email
 from services.notification_service import notify_admins
 
 logger = logging.getLogger(__name__)
 
 
 INTERNAL_PROFILE_VISIBILITIES = {"private", "internal"}
+
+
+def validate_new_password(password: object) -> None:
+    if not isinstance(password, str) or not 8 <= len(password) <= 128:
+        raise ValidationError("Choose a password between 8 and 128 characters.")
+    try:
+        password.encode("utf-8")
+    except UnicodeError as exc:
+        raise ValidationError("Choose a password with valid Unicode characters.") from exc
 
 
 def slugify_user_profile(value: str) -> str:
@@ -39,80 +50,86 @@ def _unique_user_slug(base_value: str, *, exclude_user_id: int | None = None) ->
 class UserService:
     """Service for user management and authentication"""
 
-    def create_user(self, email: str, password: str, role: UserRole = UserRole.USER) -> User:
-        """
-        Create a new user account.
-
-        Args:
-            email: User email address
-            password: Plain text password
-            role: User role (default: UserRole.USER)
-
-        Returns:
-            User: Created user object
-
-        Raises:
-            ValidationError: If user already exists
-        """
-        # Check if user exists
-        existing_user = User.query.filter_by(email=email).first()
-        if existing_user:
-            raise ValidationError("Email already registered")
-
-        # Create new user
-        verification_token = secrets.token_urlsafe(32)
+    def add_user(self, email: str, password: str, *, role: UserRole = UserRole.USER, verified: bool = False) -> User:
+        """Add an account to the caller's database transaction."""
+        email = email_for_delivery(email)
         user = User(
             email=email,
+            canonical_email=normalize_email(email),
             slug=_unique_user_slug(email.split("@", 1)[0]),
             role=role,
-            is_verified=(role == UserRole.ADMIN),  # Admins auto-verified if created via CLI/seed
-            verification_token=verification_token,
+            is_verified=verified,
             onboarding_required=(role == UserRole.USER),
         )
         user.set_capabilities([])
         user.set_password(password)
-
         db.session.add(user)
-        db.session.commit()
-
-        notify_admins(
-            exclude_user_id=user.id,
-            notification_type="admin.user_registered",
-            category="admin",
-            severity="info",
-            title="New user registered",
-            body=f"{user.email} created a WebHDP account.",
-            entity_type="user",
-            entity_id=user.id,
-            action_url=f"/profiles/users/{user.slug or user.public_id or user.id}",
-            payload={"user_id": user.id, "email": user.email, "role": user.role.value if user.role else "user"},
-            dedupe_key=f"admin:user_registered:{user.id}",
-        )
-        db.session.commit()
-
-        logger.info(f"User created: {email} with role {role.value}. Verified: {user.is_verified}")
         return user
 
-    def verify_user(self, token: str) -> Optional[User]:
-        """
-        Verify user using the verification token.
-
-        Args:
-            token: Verification token sent via email
-
-        Returns:
-            User: The verified user object if successful, None otherwise
-        """
-        user = User.query.filter_by(verification_token=token).first()
-        if not user:
-            return None
-
-        user.is_verified = True
-        user.verification_token = None  # Clear token after use
+    def create_user(self, email: str, password: str, role: UserRole = UserRole.USER) -> User:
+        """Create an account from a trusted caller, such as CLI bootstrap."""
+        if self.find_accounts_for_email(email):
+            raise ValidationError("Email already registered")
+        user = self.add_user(email, password, role=role, verified=role == UserRole.ADMIN)
         db.session.commit()
-
-        logger.info(f"User verified: {user.email}")
+        self.notify_registration(user)
+        logger.info("User created: user_id=%s, role=%s", user.id, role.value)
         return user
+
+    def set_initial_admin_credentials(self, email: str, password: str) -> User:
+        """Initialize the configured administrator using operator-provided credentials."""
+        validate_new_password(password)
+        accounts = self.find_accounts_for_email(email)
+        if len(accounts) > 1:
+            raise ValidationError("This email matches multiple accounts. Resolve the legacy address conflict first.")
+        if accounts:
+            user = accounts[0]
+            user.role = UserRole.ADMIN
+            user.is_verified = True
+            user.canonical_email = normalize_email(email)
+            user.legacy_canonical_email = None
+            user.verification_token = None
+            user.token_version = int(user.token_version or 0) + 1
+            user.force_password_change = False
+            user.onboarding_required = False
+            user.set_password(password)
+            self.invalidate_pending_mfa(user)
+        else:
+            user = self.add_user(email, password, role=UserRole.ADMIN, verified=True)
+        db.session.commit()
+        return user
+
+    def invalidate_pending_mfa(self, user: User) -> None:
+        UserMfaChallenge.query.filter_by(user_id=user.id, consumed_at=None).delete(synchronize_session=False)
+
+    def notify_registration(self, user: User) -> None:
+        try:
+            notify_admins(
+                exclude_user_id=user.id,
+                notification_type="admin.user_registered",
+                category="admin",
+                severity="info",
+                title="New user registered",
+                body=f"{user.email} created a WebHDP account.",
+                entity_type="user",
+                entity_id=user.id,
+                action_url=f"/profiles/users/{user.slug or user.public_id or user.id}",
+                payload={"user_id": user.id, "email": user.email, "role": user.role.value if user.role else "user"},
+                dedupe_key=f"admin:user_registered:{user.id}",
+            )
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            logger.exception("Could not notify administrators of verified user ID %s.", user.id)
+
+    def find_accounts_for_email(self, email: str) -> list[User]:
+        """Return up to two accounts so callers can detect legacy identity collisions."""
+        key = normalize_email(email)
+        return User.query.filter(or_(
+            User.canonical_email == key,
+            User.legacy_canonical_email == key,
+            func.lower(User.email) == key,
+        )).order_by(User.id).limit(2).all()
 
     def authenticate(self, email: str, password: str) -> Optional[User]:
         """
@@ -126,6 +143,11 @@ class UserService:
             User object if authenticated, None otherwise
         """
         user = User.query.filter_by(email=email).first()
+        if user is None:
+            try:
+                user = self.get_by_email(email)
+            except ValidationError:
+                return None
         if user and user.check_password(password):
             return user
         return None
@@ -149,31 +171,9 @@ class UserService:
         return user
 
     def get_by_email(self, email: str) -> Optional[User]:
-        """Get user by email address"""
-        return User.query.filter_by(email=email).first()
-
-    def update_email(self, user: User, email: str) -> User:
-        """
-        Update user's email address.
-
-        Raises:
-            ValidationError: If email is invalid or already in use.
-        """
-        normalized_email = (email or "").strip()
-        if not normalized_email:
-            raise ValidationError("Email is required")
-
-        if normalized_email == user.email:
-            return user
-
-        existing_user = User.query.filter_by(email=normalized_email).first()
-        if existing_user and existing_user.id != user.id:
-            raise ValidationError("Email already registered")
-
-        user.email = normalized_email
-        db.session.commit()
-        logger.info(f"Updated email for user_id={user.id}")
-        return user
+        """Get an account by its canonical email when that identity is unambiguous."""
+        accounts = self.find_accounts_for_email(email)
+        return accounts[0] if len(accounts) == 1 else None
 
     def update_password(self, user: User, current_password: str, new_password: str) -> User:
         """
@@ -197,6 +197,7 @@ class UserService:
         user.set_password(new_password)
         user.force_password_change = False
         user.token_version = int(user.token_version or 0) + 1
+        self.invalidate_pending_mfa(user)
         db.session.commit()
         logger.info(f"Updated password for user_id={user.id}")
         return user
@@ -210,8 +211,8 @@ class UserService:
     def update_profile(self, user: User, payload: dict) -> User:
         data = payload or {}
 
-        if "email" in data:
-            self.update_email(user, data.get("email"))
+        if "email" in data and str(data.get("email") or "").strip() != user.email:
+            raise ValidationError("Changing the verified sign-in email requires account support.")
 
         for field in ("display_name", "full_name", "affiliation", "orcid", "bio", "website_url", "avatar_url"):
             if field not in data:

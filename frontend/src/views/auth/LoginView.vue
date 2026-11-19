@@ -2,22 +2,23 @@
   <div class="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
     <div class="max-w-md w-full space-y-8">
       <div>
-        <h2 class="mt-6 text-center text-3xl font-extrabold text-gray-900">
+        <h1 class="mt-6 text-center text-3xl font-extrabold text-gray-900">
           Sign in to WebHDP
-        </h2>
+        </h1>
       </div>
 
-      <form v-if="step === 'credentials'" class="mt-8 space-y-6" @submit.prevent="handleLogin">
-        <div v-if="error" data-testid="login-error" class="bg-red-50 border border-red-400 text-red-700 px-4 py-3 rounded">
+      <form v-if="step === 'credentials'" class="mt-8 space-y-6" :aria-busy="loading" @submit.prevent="handleLogin">
+        <div v-if="error" role="alert" data-testid="login-error" class="bg-red-50 border border-red-400 text-red-700 px-4 py-3 rounded">
           {{ error }}
         </div>
 
-        <div class="rounded-md shadow-sm -space-y-px">
+        <div class="space-y-4">
           <div>
-            <label for="email" class="sr-only">Email address or demo username</label>
+            <label for="email" class="block text-sm font-medium text-gray-900">Email address or demo username</label>
             <input
               id="email"
-              v-model="form.email"
+              ref="identifierField"
+              v-model.trim="form.email"
               data-testid="login-email"
               name="email"
               type="text"
@@ -26,21 +27,21 @@
               autocapitalize="none"
               :spellcheck="false"
               required
-              class="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 focus:z-10 sm:text-sm"
+              class="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-indigo-500 sm:text-sm"
               placeholder="Email address or demo username"
             />
           </div>
           <div>
-            <label for="password" class="sr-only">Password</label>
+            <label for="password" class="block text-sm font-medium text-gray-900">Password</label>
             <input
               id="password"
               v-model="form.password"
               data-testid="login-password"
               name="password"
               type="password"
+              autocomplete="current-password"
               required
-              class="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-b-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 focus:z-10 sm:text-sm"
-              placeholder="Password"
+              class="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-indigo-500 sm:text-sm"
             />
           </div>
         </div>
@@ -58,21 +59,21 @@
 
         <div class="text-center">
           <router-link to="/register" class="text-indigo-600 hover:text-indigo-500">
-            Don't have an account? Register
+            Create an account
           </router-link>
           <span class="mx-2 text-gray-300">|</span>
-          <router-link to="/docs" class="text-sky-600 hover:text-sky-500">
-            View Documentation
+          <router-link :to="{ path: '/register', query: { resend: '1' } }" class="text-indigo-700 hover:text-indigo-900">
+            Resend verification
           </router-link>
         </div>
       </form>
 
-      <form v-else class="mt-8 space-y-6" @submit.prevent="handleVerifyCode">
-        <div v-if="error" data-testid="login-error" class="bg-red-50 border border-red-400 text-red-700 px-4 py-3 rounded">
+      <form v-else class="mt-8 space-y-6" :aria-busy="loading" @submit.prevent="handleVerifyCode">
+        <div v-if="error" role="alert" data-testid="login-error" class="bg-red-50 border border-red-400 text-red-700 px-4 py-3 rounded">
           {{ error }}
         </div>
 
-        <div v-if="successMessage" data-testid="login-success" class="bg-green-50 border border-green-300 text-green-700 px-4 py-3 rounded">
+        <div v-if="successMessage" role="status" data-testid="login-success" class="bg-green-50 border border-green-300 text-green-700 px-4 py-3 rounded">
           {{ successMessage }}
         </div>
 
@@ -84,6 +85,7 @@
           <div class="grid grid-cols-2 gap-2">
             <button
               type="button"
+              :aria-pressed="mfaMode === 'email'"
               class="rounded-md border px-3 py-2 text-sm font-medium"
               :class="mfaMode === 'email' ? 'border-indigo-600 bg-indigo-50 text-indigo-700' : 'border-gray-300 text-gray-700 hover:bg-gray-50'"
               @click="mfaMode = 'email'"
@@ -93,6 +95,7 @@
             <button
               type="button"
               data-testid="login-use-recovery-code"
+              :aria-pressed="mfaMode === 'recovery'"
               class="rounded-md border px-3 py-2 text-sm font-medium"
               :class="mfaMode === 'recovery' ? 'border-indigo-600 bg-indigo-50 text-indigo-700' : 'border-gray-300 text-gray-700 hover:bg-gray-50'"
               @click="mfaMode = 'recovery'"
@@ -106,6 +109,7 @@
           <input
             v-if="mfaMode === 'email'"
             id="mfa-code"
+            ref="codeField"
             v-model="code"
             data-testid="login-mfa-code"
             name="code"
@@ -169,7 +173,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { nextTick, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { linkLoginDestination } from '@/utils/webhdpLink'
 import { useAuthStore } from '@/stores/auth'
@@ -178,6 +182,8 @@ import LegalLinks from '@/components/legal/LegalLinks.vue'
 const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
+const identifierField = ref(null)
+const codeField = ref(null)
 
 const form = ref({
   email: '',
@@ -199,13 +205,16 @@ const error = ref('')
 const successMessage = ref('')
 
 const finishLogin = () => {
-  const destination = linkLoginDestination(route.query?.redirect)
+  const destination = linkLoginDestination(route.query?.redirect, '/dashboard')
   router.push(authStore.user?.model_publication_only && !destination.startsWith('/model-publication')
     ? '/model-publication'
     : destination)
 }
 
 const resolveLoginErrorMessage = (err) => {
+  if (err?.error?.code === 'EMAIL_NOT_VERIFIED') {
+    return 'Verify your email before signing in. You can request a new link below.'
+  }
   if (typeof err?.error === 'string' && err.error.trim()) {
     return err.error
   }
@@ -231,6 +240,8 @@ const returnToCredentials = () => {
   code.value = ''
   recoveryCode.value = ''
   successMessage.value = ''
+  error.value = ''
+  nextTick(() => identifierField.value?.focus())
 }
 
 const applyMfaChallenge = (data) => {
@@ -249,6 +260,7 @@ const applyMfaChallenge = (data) => {
 }
 
 const handleLogin = async () => {
+  if (loading.value) return
   loading.value = true
   error.value = ''
   successMessage.value = ''
@@ -258,6 +270,8 @@ const handleLogin = async () => {
     if (response?.data?.mfa_required) {
       applyMfaChallenge(response.data)
       step.value = 'mfa'
+      await nextTick()
+      codeField.value?.focus()
       return
     }
     finishLogin()

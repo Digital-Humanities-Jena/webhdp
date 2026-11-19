@@ -58,7 +58,8 @@ describe('UploadOperationsView', () => {
 
     await flushPromises()
 
-    expect(wrapper.text()).toContain('records are still created later at submit')
+    expect(wrapper.text()).toContain('Records are created when you start processing.')
+    expect(wrapper.text()).toContain('Ready to review')
     expect(wrapper.text()).toContain('Resume File Review')
     expect(wrapper.text()).not.toContain('View Records')
   })

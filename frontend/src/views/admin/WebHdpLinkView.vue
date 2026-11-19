@@ -75,6 +75,10 @@
         <div class="grid gap-4 sm:grid-cols-2"><label>Application name<input v-model.trim="clientForm.name" required maxlength="160" placeholder="Heritage Model Studio"></label><label>Client ID<input v-model.trim="clientForm.id" :readonly="Boolean(editingClientId)" required pattern="[a-z0-9][a-z0-9_-]*" maxlength="80" placeholder="heritage-model-studio"></label><label>Browser origins<textarea v-model="clientForm.origins" rows="2" placeholder="https://studio.example.org"></textarea><small>One exact origin per line. No wildcards or paths. Leave empty for server-only clients.</small></label><label>OAuth return addresses<textarea v-model="clientForm.redirect_uris" rows="2" placeholder="https://studio.example.org/callback"></textarea><small>One complete address per line. Must belong to a registered origin.</small></label></div>
         <fieldset><legend class="mb-2 text-sm font-semibold text-gray-900">Allowed pipelines</legend><div class="flex flex-wrap gap-x-5 gap-y-2"><label v-for="publication in publications" :key="publication.id" class="checkbox-label"><input v-model="clientForm.pipeline_ids" type="checkbox" :value="publication.id"><span>{{ publication.name }}</span></label><p v-if="!publications.length" class="text-sm text-gray-500">Publish a pipeline first.</p></div></fieldset>
         <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><label>Queued jobs<input v-model.number="clientForm.max_queued_runs" type="number" min="1" max="1000" required></label><label>Concurrent jobs<input v-model.number="clientForm.max_concurrent_runs" type="number" min="1" max="64" required></label><label>Maximum upload (MiB)<input v-model.number="clientForm.upload_mib" type="number" min="1" max="20480" required></label><label>Storage allowance (MiB)<input v-model.number="clientForm.storage_mib" type="number" :min="clientForm.upload_mib" max="1048576" required></label></div>
+        <div class="grid gap-4 sm:grid-cols-2">
+          <label>Queued jobs per account<input v-model.number="clientForm.max_queued_runs_per_user" type="number" min="1" :max="clientForm.max_queued_runs"><small>Leave blank for up to five, subject to the application limit.</small></label>
+          <label>Storage per account (MiB)<input v-model.number="clientForm.user_storage_mib" type="number" min="0.001" step="any" :max="clientForm.storage_mib"><small>Leave blank to use the automatic account share.</small></label>
+        </div>
         <button class="primary" type="submit" :disabled="Boolean(busy) || !clientForm.pipeline_ids.length">{{ busy === 'client' ? 'Saving…' : editingClientId ? 'Save application' : 'Register application' }}</button>
       </form>
       <div v-if="!clients.length && !loading" class="empty">No applications registered yet.</div>
@@ -107,7 +111,8 @@ const publications = ref([]), clients = ref([]), tokens = ref([]), runs = ref([]
 const editingClientId = ref('')
 const showPublicationForm = ref(false), showClientForm = ref(false), tokenClient = ref(null), issuedToken = ref(''), autoRefresh = ref(false)
 const publicationForm = reactive({ id: '', name: '', description: '', pipeline_identifier: '', pipeline_version: '', execution_mode: 'record', min_files: 1, max_files: 1, extensions: '', hpc_enabled: false, walltime_hours: '', retain_allocation: false, reuse_retained_allocation: false, partition: '', gpu_count: 1, gpu_type: '' })
-const clientForm = reactive({ id: '', name: '', origins: '', redirect_uris: '', pipeline_ids: [], max_queued_runs: 20, max_concurrent_runs: 1, upload_mib: 100, storage_mib: 1024 })
+const clientDefaults = { id: '', name: '', origins: '', redirect_uris: '', max_queued_runs: 20, max_concurrent_runs: 1, upload_mib: 100, storage_mib: 1024, max_queued_runs_per_user: '', user_storage_mib: '' }
+const clientForm = reactive({ ...clientDefaults, pipeline_ids: [] })
 const tokenForm = reactive({ user_id: authStore.user?.id || '', expires_in: 3600, scopes: Object.keys(linkScopeLabels) })
 const parameterFields = ref([])
 const selectedPipeline = computed(() => pipelineOptions.value.find(item => item.identifier === publicationForm.pipeline_identifier))
@@ -185,17 +190,21 @@ function toggleClientForm() {
   showClientForm.value = !showClientForm.value
   if (showClientForm.value) {
     editingClientId.value = ''
-    Object.assign(clientForm, { id: '', name: '', origins: '', redirect_uris: '', pipeline_ids: [], max_queued_runs: 20, max_concurrent_runs: 1, upload_mib: 100, storage_mib: 1024 })
+    Object.assign(clientForm, { ...clientDefaults, pipeline_ids: [] })
   }
 }
 function editClient(client) {
   editingClientId.value = client.id
-  Object.assign(clientForm, { ...client, origins: (client.origins || []).join('\n'), redirect_uris: (client.redirect_uris || []).join('\n'), pipeline_ids: [...(client.pipeline_ids || [])], upload_mib: client.max_upload_bytes / 1048576, storage_mib: client.max_storage_bytes / 1048576 })
+  Object.assign(clientForm, { ...client, origins: (client.origins || []).join('\n'), redirect_uris: (client.redirect_uris || []).join('\n'), pipeline_ids: [...(client.pipeline_ids || [])],
+    upload_mib: client.max_upload_bytes / 1048576, storage_mib: client.max_storage_bytes / 1048576,
+    max_queued_runs_per_user: client.max_queued_runs_per_user ?? '', user_storage_mib: client.max_storage_bytes_per_user == null ? '' : client.max_storage_bytes_per_user / 1048576 })
   showClientForm.value = true
 }
 async function saveClient() {
   const payload = { id: clientForm.id, name: clientForm.name, enabled: true, origins: splitLines(clientForm.origins), redirect_uris: splitLines(clientForm.redirect_uris), pipeline_ids: [...clientForm.pipeline_ids],
-    max_queued_runs: clientForm.max_queued_runs, max_concurrent_runs: clientForm.max_concurrent_runs, max_upload_bytes: Math.round(clientForm.upload_mib * 1048576), max_storage_bytes: Math.round(clientForm.storage_mib * 1048576) }
+    max_queued_runs: clientForm.max_queued_runs, max_concurrent_runs: clientForm.max_concurrent_runs, max_upload_bytes: Math.round(clientForm.upload_mib * 1048576), max_storage_bytes: Math.round(clientForm.storage_mib * 1048576),
+    max_queued_runs_per_user: clientForm.max_queued_runs_per_user === '' ? null : clientForm.max_queued_runs_per_user,
+    max_storage_bytes_per_user: clientForm.user_storage_mib === '' ? null : Math.round(clientForm.user_storage_mib * 1048576) }
   const id = editingClientId.value
   if (id) { delete payload.id; delete payload.enabled }
   if (await perform('client', () => id ? linkService.updateClient(id, payload) : linkService.createClient(payload), id ? 'Application access updated.' : 'Application registered. Its client ID can be used in the browser SDK.')) showClientForm.value = false

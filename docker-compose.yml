@@ -10,6 +10,7 @@ services:
     environment:
       - DATABASE_URL=${DATABASE_URL:-sqlite:////app/instance/hdp_web.db}
       - FLASK_ENV=${FLASK_ENV:-production}
+      - AUTH_TRUSTED_PROXY_HOPS=${AUTH_TRUSTED_PROXY_HOPS:-1}
       - SHARED_SESSION_PATH=/shared/sessions
       - FAST_RENDERER_URL=http://fast-renderer:5002
       - ANY_TO_USDZ_URL=http://any-to-usdz:5003
@@ -35,7 +36,7 @@ services:
       - SESSION_ARTIFACT_RETENTION_SECONDS=${SESSION_ARTIFACT_RETENTION_SECONDS:-2592000}
       - MAINTENANCE_FLAG_PATH=/app/instance/maintenance.json
     volumes:
-      - ./instance:/app/instance
+      - ${WEBHDP_INSTANCE_PATH:-./instance}:/app/instance
       - hdp_logs:/app/logs
       - ${WEBHDP_SESSIONS_PATH:-./hdp-shared/sessions}:/shared/sessions
       - .:/data
@@ -236,7 +237,7 @@ services:
       - LOCAL_INPUT_HOST_PATH=/data/local_input
       - LOCAL_OUTPUT_HOST_PATH=/data/local_output
     volumes:
-      - ./instance:/app/instance
+      - ${WEBHDP_INSTANCE_PATH:-./instance}:/app/instance
       - hdp_logs:/app/logs
       - ${WEBHDP_SESSIONS_PATH:-./hdp-shared/sessions}:/shared/sessions
       - .:/data
@@ -259,6 +260,30 @@ services:
           memory: 512M
         reservations:
           memory: 256M
+
+  hpc-queue:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command: [python, -m, flask, --app, app, hpc-queue]
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-sqlite:////app/instance/hdp_web.db}
+      - FLASK_ENV=${FLASK_ENV:-production}
+      - RUN_DB_BOOTSTRAP=0
+      - MAINTENANCE_FLAG_PATH=/app/instance/maintenance.json
+    volumes:
+      - ${WEBHDP_INSTANCE_PATH:-./instance}:/app/instance
+      - hdp_logs:/app/logs
+    depends_on:
+      backend:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - hdp-network
 
 volumes:
   hdp_logs:

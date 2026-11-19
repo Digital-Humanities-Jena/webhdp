@@ -1,5 +1,30 @@
 # WebHDP Release Notes
 
+## 0.1.0-alpha.4 - 2026-11-19
+
+### Account setup and institution workspaces
+
+- New accounts verify their email before choosing a password. Verification links expire and can be requested again. Authentication throttling is shared by API workers on the same host.
+- **Set up your account** is available from **Getting started** and **Account Configuration**. It shows separate Sandbox and Production key checks and routes users to credential validation, workspace discovery, workspace requests, and invitations they can manage.
+- Site administrators review institution workspace requests. An approved workspace starts private with its verified requester as Owner. Invitations bind a role to a verified recipient address and require acceptance. Member rosters and audits apply profile and role permissions.
+
+### 3D publication, quotas, and component workflows
+
+- The CPU-only 3D tutorial is replayable with built-in samples. Use it to inspect texture repairs and mapped metadata and download a self-contained GLB. The Sandbox workflow adds a metadata form, MSF review, a three-model example, and status and queue details. Drafts contain the GLB and EDM, IIIF, METS/MODS, CIDOC-CRM, and JSON-LD exports.
+- **Account → Usage and limits** reports personal upload, transfer, and processing allowances. Quotas cover concurrent uploads and jobs, expanded archive sizes, HPC allocation requests, and connected application work. Uploads and runs can be reconciled after an interrupted request.
+- Installed component versions and saved pipeline bindings survive a WebHDP update. Hosted deployments can enable Playground with the native tools setting. Component dialogs scroll in Firefox.
+
+### HPC and connected applications
+
+- Pipeline guidance shows GPU requirements and allocation availability. The HPC queue advances in the background and reconciles ambiguous scheduler replies before resubmitting. Named reservations remain scoped to granted users and can be detached from WebHDP while the Slurm job continues.
+- WebHDP-Link applies per-account queue and storage allowances and recovers confirmed requests by their saved identity. Reconstruction Testlab and MMIC-Transformer examples include selectable datasets with metadata and checksummed inputs.
+
+### Upgrade and verification
+
+- The application database migration target is `b5c4d6e7f890`. Preserve the instance directory, existing accounts, component registries, and matching service images. Unverified accounts need a fresh verification link after upgrading.
+- The managed EDM validator uses the April 2026 Europeana sorter and a pinned transformation compatible with its bundled schema. Apply the updated validator setup before rebuilding its image.
+- Qualify SMTP, HTTPS, Sandbox, and any advertised GPU or external Link workflows in the target staging environment. See the [alpha.4 upgrade guide](docs/guides/upgrade_alpha4.md) and [release candidate checklist](PUBLISHING.md#review-the-release-tree).
+
 ## 0.1.0-alpha.3 - 2026-11-17
 
 ### Publication workflows

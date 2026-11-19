@@ -77,7 +77,8 @@
           </aside>
         </div>
       </section>
-      <ReservedGpuAccess v-if="!loading && hasAccess" select-session class="mt-6" />
+      <MyHpcAllocations ref="allocationPanel" class="mt-6" />
+      <ReservedGpuAccess v-if="!loading && hasAccess" select-session class="mt-6" @claimed="refreshAllocations" @released="refreshAllocations" />
     </div>
   </div>
 </template>
@@ -87,11 +88,13 @@ import { computed, reactive, ref } from 'vue'
 import hpcResourceRequestService from '@/services/hpcResourceRequest.service'
 import { useToast } from '@/composables/useToast'
 import ReservedGpuAccess from '@/components/hpc/ReservedGpuAccess.vue'
+import MyHpcAllocations from '@/components/hpc/MyHpcAllocations.vue'
 
 const toast = useToast()
 const loading = ref(true)
 const submitting = ref(false)
 const status = ref(null)
+const allocationPanel = ref(null)
 const useCases = ref(['3D Models', 'Photographies', 'Historical Data', 'Documents', 'Other'])
 const form = reactive({
   full_name: '',
@@ -102,6 +105,7 @@ const form = reactive({
 
 const latestRequest = computed(() => status.value?.hpc?.latest_request || null)
 const hasAccess = computed(() => Boolean(status.value?.hpc?.has_access))
+const refreshAllocations = () => allocationPanel.value?.refresh()
 const canSubmit = computed(() => {
   return Boolean(!hasAccess.value && form.full_name && form.affiliation && form.use_cases.length && latestRequest.value?.status !== 'pending')
 })

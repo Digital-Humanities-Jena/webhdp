@@ -11,6 +11,7 @@ import shutil
 from uuid import uuid4
 from zipfile import ZipFile
 
+from cryptography.fernet import InvalidToken
 from flask import Blueprint, request, send_file
 from flask_jwt_extended import get_jwt, get_jwt_identity, jwt_required
 from werkzeug.exceptions import RequestEntityTooLarge
@@ -30,6 +31,7 @@ def keep_job_responses_private(response):
 
 
 LIBRARY = Path(__file__).resolve().parents[1] / "datasets" / "quick-publication"
+RUN_MODES = {"practice", "sandbox"}
 
 
 @lru_cache(maxsize=1)
@@ -82,8 +84,15 @@ def sample_preview(sample_id):
 def availability():
     user = db.session.get(User, int(get_jwt_identity()))
     demo = is_demo(user)
-    return APIResponse.success({"ready": queue.enabled() and queue.worker_ready(queue.root()),
-                                "credential_ready": bool(sandbox_token(user.id, demo)), "demo": demo})
+    base = queue.root()
+    ready = queue.enabled() and queue.worker_ready(base)
+    # A malformed stored Sandbox credential must not make private practice unavailable.
+    try:
+        credential_ready = bool(sandbox_token(user.id, demo))
+    except (InvalidToken, UnicodeDecodeError):
+        credential_ready = False
+    return APIResponse.success({"ready": ready, "credential_ready": credential_ready, "demo": demo,
+                                "practice_ready": ready and not demo and user.is_verified and queue.practice_worker_ready(base)})
 
 
 @model_publication_bp.route("/queue")
@@ -92,16 +101,19 @@ def queue_status():
     return APIResponse.success(queue.snapshot(queue.root()))
 
 
-def _owned_jobs(job_id=None):
+def _owned_jobs(job_id=None, *, run_mode=None):
     user = db.session.get(User, int(get_jwt_identity()))
-    return queue.get_jobs(queue.root(), user_id=user.id, job_id=job_id,
+    return queue.get_jobs(queue.root(), user_id=user.id, job_id=job_id, run_mode=run_mode,
                           sign_in=queue.sign_in_key(get_jwt()["jti"]) if is_demo(user) else None)
 
 
 @model_publication_bp.route("/jobs")
 @jwt_required()
 def jobs():
-    return APIResponse.success({"jobs": [queue.serialize(job) for job in _owned_jobs()]})
+    mode = request.args.get("run_mode")
+    if mode is not None and mode not in RUN_MODES:
+        return APIResponse.error("MODEL_PUBLICATION_INPUT", "Choose practice or Sandbox runs.", 400)
+    return APIResponse.success({"jobs": [queue.serialize(job) for job in _owned_jobs(run_mode=mode)]})
 
 
 @model_publication_bp.route("/jobs/<job_id>")
@@ -140,9 +152,16 @@ def _read_input(user):
     request_key = request.headers.get("Idempotency-Key") or uuid4().hex
     if not re.fullmatch(r"[A-Za-z0-9-]{1,64}", request_key):
         raise queue.QueueError("Invalid upload request identity.")
+    run_mode = request.form.get("run_mode", "sandbox")
+    if run_mode not in RUN_MODES:
+        raise queue.QueueError("Choose a practice run or a Sandbox draft.")
+    if run_mode == "practice" and (is_demo(user) or not user.is_verified):
+        raise queue.QueueError("Practice runs are available with your own verified WebHDP account.", 403)
     archive = request.files.get("archive")
     msf = request.files.get("msf")
     sample_id = request.form.get("sample_id")
+    if run_mode == "practice" and not sample_id:
+        raise queue.QueueError("Choose a built-in model to run the tutorial.")
     if bool(archive) == bool(sample_id):
         raise queue.QueueError("Choose one sample or upload one model.")
     if sample_id and sample_id not in {entry["id"] for entry in sample_catalog()}:
@@ -168,6 +187,8 @@ def _read_input(user):
     if is_demo(user) and (mode != "archive" or any(metadata.values())):
         raise queue.QueueError("The demonstration uses the sample package's metadata.")
     sample = next((entry for entry in sample_catalog() if entry["id"] == sample_id), None)
+    if run_mode == "practice" and (sample["format"] == "batch" or mode != "archive" or any(metadata.values())):
+        raise queue.QueueError("Choose one tutorial sample with its original metadata spreadsheet.")
     if sample and sample["format"] == "batch" and mode != "archive":
         raise queue.QueueError("The batch sample needs its original metadata spreadsheet.")
     msf_suffix = Path(msf.filename).suffix.lower() if msf else ""
@@ -181,11 +202,17 @@ def _read_input(user):
         raise queue.QueueError("Enter a title, creator and description within the indicated lengths.")
     if suffix == ".glb" and mode == "archive":
         raise queue.QueueError("For a standalone GLB, enter metadata or select an MSF.")
-    return request_key, archive, msf, {"sample_id": sample_id, "extension": suffix, "msf_extension": msf_suffix,
-                                        "title": metadata.get("title") or (sample["title"] if sample else None),
-                                        "model_count": len(sample["records"]) if sample else 1,
-                                        "original_filename": Path(archive.filename).name if archive else None,
-                                        "metadata_source": mode, "metadata": metadata if mode == "form" else {}}
+    parameters = {"sample_id": sample_id, "extension": suffix, "msf_extension": msf_suffix,
+                  "title": metadata.get("title") or (sample["title"] if sample else None),
+                  "model_count": len(sample["records"]) if sample else 1,
+                  "original_filename": Path(archive.filename).name if archive else None,
+                  "run_mode": run_mode, "metadata_source": mode,
+                  "metadata": metadata if mode == "form" else {}}
+    if run_mode == "practice":
+        # Keep the sample out of the Sandbox input fields so an old worker cannot deposit it.
+        parameters["practice_sample_id"] = sample_id
+        parameters["sample_id"] = None
+    return request_key, archive, msf, parameters
 
 
 @model_publication_bp.route("/jobs", methods=["POST"])
@@ -196,10 +223,13 @@ def submit_job():
     demo = is_demo(user)
     if not queue.enabled() or not queue.worker_ready(base):
         return APIResponse.error("WORKER_OFFLINE", "Model processing is temporarily unavailable.", 503)
-    if not sandbox_token(user.id, demo):
-        return APIResponse.error("SANDBOX_REQUIRED", "Set an active Zenodo Sandbox credential before starting a run.", 409)
     try:
         request_key, archive, msf, parameters = _read_input(user)
+        if parameters["run_mode"] == "practice":
+            if not queue.practice_worker_ready(base):
+                return APIResponse.error("WORKER_OFFLINE", "Tutorial processing is temporarily unavailable.", 503)
+        elif not sandbox_token(user.id, demo):
+            return APIResponse.error("SANDBOX_REQUIRED", "Set an active Zenodo Sandbox credential before starting a run.", 409)
         demo_window = demo_expiry(user.id) if demo else 0
         job_id, created = queue.reserve(base, user_id=user.id, sign_in=queue.sign_in_key(get_jwt()["jti"]),
                                         request_key=request_key, demo_window=demo_window, parameters=parameters)
@@ -207,7 +237,7 @@ def submit_job():
             workspace = base / job_id
             try:
                 workspace.mkdir(mode=0o700)
-                if archive and not parameters["sample_id"]:
+                if archive and not parameters.get("sample_id"):
                     with (workspace / ("model" + parameters["extension"])).open("wb") as stream:
                         shutil.copyfileobj(archive.stream, stream)
                 if msf:
@@ -220,6 +250,10 @@ def submit_job():
         job = _owned_jobs(job_id)[0]
         return APIResponse.success({"job": queue.serialize(job)}, status_code=202 if created else 200)
     except queue.QueueError as exc:
-        return APIResponse.error("MODEL_PUBLICATION_INPUT", str(exc), exc.status)
+        response, status = APIResponse.error(exc.code, str(exc), exc.status, details=exc.details)
+        if exc.code == "MODEL_PUBLICATION_DAILY_QUOTA":
+            import time
+            response.headers["Retry-After"] = str(max(1, exc.details["usage"]["daily_reset_at"] - int(time.time())))
+        return response, status
     except RequestEntityTooLarge:
         return APIResponse.error("MODEL_PUBLICATION_INPUT", "Model uploads are limited to 24 MiB plus an optional 1 MiB MSF.", 413)

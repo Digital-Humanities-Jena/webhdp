@@ -31,6 +31,7 @@ function buildWorkspaceDetails({
         id: 42,
         permissions: {
           can_manage: canManage,
+          can_change_visibility: canManage,
         },
         origin_type: currentWorkspace.origin_type || 'workflow',
         access_mode: currentWorkspace.access_mode || 'full',

@@ -49,7 +49,7 @@
                   :value="pipeline.identifier"
                   v-model="selectedPipeline"
                   :disabled="Boolean(pipelineInputError(pipeline, workflowStore.selectedFiles))"
-                  :aria-describedby="`${pipeline.identifier}-outcome${pipelineInputError(pipeline, workflowStore.selectedFiles) ? ` ${pipeline.identifier}-input-error` : ''}`"
+                  :aria-describedby="`${pipeline.identifier}-outcome${pipelineGpuCount(pipeline) ? ` ${pipeline.identifier}-gpu` : ''}${pipelineInputError(pipeline, workflowStore.selectedFiles) ? ` ${pipeline.identifier}-input-error` : ''}`"
                   class="mt-1.5 h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500"
                 />
                 <div class="ml-4 min-w-0 flex-1">
@@ -58,6 +58,16 @@
                     <span v-if="recommendedPipeline?.identifier === pipeline.identifier" class="text-xs font-medium text-indigo-700" title="Compatible with your selection; favors fewer resources and a workflow without publication.">Recommended</span>
                   </div>
                   <p class="mt-1 text-sm text-gray-600 leading-relaxed">{{ pipeline.description }}</p>
+                  <p v-if="pipelineGpuCount(pipeline)" :id="`${pipeline.identifier}-gpu`" class="mt-2 text-sm font-semibold text-indigo-900">
+                    Requires {{ pipelineGpuCount(pipeline) === 1 ? 'a GPU' : `${pipelineGpuCount(pipeline)} GPUs` }}
+                  </p>
+                  <PipelineGpuStatus
+                    v-if="selectedPipeline === pipeline.identifier && pipelineGpuCount(pipeline)"
+                    class="mt-2"
+                    :session-id="workflowStore.sessionId"
+                    :gpu-count="pipelineGpuCount(pipeline)"
+                    :component-keys="pipelineGuidance(pipeline).hpc_component_keys"
+                  />
 
                   <p :id="`${pipeline.identifier}-outcome`" class="mt-2 text-sm font-medium text-slate-800">{{ pipelineGuidance(pipeline).outcome }}</p>
                   <p v-if="pipelineInputError(pipeline, workflowStore.selectedFiles)" :id="`${pipeline.identifier}-input-error`" class="mt-1 text-sm text-amber-800">{{ pipelineInputError(pipeline, workflowStore.selectedFiles) }}</p>
@@ -115,11 +125,12 @@ import { useRoute, useRouter } from 'vue-router'
 import { useWorkflowStore } from '@/stores/workflow'
 import { useToast } from '@/composables/useToast'
 import pipelineService from '@/services/pipeline.service'
+import PipelineGpuStatus from '@/components/hpc/PipelineGpuStatus.vue'
 import StepIndicator from '@/components/workflow/StepIndicator.vue'
 import LoadingSpinner from '@/components/ui/LoadingSpinner.vue'
 import Alert from '@/components/ui/Alert.vue'
 import { persistWorkflowState, restoreWorkflowContext, shouldRestoreWorkflowContext } from '@/utils/workflowState'
-import { pipelineGuidance, pipelineInputError, recommendPipeline, pipelineTaskLabel } from '@/utils/pipelineGuidance'
+import { pipelineGpuCount, pipelineGuidance, pipelineInputError, recommendPipeline, pipelineTaskLabel } from '@/utils/pipelineGuidance'
 
 const route = useRoute()
 const router = useRouter()

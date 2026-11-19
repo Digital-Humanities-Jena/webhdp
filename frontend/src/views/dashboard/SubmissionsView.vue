@@ -2,7 +2,12 @@
   <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
     <div class="mb-6">
       <h1 class="text-3xl font-bold text-gray-900">My Submissions</h1>
-      <p class="mt-1 text-gray-600">A history of all your processing submissions.</p>
+      <p class="mt-1 text-gray-600">Follow processing runs started from an upload session and open their records.</p>
+      <p class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm">
+        <router-link :to="{ name: 'ModelPublication' }" class="font-semibold text-indigo-700 underline">3D publication requests</router-link>
+        <router-link :to="{ name: 'ModelPublicationTutorial' }" class="font-semibold text-indigo-700 underline">3D tutorial runs</router-link>
+        <router-link :to="{ name: 'LinkedProcessing' }" class="font-semibold text-indigo-700 underline">Runs from connected apps</router-link>
+      </p>
     </div>
 
     <div class="bg-white shadow rounded-lg">
@@ -10,11 +15,18 @@
         <LoadingSpinner size="lg" text="Loading submissions..." />
       </div>
 
-      <div v-else-if="submissions.length === 0" class="p-6 text-center">
-        <p class="text-gray-500">You have not made any submissions yet.</p>
+      <div v-else-if="loadError" role="alert" class="p-6 text-center">
+        <p class="text-sm text-rose-800">{{ loadError }}</p>
+        <button type="button" class="mt-3 text-sm font-semibold text-indigo-700 underline" @click="loadSubmissions">Try again</button>
       </div>
 
-      <table v-else class="min-w-full divide-y divide-gray-200">
+      <div v-else-if="submissions.length === 0" class="p-6 text-center">
+        <p class="text-gray-500">Once you start processing a session, the submission will appear here.</p>
+        <router-link :to="{ name: 'UploadOperations' }" class="mt-3 inline-block text-sm font-semibold text-indigo-700 underline">Open your uploads</router-link>
+      </div>
+
+      <div v-else class="overflow-x-auto">
+      <table class="min-w-full divide-y divide-gray-200">
         <thead class="bg-gray-50">
           <tr>
             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ID</th>
@@ -59,6 +71,7 @@
           </tr>
         </tbody>
       </table>
+      </div>
     </div>
   </div>
 </template>
@@ -70,6 +83,7 @@ import LoadingSpinner from '@/components/ui/LoadingSpinner.vue'
 
 const loading = ref(true)
 const submissions = ref([])
+const loadError = ref('')
 
 const formatDate = (dateString) => {
   if (!dateString) return 'N/A'
@@ -86,14 +100,17 @@ const statusClass = (status) => {
   }
 }
 
-onMounted(async () => {
+async function loadSubmissions() {
+  loading.value = true
+  loadError.value = ''
   try {
     const response = await submissionService.listSubmissions()
-    submissions.value = response.data.submissions || []
+    submissions.value = response.data?.submissions || []
   } catch (err) {
-    console.error('Failed to load submissions:', err)
+    loadError.value = err?.error?.message || 'Could not load submissions.'
   } finally {
     loading.value = false
   }
-})
+}
+onMounted(loadSubmissions)
 </script>

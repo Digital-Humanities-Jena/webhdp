@@ -261,6 +261,7 @@ class HpcApplicationGatewayService:
         self._marker_sessions: dict[str, _MarkerSession] = {}
         self._webhdp_sessions: dict[str, _WebHdpSession] = {}
         self._webhdp_reservations: dict[str, _WebHdpReservation] = {}
+        self._closed_webhdp_requests: dict[str, dict[str, str]] = {}
         self._active_webhdp_steps: set[str] = set()
         self._reserved_ports: set[int] = set()
         self._lock = asyncio.Lock()
@@ -324,6 +325,12 @@ class HpcApplicationGatewayService:
                 continue
             loaded[session.session_id] = session
         self._webhdp_sessions.update(loaded)
+        closed_requests = payload.get("closed_requests", {})
+        if isinstance(closed_requests, dict):
+            self._closed_webhdp_requests.update({
+                request_id: receipt for request_id, receipt in closed_requests.items()
+                if isinstance(receipt, dict) and {"owner_username", "job_id"} <= receipt.keys()
+            })
         for item in reservations:
             try:
                 reservation = _WebHdpReservation(
@@ -383,13 +390,14 @@ class HpcApplicationGatewayService:
             with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, prefix=".webhdp-sessions-",
                                              encoding="utf-8", delete=False) as stream:
                 temporary_path = Path(stream.name)
-                json.dump({"sessions": sessions, "reservations": reservations}, stream, indent=2, sort_keys=True)
+                json.dump({"sessions": sessions, "reservations": reservations,
+                           "closed_requests": self._closed_webhdp_requests}, stream, indent=2, sort_keys=True)
                 stream.flush()
                 os.fsync(stream.fileno())
             temporary_path.replace(path)
         except OSError as exc:
             if required:
-                raise HTTPException(status_code=503, detail="WebHDP reservation registry is not writable") from exc
+                raise HTTPException(status_code=503, detail="WebHDP session registry is not writable") from exc
         finally:
             if temporary_path is not None:
                 try:
@@ -1883,6 +1891,7 @@ while true; do sleep 120; done
         )
 
     def _render_webhdp_hold_batch_script(self, session: _WebHdpSession) -> str:
+        job_identity = session.session_id if "-" in session.session_id else session.session_id[:8]
         cuda_module_block = ""
         if session.cuda_module:
             module_name = shlex.quote(session.cuda_module)
@@ -1898,7 +1907,7 @@ while true; do sleep 120; done
                 gres = f"gpu:{session.gpu_type}:{session.gpu_count}"
             gres_line = f"#SBATCH --gres={gres}\n"
         return f"""#!/bin/bash
-#SBATCH --job-name=hpc-link-webhdp-{session.session_id[:8]}
+#SBATCH --job-name=hpc-link-webhdp-{job_identity}
 #SBATCH --partition={session.partition}
 #SBATCH --cpus-per-task={self._settings.webhdp_cpus_per_task}
 #SBATCH --mem={self._settings.webhdp_memory_mb}M
@@ -2124,8 +2133,22 @@ while true; do sleep 120; done
             gpu_count=request.gpu_count,
             duration_minutes=request.duration_minutes,
         )
+        request_id = str(request.request_id) if request.request_id else None
+        cuda_module = request.cuda_module or self._settings.webhdp_cuda_module
         async with self._lock:
-            session_id = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")
+            closed = self._closed_webhdp_requests.get(request_id) if request_id else None
+            if closed:
+                self._ensure_owner_access(closed["owner_username"], actor)
+                raise HTTPException(status_code=409, detail="This allocation request was already released")
+            existing = self._webhdp_sessions.get(request_id) if request_id else None
+            if existing:
+                self._ensure_owner_access(existing.owner_username, actor)
+                if (existing.reservation_id is not None or existing.partition != partition
+                        or existing.gpu_type != request.gpu_type or existing.gpu_count != request.gpu_count
+                        or existing.duration_minutes != request.duration_minutes or existing.cuda_module != cuda_module):
+                    raise HTTPException(status_code=409, detail="This allocation request has different resource settings")
+                return self._ordinary_session_response(existing)
+            session_id = request_id or datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")
             now = datetime.now(timezone.utc)
             remote_dir = f"{self._settings.hpc_apps_root}/webhdp/sessions/{session_id}"
             session = _WebHdpSession(
@@ -2139,38 +2162,66 @@ while true; do sleep 120; done
                 remote_session_dir=remote_dir,
                 remote_input_dir=f"{remote_dir}/inputs",
                 remote_output_dir=f"{remote_dir}/outputs",
-                cuda_module=request.cuda_module or self._settings.webhdp_cuda_module,
+                cuda_module=cuda_module,
                 created_at=now,
                 expires_at=now + timedelta(minutes=request.duration_minutes),
                 owner_username=actor.username,
             )
-
-        mkdir_cmd = (
-            f"mkdir -p {shlex.quote(session.remote_session_dir)} "
-            f"{shlex.quote(session.remote_input_dir)} {shlex.quote(session.remote_output_dir)}"
-        )
-        _, stderr, exit_code = await ssh_manager.run_command(mkdir_cmd)
-        if exit_code != 0:
-            raise HTTPException(status_code=500, detail=f"Could not create WebHDP session directories: {stderr}")
+            if request_id:
+                self._webhdp_sessions[session_id] = session
+                try:
+                    # A crash during sbatch leaves an intent behind. Replaying the
+                    # same request can recover the job but cannot submit another one.
+                    self._save_webhdp_sessions_to_registry(required=True)
+                except HTTPException:
+                    del self._webhdp_sessions[session_id]
+                    raise
 
         script_path = f"{session.remote_session_dir}/hold_webhdp.sbatch"
         try:
+            mkdir_cmd = (f"umask 077; mkdir -p {shlex.quote(session.remote_session_dir)} "
+                         f"{shlex.quote(session.remote_input_dir)} {shlex.quote(session.remote_output_dir)}")
+            _, _, exit_code = await ssh_manager.run_command(mkdir_cmd)
+            if exit_code != 0:
+                raise HTTPException(status_code=500, detail="Could not create WebHDP session directories")
             async with await ssh_manager.open_sftp() as sftp:
                 async with sftp.open(script_path, "w") as handle:
                     await handle.write(self._render_webhdp_hold_batch_script(session))
-        except Exception as exc:
-            raise HTTPException(status_code=500, detail=f"Failed to upload WebHDP launch script: {exc}") from exc
+        except BaseException:
+            if request_id:
+                async with self._lock:
+                    self._webhdp_sessions.pop(session_id, None)
+                    self._save_webhdp_sessions_to_registry(required=True)
+            raise
 
-        stdout, stderr, exit_code = await ssh_manager.run_command(f"sbatch --parsable {shlex.quote(script_path)}")
+        stdout, _, exit_code = await ssh_manager.run_command(f"sbatch --parsable {shlex.quote(script_path)}")
         if exit_code != 0:
-            raise HTTPException(status_code=500, detail=f"sbatch failed for WebHDP: {stderr or stdout}")
+            raise HTTPException(status_code=500, detail="Could not confirm the scheduler submission")
         job_id = self._extract_job_id(stdout)
         if not job_id:
-            raise HTTPException(status_code=500, detail=f"Could not parse job ID from: {stdout}")
-        session.job_id = job_id
+            raise HTTPException(status_code=500, detail="Could not confirm the scheduler job ID")
         async with self._lock:
+            session.job_id = job_id
             self._webhdp_sessions[session.session_id] = session
-            self._save_webhdp_sessions_to_registry()
+            self._save_webhdp_sessions_to_registry(required=bool(request_id))
+        return self._ordinary_session_response(session)
+
+    async def get_webhdp_session_request(self, request_id: str, actor: AuthenticatedUser) -> WebHdpSessionCreateResponse | None:
+        async with self._lock:
+            closed = self._closed_webhdp_requests.get(request_id)
+            if closed:
+                self._ensure_owner_access(closed["owner_username"], actor)
+                raise HTTPException(status_code=409, detail="This allocation request was already released")
+            session = self._webhdp_sessions.get(request_id)
+            if session is None or session.reservation_id is not None:
+                return None
+            self._ensure_owner_access(session.owner_username, actor)
+            return self._ordinary_session_response(session)
+
+    @staticmethod
+    def _ordinary_session_response(session: _WebHdpSession) -> WebHdpSessionCreateResponse:
+        if not session.job_id:
+            raise HTTPException(status_code=409, detail="This allocation's scheduler submission is still unconfirmed")
         return WebHdpSessionCreateResponse(
             session_id=session.session_id,
             app_id="webhdp",
@@ -2197,6 +2248,8 @@ while true; do sleep 120; done
         self._ensure_owner_access(session.owner_username, actor)
         if session.reservation_id is not None:
             return await self._get_adopted_session_status(session, actor)
+        if not session.job_id:
+            raise HTTPException(status_code=409, detail="This allocation's scheduler submission is still unconfirmed")
         scheduler_state, scheduler_reason = await self._scheduler_state_for_job(session.job_id)
         if scheduler_state == "RUNNING":
             session.status = "running"
@@ -2222,6 +2275,8 @@ while true; do sleep 120; done
                 pass
         remaining_seconds = self._remaining_seconds(session.expires_at)
         async with self._lock:
+            if self._webhdp_sessions.get(session.session_id) is not session:
+                raise HTTPException(status_code=404, detail="WebHDP session was released")
             self._webhdp_sessions[session.session_id] = session
             self._save_webhdp_sessions_to_registry()
         return WebHdpSessionStatusResponse(
@@ -3346,6 +3401,12 @@ if __name__ == "__main__":
         async with self._lock:
             session = self._webhdp_sessions.get(session_id)
             if session is None:
+                closed = self._closed_webhdp_requests.get(session_id)
+                if closed:
+                    self._ensure_owner_access(closed["owner_username"], actor)
+                    self._save_webhdp_sessions_to_registry(required=True)
+                    return SessionStopResponse(session_id=session_id, job_id=closed["job_id"], cancelled=True,
+                                               message="WebHDP session released")
                 for reservation in self._webhdp_reservations.values():
                     if session_id and session_id in reservation.closed_claims.values():
                         self._ensure_owner_access(reservation.owner_username, actor)
@@ -3355,15 +3416,24 @@ if __name__ == "__main__":
             if session.reservation_id is not None:
                 reservation = self._get_reservation(session.reservation_id, actor)
                 return await self._detach_webhdp_claim_locked(reservation, session.claim_id)
+            if not session.job_id:
+                raise HTTPException(status_code=409, detail="This allocation's scheduler submission is still unconfirmed")
+            _, _, exit_code = await ssh_manager.run_command(f"scancel {shlex.quote(session.job_id)}", timeout=20)
+            if exit_code != 0:
+                scheduler_state, _ = await self._scheduler_state_for_job(session.job_id)
+                if scheduler_state not in TERMINAL_STATES | {"COMPLETED_OR_UNKNOWN"}:
+                    return SessionStopResponse(session_id=session.session_id, job_id=session.job_id, cancelled=False,
+                                               message="Slurm has not confirmed that the allocation ended")
             self._webhdp_sessions.pop(session_id, None)
-            self._save_webhdp_sessions_to_registry()
-        _, stderr, exit_code = await ssh_manager.run_command(f"scancel {shlex.quote(session.job_id)}")
-        cancelled = exit_code == 0
+            keyed_request = "-" in session_id  # Ordinary legacy session IDs were numeric timestamps.
+            if keyed_request:
+                self._closed_webhdp_requests[session_id] = {"owner_username": session.owner_username, "job_id": session.job_id}
+            self._save_webhdp_sessions_to_registry(required=keyed_request)
         return SessionStopResponse(
             session_id=session.session_id,
             job_id=session.job_id,
-            cancelled=cancelled,
-            message="WebHDP session cancelled" if cancelled else f"scancel failed: {stderr}",
+            cancelled=True,
+            message="WebHDP session released",
         )
 
 

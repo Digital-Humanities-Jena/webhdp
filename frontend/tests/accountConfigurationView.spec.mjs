@@ -42,14 +42,16 @@ const mocked = vi.hoisted(() => ({
   toast: {
     success: vi.fn(),
     error: vi.fn(),
+    warning: vi.fn(),
   },
+  route: { query: {} },
 }))
 
 vi.mock('@/services/auth.service', () => ({ default: mocked.authService }))
 vi.mock('@/services/institution.service', () => ({ default: mocked.institutionService }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => mocked.authStore }))
 vi.mock('@/composables/useToast', () => ({ useToast: () => mocked.toast }))
-vi.mock('vue-router', () => ({ useRoute: () => ({ query: {} }) }))
+vi.mock('vue-router', () => ({ useRoute: () => mocked.route }))
 
 import AccountConfigurationView from '../src/views/account/AccountConfigurationView.vue'
 
@@ -78,6 +80,7 @@ const liveCredential = {
 
 describe('AccountConfigurationView credentials', () => {
   beforeEach(() => {
+    mocked.route.query = {}
     Object.values(mocked.authService).forEach((fn) => fn.mockReset())
     Object.values(mocked.institutionService).forEach((fn) => fn.mockReset())
     Object.values(mocked.toast).forEach((fn) => fn.mockReset())
@@ -145,6 +148,32 @@ describe('AccountConfigurationView credentials', () => {
     expect(wrapper.get('a[aria-label="Open security and credentials documentation"]').attributes('href')).toBe('/docs/security-and-credentials')
     expect(wrapper.findAll('a[aria-label="Open password security documentation"]')).toHaveLength(3)
     expect(wrapper.get('a[aria-label="Open recovery code documentation"]').attributes('href')).toBe('/docs/security-and-credentials')
+  })
+
+  it('opens the chosen Zenodo environment and reports an invalid validation result', async () => {
+    mocked.route.query = { zenodo: 'production' }
+    const invalidCredential = {
+      ...liveCredential,
+      validation_status: 'invalid',
+      validation_report: { summary: 'Zenodo rejected this key.' },
+    }
+    mocked.authService.listZenodoCredentials.mockResolvedValue({
+      data: { credentials: [liveCredential], active: { sandbox: liveCredential, production: null } },
+    })
+    mocked.authService.validateZenodoCredentialById.mockResolvedValue({ data: { credential: invalidCredential } })
+    const wrapper = mount(AccountConfigurationView, { global: { stubs: ['RouterLink'] } })
+    await flushPromises()
+
+    expect(wrapper.get('#zenodo-keys [data-testid="zenodo-key-environment"]').element.value).toBe('production')
+    expect(wrapper.get('#zenodo-sandbox').exists()).toBe(true)
+    expect(wrapper.get('#zenodo-production').exists()).toBe(true)
+    await wrapper.get('[data-testid="zenodo-credential-validate-42"]').trigger('click')
+    await flushPromises()
+
+    expect(mocked.authService.validateZenodoCredentialById).toHaveBeenCalledWith(42)
+    expect(mocked.toast.warning).toHaveBeenCalledWith('Zenodo rejected this key.')
+    expect(mocked.toast.success).not.toHaveBeenCalled()
+    wrapper.unmount()
   })
 
   it('renders pending shares and keeps shared token cleartext hidden', async () => {
@@ -243,7 +272,7 @@ describe('AccountConfigurationView credentials', () => {
     expect(wrapper.text()).toContain('3 recovery codes available')
   })
 
-  it('suggests existing institutions and warns before creating a similar one', async () => {
+  it('suggests institutions and saves a free-text affiliation without creating a workspace', async () => {
     vi.useFakeTimers()
     mocked.authService.listZenodoCredentials.mockResolvedValue({
       data: { credentials: [], active: { sandbox: null, production: null }, incoming_shares: [], outgoing_shares: [] },
@@ -251,51 +280,34 @@ describe('AccountConfigurationView credentials', () => {
     mocked.institutionService.suggestInstitutions.mockResolvedValue({
       data: { institutions: [{ id: 3, name: 'Museum Network', similarity: 0.97 }] },
     })
-    mocked.institutionService.configureAffiliation
-      .mockRejectedValueOnce({
-        error: {
-          code: 'SIMILAR_INSTITUTION_EXISTS',
-          details: { similar: [{ id: 3, name: 'Museum Network', similarity: 0.94 }] },
-          message: 'A very similar institution already exists.',
-        },
-      })
-      .mockResolvedValueOnce({
-        data: {
-          user: { id: 7, email: 'owner@example.com', affiliation: 'Museum Network', default_institution_id: 3 },
-          institution: { id: 3, name: 'Museum Network' },
-          institutions: [{ id: 3, name: 'Museum Network', role: 'reader' }],
-          memberships: [],
-          created: false,
-        },
-      })
-
-    const wrapper = mount(AccountConfigurationView, {
-      global: {
-        stubs: {
-          RouterLink: {
-            props: ['to'],
-            template: '<a :href="to"><slot /></a>',
-          },
-        },
+    mocked.institutionService.configureAffiliation.mockResolvedValue({
+      data: {
+        user: { id: 7, email: 'owner@example.com', affiliation: 'Another Museum' },
+        institution: null,
+        institutions: [],
+        memberships: [],
+        created: false,
       },
     })
-    await flushPromises()
+    try {
+      const wrapper = mount(AccountConfigurationView, {
+        global: { stubs: { RouterLink: { props: ['to'], template: '<a :href="to"><slot /></a>' } } },
+      })
+      await flushPromises()
+      await wrapper.get('[data-testid="institution-affiliation-input"]').setValue('Museum Net')
+      vi.advanceTimersByTime(250)
+      await flushPromises()
+      expect(mocked.institutionService.suggestInstitutions).toHaveBeenCalledWith('Museum Net', { limit: 8 })
+      expect(wrapper.get('[data-testid="institution-suggestions"]').text()).toContain('Museum Network')
 
-    await wrapper.get('[data-testid="institution-affiliation-input"]').setValue('Museum Net')
-    vi.advanceTimersByTime(250)
-    await flushPromises()
-    expect(mocked.institutionService.suggestInstitutions).toHaveBeenCalledWith('Museum Net', { limit: 8 })
-    expect(wrapper.get('[data-testid="institution-suggestions"]').text()).toContain('Museum Network')
-
-    await wrapper.get('[data-testid="institution-affiliation-input"]').setValue('Museum Networks')
-    await wrapper.get('[data-testid="institution-create-button"]').trigger('click')
-    await flushPromises()
-    expect(wrapper.get('[data-testid="similar-institution-warning"]').text()).toContain('Museum Network')
-
-    await wrapper.findAll('button').find((button) => button.text() === 'Use Museum Network').trigger('click')
-    await flushPromises()
-    expect(mocked.institutionService.configureAffiliation).toHaveBeenLastCalledWith({ institution_id: 3 })
-    expect(mocked.authStore.setUser).toHaveBeenCalled()
-    vi.useRealTimers()
+      await wrapper.get('[data-testid="institution-affiliation-input"]').setValue('Another Museum')
+      await wrapper.get('[data-testid="institution-affiliation-save"]').trigger('click')
+      await flushPromises()
+      expect(mocked.institutionService.configureAffiliation).toHaveBeenCalledWith({ name: 'Another Museum' })
+      expect(mocked.authStore.setUser).toHaveBeenCalledWith(expect.objectContaining({ affiliation: 'Another Museum', memberships: [] }))
+      wrapper.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

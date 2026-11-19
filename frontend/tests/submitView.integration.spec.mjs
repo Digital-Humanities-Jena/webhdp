@@ -361,6 +361,37 @@ describe('SubmitView MSW integration', () => {
     return mounted.wrapper
   }
 
+  it('shows scheduler contention and reuses a pending GPU request before running the pipeline', async () => {
+    const phases = []
+    server.use(
+      http.get(apiV1Url('/hpc-link/status'), () => jsonResponse({ data: {
+        available: true, can_allocate: true, active_hpc_allocation: false,
+        gpu_allocation_id: 'alloc-42', gpu_allocation_status: 'allocating',
+        gpu_allocation_gpu_count: 1, gpu_allocation_scheduler_reason: 'Resources',
+      } })),
+      http.get(apiV1Url('/hpc-link/allocations/alloc-42'), () => {
+        phases.push('assigned')
+        return jsonResponse({ data: { allocation: { allocation_id: 'alloc-42', status: 'running', requested_gpu_count: 1 } } })
+      }),
+      http.post(apiV1Url('/hpc-link/allocations/alloc-42/preflight'), () => {
+        phases.push('checked')
+        return jsonResponse({ data: { preflight: { success: true } } })
+      }),
+    )
+    const wrapper = await mountReview()
+
+    expect(wrapper.text()).toContain('The scheduler has no matching resources available for this request yet.')
+    expect(executeRequest).toBeNull()
+    await wrapper.get('[data-testid="submit-confirm"]').trigger('click')
+    await flushPromises()
+    await flushPromises()
+
+    expect(allocationRequests).toBe(0)
+    expect(phases).toEqual(['assigned', 'checked'])
+    expect(executeRequest).toMatchObject({ session_id: 42, async_execution: true })
+    wrapper.unmount()
+  })
+
   it('shows actionable blockers and makes no allocation or execution requests', async () => {
     server.use(http.post(apiV2Url('/pipelines/render/readiness'), () => jsonResponse({ data: {
       ready: false, selected_count: 1,

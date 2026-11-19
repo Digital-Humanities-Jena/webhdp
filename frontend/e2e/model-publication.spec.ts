@@ -54,6 +54,62 @@ async function setup(page: Page) {
   await page.route(apiV1('/model-publication/jobs'), route => fulfillJson(route, { data: { jobs: [] } }))
 }
 
+test('lets a new user run, review, download and replay the 3D tutorial without a Sandbox key', async ({ page }) => {
+  await setup(page)
+  await seedAuthToken(page)
+  await mockCurrentUser(page, { ...defaultUser, onboarding_required: true })
+  await page.route(apiV1('/model-publication/availability'), route => fulfillJson(route, {
+    data: { ready: true, practice_ready: true, credential_ready: false },
+  }))
+  const requestKeys: string[] = []
+  const queuedPractice = { ...baseJob, run_mode: 'practice', stage: 'queued', status: 'queued', ahead: 2 }
+  const finishedPractice = { ...completedJob, run_mode: 'practice', draft: null,
+    files: [{ name: 'model.glb', size: 256, format: 'Model' }, { name: 'metadata.csv', size: 640, format: 'Source spreadsheet' }],
+  }
+  let current: typeof queuedPractice | typeof finishedPractice = queuedPractice
+  await page.route(apiV1('/model-publication/jobs'), async route => {
+    const request = route.request()
+    if (request.method() === 'GET') {
+      expect(new URL(request.url()).searchParams.get('run_mode')).toBe('practice')
+      await fulfillJson(route, { data: { jobs: requestKeys.length ? [current] : [] } })
+      return
+    }
+    expect(request.postData()).toMatch(/name="run_mode"\r\n\r\npractice/)
+    expect(request.postData()).toMatch(/name="sample_id"\r\n\r\npainted-floor-tile/)
+    requestKeys.push(request.headers()['idempotency-key'])
+    await fulfillJson(route, { data: { job: current } }, 202)
+  })
+  await page.route(apiV1('/model-publication/jobs/sample-request/files/model.glb'), route => route.fulfill({
+    status: 200, contentType: 'model/gltf-binary', body: 'sample GLB bytes',
+  }))
+
+  await page.goto('/tutorial/3d')
+  await expect(page.getByRole('heading', { name: 'Try the 3D asset pipeline' })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Selected sample' }).getByLabel('Title')).toHaveValue(dataset.title)
+  await expect(page.getByRole('link', { name: 'Manage your Zenodo Sandbox key' })).toHaveCount(0)
+  await page.getByRole('button', { name: 'Run practice pipeline' }).click()
+  await expect(page.getByRole('region', { name: 'Processing queue' })).toContainText('Your place in the queue is 3.')
+  current = finishedPractice
+
+  await expect(page.getByText('Practice results ready')).toBeVisible()
+  await page.getByRole('button', { name: 'Inspect texture repairs' }).click()
+  await expect(page.getByRole('dialog', { name: 'Texture repair details' })).toContainText('tile-pattern.png')
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('heading', { name: 'Zenodo Sandbox draft' })).toHaveCount(0)
+  const [download] = await Promise.all([
+    page.waitForEvent('download'), page.getByRole('button', { name: 'Download model.glb' }).click(),
+  ])
+  expect(download.suggestedFilename()).toBe('model.glb')
+
+  await page.reload()
+  await expect(page.getByText('Practice results ready')).toBeVisible()
+  await page.getByRole('button', { name: 'Run tutorial again' }).click()
+  current = queuedPractice
+  await page.getByRole('button', { name: 'Run practice pipeline' }).click()
+  await expect.poll(() => requestKeys.length).toBe(2)
+  expect(requestKeys[0]).not.toBe(requestKeys[1])
+})
+
 test('offers download links publicly and retains the workflow after sign in', async ({ page }) => {
   await setup(page)
   const downloadPath = '/model-publication/samples/painted-floor-tile'

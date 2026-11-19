@@ -65,7 +65,7 @@ export async function loginThroughUi(page: Page, {
   await page.getByTestId('login-email').fill(email)
   await page.getByTestId('login-password').fill(password)
   await page.getByTestId('login-submit').click()
-  await expect(page).toHaveURL(/\/workflow\/upload$/)
+  await expect(page).toHaveURL(/\/dashboard$/)
 }
 
 export async function mockSetupStatus(page: Page, initialized = true) {

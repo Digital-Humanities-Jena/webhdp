@@ -301,6 +301,7 @@ def test_output_preview_local_returns_structured_validation_sections(tmp_path, m
     msf_path.write_text("filename,title\nartifact.glb,Artifact\n", encoding="utf-8")
 
     monkeypatch.setattr(msf_routes, "_is_admin_request_user", lambda: True)
+    monkeypatch.setattr(msf_routes, "_require_mounted_inputs", lambda: None)
     monkeypatch.setattr(
         msf_routes.CloudUploadService,
         "get_storage_mode",

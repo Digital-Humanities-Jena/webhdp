@@ -29,6 +29,14 @@ PUBLIC_PATH_PREFIXES = (
 )
 PUBLIC_EXACT_PATHS = {
     "/api/v1/health",
+    "/api/v1/auth/register",
+    "/api/v1/auth/resend-verification",
+    "/api/v1/auth/verify-email",
+    "/api/v1/auth/verify-email/{token}",
+    "/api/v1/auth/login",
+    "/api/v1/auth/login/verify-code",
+    "/api/v1/auth/login/verify-recovery-code",
+    "/api/v1/auth/login/resend-code",
     "/api/v1/docs/index",
     "/api/v1/model-publication/samples",
     "/api/v1/link/discovery",

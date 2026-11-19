@@ -5,12 +5,14 @@
         <div class="px-6 py-5 border-b border-gray-200 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <h1 class="text-2xl font-semibold text-gray-900">Institution Workspaces</h1>
-            <p class="text-sm text-gray-500 mt-1">Manage shared organizations, members, default communities, and institution-level Zenodo credentials.</p>
+            <p class="text-sm text-gray-500 mt-1">Open your institution’s shared workspace or request a new one.</p>
           </div>
-          <div v-if="isAdmin" class="flex gap-3">
+          <div v-if="isAdmin" id="create-institution" class="flex gap-3">
             <input
               v-model.trim="createForm.name"
               type="text"
+              aria-label="New institution name"
+              maxlength="255"
               placeholder="New institution name"
               class="block rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
             />
@@ -28,7 +30,7 @@
           <aside class="xl:col-span-1 p-5 bg-gray-50 space-y-3">
             <div v-if="loadingInstitutions" class="text-sm text-gray-500">Loading institutions...</div>
             <div v-else-if="!institutionOptions.length" class="rounded-lg border border-dashed border-gray-300 bg-white p-4 text-sm text-gray-500">
-              No institution workspaces available.
+              {{ isAdmin ? 'There are no institution workspaces yet.' : 'You have no memberships yet. Open your invitation email to join an existing workspace.' }}
             </div>
             <button
               v-for="institution in institutionOptions"
@@ -39,7 +41,7 @@
               @click="selectInstitution(institution.id)"
             >
               <p class="text-sm font-semibold text-gray-900">{{ institution.name }}</p>
-              <p class="text-xs text-gray-500 mt-1 capitalize">{{ institution.role || 'member' }} role</p>
+              <p class="text-xs text-gray-500 mt-1 capitalize">{{ institution.role ? `${institution.role} role` : 'Site administration' }}</p>
             </button>
           </aside>
 
@@ -61,11 +63,23 @@
                   <div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div class="md:col-span-2">
                       <label class="block text-sm font-medium text-gray-700 mb-1">Name</label>
-                      <input v-model.trim="institutionForm.name" type="text" class="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm" />
+                      <input v-model.trim="institutionForm.name" type="text" :disabled="!isAdmin" maxlength="255" class="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 disabled:bg-gray-50 sm:text-sm" />
                     </div>
                     <div class="md:col-span-2">
-                      <label class="block text-sm font-medium text-gray-700 mb-1">Description</label>
-                      <textarea v-model.trim="institutionForm.description" rows="4" class="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm" />
+                      <label for="workspace-description" class="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                      <textarea id="workspace-description" v-model.trim="institutionForm.description" rows="4" maxlength="10000"
+                        :disabled="!canManageInstitution" class="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 disabled:bg-gray-50 sm:text-sm" />
+                    </div>
+                    <div v-if="canManageInstitution" class="md:col-span-2">
+                      <label for="workspace-visibility" class="block text-sm font-medium text-gray-700 mb-1">Directory visibility</label>
+                      <select id="workspace-visibility" v-model="institutionForm.profileVisibility" aria-describedby="workspace-visibility-help"
+                        class="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm">
+                        <option value="private">Private</option>
+                        <option value="internal">Visible to signed-in users</option>
+                      </select>
+                      <p id="workspace-visibility-help" class="mt-1 text-xs text-gray-600">
+                        Visibility makes the institution searchable and shares its profile, including the description, with signed-in users. Joining still requires an invitation.
+                      </p>
                     </div>
                   </div>
                   <div class="mt-4 flex justify-end">
@@ -140,20 +154,14 @@
                 <article class="rounded-xl border border-gray-200 p-5">
                   <div class="flex items-center justify-between gap-3">
                     <div>
-                      <h2 class="text-lg font-semibold text-gray-900">Members</h2>
+                      <h2 ref="memberHeading" tabindex="-1" class="text-lg font-semibold text-gray-900">Members</h2>
                       <p class="text-sm text-gray-500 mt-1">Managers and owners can maintain shared membership here.</p>
                     </div>
                   </div>
                   <div class="mt-4 space-y-4">
-                    <div v-if="canManageInstitution" class="grid grid-cols-1 md:grid-cols-[1fr_180px_auto] gap-3">
-                      <input v-model.trim="membershipForm.email" type="email" placeholder="user@example.com" class="block rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm" />
-                      <select v-model="membershipForm.role" class="block rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm">
-                        <option v-for="role in institutionRoles" :key="role" :value="role">{{ role }}</option>
-                      </select>
-                      <button type="button" :disabled="savingMembership || !membershipForm.email" class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 disabled:opacity-50" @click="addMembership">
-                        {{ savingMembership ? 'Adding...' : 'Add member' }}
-                      </button>
-                    </div>
+                    <InstitutionInvitations v-if="canManageInstitution" :key="selectedInstitution.id"
+                      :institution-id="selectedInstitution.id" :roles="assignableInstitutionRoles"
+                      @changed="loadInstitutionAuditEvents(selectedInstitution.id)" />
                     <div
                       v-for="membership in selectedInstitution.memberships || []"
                       :key="membership.id"
@@ -161,27 +169,32 @@
                     >
                       <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                         <div>
-                          <p class="text-sm font-semibold text-gray-900">{{ membership.user?.email || `User #${membership.user_id}` }}</p>
-                          <p class="text-xs text-gray-500 mt-1">User ID {{ membership.user_id }}</p>
+                          <p class="text-sm font-semibold text-gray-900">{{ memberLabel(membership) }}</p>
+                          <p v-if="membership.user?.email && membership.user.email !== memberLabel(membership)" class="text-xs text-gray-500 mt-1">
+                            {{ membership.user.email }}
+                          </p>
                         </div>
-                        <div class="flex items-center gap-2">
+                        <div v-if="canManageInstitution" class="flex items-center gap-2">
                           <select
                             :value="membership.role"
-                            :disabled="!canManageInstitution"
+                            :aria-label="`Role for ${memberLabel(membership)}`"
+                            :disabled="membership.role === 'owner' && !canManageOwners"
                             class="block rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
                             @change="updateMembershipRole(membership, $event.target.value)"
                           >
-                            <option v-for="role in institutionRoles" :key="role" :value="role">{{ role }}</option>
+                            <option v-for="role in (membership.role === 'owner' ? institutionRoles : assignableInstitutionRoles)" :key="role" :value="role">{{ role }}</option>
                           </select>
                           <button
                             type="button"
-                            :disabled="!canManageInstitution"
+                            :aria-label="`Remove ${memberLabel(membership)}`"
+                            :disabled="membership.role === 'owner' && !canManageOwners"
                             class="px-3 py-2 text-xs font-medium text-red-600 border border-red-200 rounded-md hover:bg-red-50 disabled:opacity-50"
                             @click="removeMembership(membership)"
                           >
                             Remove
                           </button>
                         </div>
+                        <p v-else class="text-sm capitalize text-gray-600">{{ membership.role }}</p>
                       </div>
                     </div>
                   </div>
@@ -307,19 +320,25 @@
           </div>
         </div>
       </section>
+      <InstitutionWorkspaceRequests :key="isAdmin" :admin="isAdmin" @approved="openApprovedWorkspace" />
     </div>
   </div>
 </template>
 
 <script setup>
 import { computed, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import ZenodoCredentialValidationReport from '@/components/account/ZenodoCredentialValidationReport.vue'
+import InstitutionInvitations from '@/components/account/InstitutionInvitations.vue'
+import InstitutionWorkspaceRequests from '@/components/account/InstitutionWorkspaceRequests.vue'
 import institutionService from '@/services/institution.service'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 
 const authStore = useAuthStore()
 const toast = useToast()
+const route = useRoute()
+const router = useRouter()
 
 const credentialEnvironments = ['sandbox', 'production']
 const institutionRoles = ['reader', 'curator', 'manager', 'owner']
@@ -328,17 +347,17 @@ const loadingInstitutions = ref(false)
 const loadingDetail = ref(false)
 const creatingInstitution = ref(false)
 const savingInstitution = ref(false)
-const savingMembership = ref(false)
 const savingCommunity = ref(false)
 const loadingAudit = ref(false)
 const selectedInstitutionId = ref(null)
 const selectedInstitution = ref(null)
+const memberHeading = ref(null)
+const adminInstitutions = ref([])
 const auditEvents = ref([])
 const auditPagination = reactive({ page: 1, per_page: 10, total: 0, pages: 1 })
 
 const createForm = reactive({ name: '' })
-const institutionForm = reactive({ name: '', description: '' })
-const membershipForm = reactive({ email: '', role: 'reader' })
+const institutionForm = reactive({ name: '', description: '', profileVisibility: 'private' })
 const communityForm = reactive({ identifier: '', enabled: true, is_primary_submission: false, is_moderation_default: false, sort_order: 0 })
 const institutionCredentialState = reactive({
   sandbox: { credential: null, token: '', saving: false, validating: false, deleting: false },
@@ -346,17 +365,22 @@ const institutionCredentialState = reactive({
 })
 
 const isAdmin = computed(() => authStore.user?.role === 'admin')
-const institutionOptions = computed(() => authStore.institutions || [])
+const institutionOptions = computed(() => isAdmin.value ? adminInstitutions.value : authStore.institutions || [])
 const currentInstitutionRole = computed(() => {
   const institution = institutionOptions.value.find((item) => item.id === selectedInstitutionId.value)
   return institution?.role || null
 })
 const canManageInstitution = computed(() => isAdmin.value || ['manager', 'owner'].includes(currentInstitutionRole.value))
+const canManageOwners = computed(() => isAdmin.value || currentInstitutionRole.value === 'owner')
+const assignableInstitutionRoles = computed(() => canManageOwners.value ? institutionRoles : institutionRoles.filter(role => role !== 'owner'))
 const formatTimestamp = (value) => value ? new Date(value).toLocaleString() : 'Unknown'
+const memberLabel = (membership) => membership.user?.display_name || membership.user?.full_name || membership.user?.email
+  || (canManageInstitution.value ? `Member #${membership.user_id}` : 'Member')
 
 const resetInstitutionForm = (institution) => {
   institutionForm.name = institution?.name || ''
   institutionForm.description = institution?.description || ''
+  institutionForm.profileVisibility = institution?.profile_visibility === 'internal' ? 'internal' : 'private'
 }
 
 const resetInstitutionCredentials = () => {
@@ -383,6 +407,7 @@ const loadInstitutionDetail = async (institutionId) => {
   loadingDetail.value = true
   try {
     const response = await institutionService.getInstitution(institutionId)
+    if (institutionId !== selectedInstitutionId.value) return
     selectedInstitution.value = response.data?.institution || null
     resetInstitutionForm(selectedInstitution.value)
     resetInstitutionCredentials()
@@ -390,7 +415,7 @@ const loadInstitutionDetail = async (institutionId) => {
   } catch (error) {
     toast.error(error?.error?.message || error?.message || 'Failed to load institution workspace')
   } finally {
-    loadingDetail.value = false
+    if (institutionId === selectedInstitutionId.value) loadingDetail.value = false
   }
 }
 
@@ -409,6 +434,7 @@ const loadInstitutionAuditEvents = async (institutionId) => {
       page: 1,
       per_page: auditPagination.per_page,
     })
+    if (institutionId !== selectedInstitutionId.value) return
     auditEvents.value = response.data?.audit_events || []
     const pagination = response.data?.pagination || {}
     auditPagination.page = pagination.page || 1
@@ -416,21 +442,25 @@ const loadInstitutionAuditEvents = async (institutionId) => {
     auditPagination.total = pagination.total || 0
     auditPagination.pages = pagination.pages || 1
   } catch (error) {
+    if (institutionId !== selectedInstitutionId.value) return
     auditEvents.value = []
     toast.error(error?.error?.message || error?.message || 'Failed to load institution audit history')
   } finally {
-    loadingAudit.value = false
+    if (institutionId === selectedInstitutionId.value) loadingAudit.value = false
   }
 }
 
-const loadInstitutions = async () => {
+const loadInstitutions = async (preferredId) => {
   loadingInstitutions.value = true
   try {
     await refreshAuthUser()
-    if (!selectedInstitutionId.value) {
-      selectedInstitutionId.value = authStore.user?.default_institution_id || institutionOptions.value[0]?.id || null
-    }
+    if (isAdmin.value) adminInstitutions.value = (await institutionService.listInstitutions({ all: true })).data?.institutions || []
+    const candidates = [preferredId, Number(route.query.workspace), selectedInstitutionId.value, authStore.user?.default_institution_id]
+    selectedInstitutionId.value = candidates.find(id => institutionOptions.value.some(institution => institution.id === id))
+      || institutionOptions.value[0]?.id || null
     await loadInstitutionDetail(selectedInstitutionId.value)
+  } catch (error) {
+    toast.error(error?.error?.message || 'Failed to load institution workspaces')
   } finally {
     loadingInstitutions.value = false
   }
@@ -438,8 +468,13 @@ const loadInstitutions = async () => {
 
 const selectInstitution = async (institutionId) => {
   selectedInstitutionId.value = institutionId
+  const query = { ...route.query, workspace: String(institutionId) }
+  delete query.section
+  router.replace({ query })
   await loadInstitutionDetail(institutionId)
 }
+
+const openApprovedWorkspace = (institutionId) => loadInstitutions(institutionId)
 
 const createInstitution = async () => {
   creatingInstitution.value = true
@@ -447,9 +482,7 @@ const createInstitution = async () => {
     const response = await institutionService.createInstitution({ name: createForm.name })
     createForm.name = ''
     toast.success('Institution created successfully')
-    await refreshAuthUser()
-    selectedInstitutionId.value = response.data?.institution?.id || null
-    await loadInstitutionDetail(selectedInstitutionId.value)
+    await loadInstitutions(response.data?.institution?.id)
   } catch (error) {
     toast.error(error?.error?.message || error?.message || 'Failed to create institution')
   } finally {
@@ -458,40 +491,23 @@ const createInstitution = async () => {
 }
 
 const saveInstitution = async () => {
-  if (!selectedInstitution.value) return
+  if (!selectedInstitution.value || !canManageInstitution.value) return
   savingInstitution.value = true
   try {
-    const response = await institutionService.updateInstitution(selectedInstitution.value.id, {
-      name: institutionForm.name,
-      description: institutionForm.description,
-    })
+    const payload = { description: institutionForm.description }
+    if (isAdmin.value) payload.name = institutionForm.name
+    if (institutionForm.profileVisibility !== (selectedInstitution.value.profile_visibility || 'private')) {
+      payload.profile_visibility = institutionForm.profileVisibility
+    }
+    const response = await institutionService.updateInstitution(selectedInstitution.value.id, payload)
     selectedInstitution.value = response.data?.institution || selectedInstitution.value
     await loadInstitutionAuditEvents(selectedInstitution.value.id)
-    await refreshAuthUser()
+    await loadInstitutions(selectedInstitution.value.id)
     toast.success('Institution updated successfully')
   } catch (error) {
     toast.error(error?.error?.message || error?.message || 'Failed to update institution')
   } finally {
     savingInstitution.value = false
-  }
-}
-
-const addMembership = async () => {
-  if (!selectedInstitution.value) return
-  savingMembership.value = true
-  try {
-    await institutionService.createMembership(selectedInstitution.value.id, {
-      email: membershipForm.email,
-      role: membershipForm.role,
-    })
-    membershipForm.email = ''
-    membershipForm.role = 'reader'
-    await loadInstitutionDetail(selectedInstitution.value.id)
-    toast.success('Institution membership saved')
-  } catch (error) {
-    toast.error(error?.error?.message || error?.message || 'Failed to save membership')
-  } finally {
-    savingMembership.value = false
   }
 }
 
@@ -641,13 +657,24 @@ const deleteInstitutionCredential = async (environment) => {
 }
 
 watch(
-  () => authStore.user?.default_institution_id,
-  (defaultInstitutionId) => {
-    if (!selectedInstitutionId.value && defaultInstitutionId) {
-      selectedInstitutionId.value = defaultInstitutionId
+  () => route.query.workspace,
+  (workspace) => {
+    const id = Number(workspace)
+    if (!Number.isSafeInteger(id) || id <= 0 || id === selectedInstitutionId.value) return
+    if (institutionOptions.value.some(institution => institution.id === id)) {
+      selectedInstitutionId.value = id
+      loadInstitutionDetail(id)
+    } else {
+      loadInstitutions(id)
     }
   }
 )
+
+watch([memberHeading, () => route.query.section, () => route.query.workspace], ([heading, section, workspace]) => {
+  if (section === 'members' && canManageInstitution.value && Number(workspace) === selectedInstitution.value?.id) {
+    heading?.focus()
+  }
+}, { flush: 'post' })
 
 loadInstitutions()
 </script>

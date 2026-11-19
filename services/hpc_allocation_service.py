@@ -5,30 +5,37 @@ from __future__ import annotations
 import json
 import os
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 from urllib.parse import quote
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from sqlalchemy import or_
 
 from database.database import db
-from database.models import HpcAllocation, HpcArtifact, HpcLinkConfig, Session as DBSession, User, UserRole
-from exceptions import ResourceNotFoundError, SecurityError, ValidationError
+from database.models import HpcAllocation, HpcArtifact, HpcLinkConfig, PipelineRun, PipelineRunStatus, PlaygroundRun, Session as DBSession, User, UserRole
+from database.webhdp_link_models import LinkRun
+from exceptions import APIConnectionError, AppException, ResourceNotFoundError, SecurityError, ValidationError
 from services.credential_crypto import decrypt_secret, encrypt_secret
 from services.cloud_upload_service import STORAGE_DROPBOX, STORAGE_GDRIVE, STORAGE_SERVER, CloudUploadService
 from services.hpc_link_client import HpcLinkClient
 from services.notification_service import notify_user
 from services.registry_lock import OperationConflict, registry_lock, serialize_registry
+from services.session_access_service import can_edit_session, is_session_mutable
 
 
 TERMINAL_ALLOCATION_STATES = {"failed", "released", "expired", "cancelled"}
 ACTIVE_ALLOCATION_STATES = {"allocating", "running"}
 QUEUEABLE_ALLOCATION_STATES = {"queued", "allocating", "running"}
+ALLOCATION_PURPOSES = {"workflow", "playground"}
+MAX_SESSION_ID = 2**63 - 1
 PARTITION_TOKEN_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 DEFAULT_PARTITION_PLACEHOLDER = "partition-a"
 PARTITION_SEQUENCE_ENV = "HPC_LINK_PARTITION_SEQUENCE"
 PARTITION_ATTEMPT_TIMEOUT_ENV = "HPC_LINK_PARTITION_ATTEMPT_TIMEOUT_SECONDS"
+KEYED_SUBMISSION_PENDING = "CONFIRMING_SUBMISSION"
+LEGACY_SUBMISSION_PENDING = "CONFIRMING_LEGACY_SUBMISSION"
+SUBMISSION_RETRY_DELAY = timedelta(seconds=30)
 
 
 def _utc_now_naive() -> datetime:
@@ -74,6 +81,31 @@ def _json_list(value: Any) -> list[Any]:
     except (TypeError, ValueError):
         return []
     return parsed if isinstance(parsed, list) else []
+
+
+class HpcQuotaExceeded(AppException):
+    status_code = 429
+    error_code = "HPC_QUOTA_EXCEEDED"
+
+
+def parse_allocation_integer(value: Any, *, name: str, minimum: int, maximum: Optional[int] = None) -> int:
+    if type(value) in (int, str):
+        try:
+            number = int(value)
+        except ValueError:
+            pass
+        else:
+            if number >= minimum and (maximum is None or number <= maximum):
+                return number
+    if maximum is not None:
+        raise ValidationError(f"{name} must be a whole number from {minimum} to {maximum}.")
+    raise ValidationError(f"{name} must be a non-negative integer" if minimum == 0 else f"{name} must be a positive integer.")
+
+
+def validate_allocation_purpose(purpose: str) -> str:
+    if purpose not in ALLOCATION_PURPOSES:
+        raise ValidationError("Select workflow or playground as the allocation purpose.")
+    return purpose
 
 
 class HpcAllocationService:
@@ -210,11 +242,12 @@ class HpcAllocationService:
 
     @staticmethod
     def user_can_allocate(user: User, *, purpose: str = "workflow") -> bool:
+        if not user:
+            return False
         if user.role == UserRole.ADMIN:
             return True
-        if purpose == "playground" and user.role == UserRole.MODERATOR:
-            return True
-        return bool(user.is_verified and user.has_capability("hpc_link_access"))
+        return bool(user.is_verified and (user.has_capability("hpc_link_access")
+                    or purpose == "playground" and user.role == UserRole.MODERATOR))
 
     def require_allocation_access(self, user: User, *, purpose: str = "workflow") -> None:
         if not user.is_verified and user.role != UserRole.ADMIN:
@@ -230,6 +263,10 @@ class HpcAllocationService:
             "session_id": allocation.session_id,
             "purpose": allocation.purpose,
             "status": allocation.status,
+            "can_release": (allocation.status in QUEUEABLE_ALLOCATION_STATES
+                            and not self._awaiting_submission_confirmation(allocation)
+                            and not self.allocation_is_in_use(allocation)),
+            "awaiting_confirmation": self._awaiting_submission_confirmation(allocation),
             "requested_partition": allocation.requested_partition,
             "partition_attempt_index": int(allocation.partition_attempt_index or 0),
             "partition_attempt_started_at": allocation.partition_attempt_started_at.isoformat()
@@ -347,10 +384,53 @@ class HpcAllocationService:
         allocation.last_health_json = None
 
     def _active_count(self, *, user_id: Optional[int] = None) -> int:
-        query = HpcAllocation.query.filter(HpcAllocation.status.in_(list(ACTIVE_ALLOCATION_STATES)))
+        query = HpcAllocation.query.filter(HpcAllocation.status.in_(ACTIVE_ALLOCATION_STATES),
+            or_(HpcAllocation.reservation_id.is_(None), HpcAllocation.expires_at.is_(None),
+                HpcAllocation.expires_at > _utc_now_naive()))
         if user_id is not None:
             query = query.filter(HpcAllocation.user_id == int(user_id))
         return int(query.count())
+
+    def _queued_count(self, *, user_id: Optional[int] = None) -> int:
+        query = HpcAllocation.query.filter_by(status="queued")
+        if user_id is not None:
+            query = query.filter_by(user_id=user_id)
+        return query.count()
+
+    @staticmethod
+    def allocation_is_in_use(allocation: HpcAllocation) -> bool:
+        if allocation.status != "running" or allocation.session_id is None:
+            return False
+        if any(model.query.filter(model.session_id == allocation.session_id,
+                model.status.in_({PipelineRunStatus.PENDING, PipelineRunStatus.RUNNING})).first()
+                for model in (PipelineRun, PlaygroundRun)):
+            return True
+        return LinkRun.query.filter(LinkRun.session_id == allocation.session_id,
+                                    LinkRun.status.in_({"queued", "running"})).first() is not None
+
+    @staticmethod
+    def _request_limits() -> Dict[str, int]:
+        return {
+            "queued_limit": max(1, _env_int("HPC_LINK_MAX_QUEUED_ALLOCATIONS_PER_USER", 2)),
+            "global_queued_limit": max(1, _env_int("HPC_LINK_MAX_QUEUED_ALLOCATIONS", 24)),
+            "max_gpu_count": min(4, max(0, _env_int("HPC_LINK_MAX_GPUS_PER_ALLOCATION", 4))),
+            "max_duration_minutes": min(10080, max(5, _env_int("HPC_LINK_MAX_DURATION_MINUTES_PER_ALLOCATION", 10080))),
+        }
+
+    def allocation_quota(self, user: User, config: HpcLinkConfig) -> Dict[str, int]:
+        limits = self._request_limits()
+        return {
+            "active": self._active_count(user_id=user.id),
+            "active_limit": min(int(config.max_active_allocations_per_user or 1), int(config.max_active_allocations or 1)),
+            "queued": self._queued_count(user_id=user.id),
+            **{key: limits[key] for key in ("queued_limit", "max_gpu_count", "max_duration_minutes")},
+        }
+
+    def list_user_allocations(self, user: User) -> list[Dict[str, Any]]:
+        rows = (HpcAllocation.query.filter(HpcAllocation.user_id == user.id,
+                HpcAllocation.status.in_(QUEUEABLE_ALLOCATION_STATES))
+                .order_by(HpcAllocation.requested_at.desc(), HpcAllocation.id.desc()).all())
+        return [self.serialize_allocation(row) for row in rows]
 
     def _can_start_next(self, config: HpcLinkConfig, allocation: HpcAllocation) -> bool:
         if self._active_count() >= int(config.max_active_allocations or 1):
@@ -364,36 +444,62 @@ class HpcAllocationService:
         config = self.get_or_create_config()
         if not config.enabled:
             raise ValidationError("HPC-Link is not enabled on this WebHDP instance")
+        validate_allocation_purpose(purpose)
         self.require_allocation_access(user, purpose=purpose)
 
         if session_id is not None:
-            session_row = db.session.get(DBSession, int(session_id))
+            session_id = parse_allocation_integer(session_id, name="Session ID", minimum=1, maximum=MAX_SESSION_ID)
+            session_row = db.session.get(DBSession, session_id)
             if session_row is None:
                 raise ResourceNotFoundError("Session not found")
             if session_row.user_id != user.id and user.role != UserRole.ADMIN:
                 raise SecurityError("Access denied for this workflow session")
+            if not is_session_mutable(session_row):
+                raise SecurityError("This read-only session cannot request an HPC allocation")
+        elif purpose == "playground":
+            raise ValidationError("Select an upload session before requesting a Playground allocation.")
 
-        existing = None
+        limits = self._request_limits()
+        raw_gpu_count = payload.get("gpu_count")
+        explicit_gpu_count = raw_gpu_count not in (None, "")
+        requested_gpu_count = parse_allocation_integer(
+            raw_gpu_count if explicit_gpu_count else config.default_gpu_count if config.default_gpu_count is not None else 1,
+            name="GPU count", minimum=0,
+        )
+        if requested_gpu_count > limits["max_gpu_count"]:
+            raise HpcQuotaExceeded(f"An allocation can request at most {limits['max_gpu_count']} GPUs.")
+        raw_duration = payload.get("duration_minutes")
+        requested_duration = parse_allocation_integer(
+            raw_duration if raw_duration not in (None, "") else config.default_duration_minutes or 30,
+            name="Allocation duration in minutes", minimum=5, maximum=10080,
+        )
+        if requested_duration > limits["max_duration_minutes"]:
+            raise HpcQuotaExceeded(f"An allocation can request at most {limits['max_duration_minutes']} minutes.")
+        gpu_type = str(payload.get("gpu_type") or config.default_gpu_type or "").strip() or None
+        if gpu_type and not PARTITION_TOKEN_RE.fullmatch(gpu_type):
+            raise ValidationError("GPU type must be a Slurm resource name.")
+
+        existing = HpcAllocation.query.filter_by(session_id=session_id).filter(
+            HpcAllocation.status.in_(QUEUEABLE_ALLOCATION_STATES))
         if session_id is not None:
-            existing = (
-                HpcAllocation.query.filter(
-                    HpcAllocation.session_id == int(session_id),
-                    or_(HpcAllocation.purpose == purpose, HpcAllocation.reservation_id.is_not(None)),
-                    HpcAllocation.status.in_(list(QUEUEABLE_ALLOCATION_STATES)),
-                )
-                .order_by(HpcAllocation.requested_at.desc())
-                .first()
-            )
+            existing = existing.filter(or_(HpcAllocation.purpose == purpose, HpcAllocation.reservation_id.is_not(None)))
+        else:
+            existing = existing.filter_by(user_id=user.id, purpose=purpose)
+        existing = existing.order_by(HpcAllocation.requested_at.desc(), HpcAllocation.id.desc()).first()
         if existing is not None:
-            if existing.reservation_id is not None and existing.user_id != user.id:
-                raise SecurityError("This upload session already has a reserved GPU claim")
+            if existing.user_id != user.id:
+                raise OperationConflict("This upload session already has an HPC allocation owned by another account.")
             self.process_queue()
             if existing.status in QUEUEABLE_ALLOCATION_STATES:
+                if explicit_gpu_count and existing.requested_gpu_count < requested_gpu_count:
+                    raise ValidationError(f"The existing allocation has {existing.requested_gpu_count} GPU(s). Release it before requesting {requested_gpu_count} GPU(s).")
                 return self.serialize_allocation(existing)
 
-        requested_gpu_count = payload.get("gpu_count")
-        if requested_gpu_count in (None, ""):
-            requested_gpu_count = config.default_gpu_count if config.default_gpu_count is not None else 1
+        self.process_queue()
+        if self._queued_count(user_id=user.id) >= limits["queued_limit"]:
+            raise HpcQuotaExceeded("Your HPC queue is full. Cancel a queued request or wait for it to start.")
+        if self._queued_count() >= limits["global_queued_limit"]:
+            raise HpcQuotaExceeded("The WebHDP HPC queue is full. Try again when a request starts or finishes.")
 
         partition_sequence = self._partition_sequence_for_request(config, payload)
         allocation = HpcAllocation(
@@ -402,9 +508,9 @@ class HpcAllocationService:
             purpose=purpose,
             status="queued",
             requested_partition=partition_sequence[0],
-            requested_gpu_type=str(payload.get("gpu_type") or config.default_gpu_type or "").strip() or None,
-            requested_gpu_count=int(requested_gpu_count),
-            requested_duration_minutes=int(payload.get("duration_minutes") or config.default_duration_minutes or 30),
+            requested_gpu_type=gpu_type,
+            requested_gpu_count=requested_gpu_count,
+            requested_duration_minutes=requested_duration,
             partition_sequence_json=json.dumps(partition_sequence),
             partition_attempt_index=0,
         )
@@ -446,19 +552,64 @@ class HpcAllocationService:
             HpcAllocation.status.in_(list(ACTIVE_ALLOCATION_STATES))
         ).order_by(HpcAllocation.requested_at.asc()).all():
             self.refresh_allocation(allocation)
-        queued = HpcAllocation.query.filter_by(status="queued").order_by(HpcAllocation.requested_at.asc()).all()
+        queue_deadline = _utc_now_naive() - timedelta(minutes=max(1, _env_int("HPC_LINK_QUEUED_REQUEST_TTL_MINUTES", 1440)))
+        queued = HpcAllocation.query.filter_by(status="queued").order_by(HpcAllocation.requested_at.asc(), HpcAllocation.id.asc()).all()
         for allocation in queued:
+            if allocation.requested_at <= queue_deadline:
+                allocation.status = "expired"
+                allocation.last_error = "The queued request expired before receiving an allocation."
+                db.session.commit()
+                continue
+            if allocation.purpose not in ALLOCATION_PURPOSES or not self.user_can_allocate(allocation.user, purpose=allocation.purpose):
+                allocation.status = "cancelled"
+                allocation.last_error = "HPC access is no longer enabled for this account."
+                db.session.commit()
+                continue
             if not self._can_start_next(config, allocation):
                 continue
             self._start_allocation(allocation, config)
 
-    def _start_allocation(self, allocation: HpcAllocation, config: HpcLinkConfig) -> None:
+    @staticmethod
+    def _awaiting_submission_confirmation(allocation: HpcAllocation) -> bool:
+        return (allocation.reservation_id is None and allocation.status == "allocating"
+                and not allocation.remote_session_id and allocation.partition_attempt_started_at is not None)
+
+    @staticmethod
+    def _submission_request_id(allocation: HpcAllocation) -> str:
+        return str(uuid5(NAMESPACE_URL, f"webhdp-allocation:{allocation.public_id}:{allocation.partition_attempt_index or 0}"))
+
+    def _record_submission(self, allocation: HpcAllocation, response: Any) -> None:
+        if not isinstance(response, dict) or not response.get("session_id") or not response.get("job_id"):
+            raise APIConnectionError("HPC-Link did not return an allocation handle")
+        allocation.remote_session_id = response["session_id"]
+        allocation.remote_job_id = response["job_id"]
+        allocation.remote_session_dir = response.get("remote_session_dir")
+        allocation.remote_input_dir = response.get("input_dir")
+        allocation.remote_output_dir = response.get("output_dir")
+        allocation.scheduler_state = response.get("scheduler_state") or response.get("status")
+        allocation.status = "running" if str(response.get("status") or "").lower() == "running" else "allocating"
+        allocation.expires_at = _parse_datetime(response.get("expires_at"))
+        allocation.last_health_json = json.dumps(response, sort_keys=True, default=str)
+        allocation.last_error = None
+        if allocation.status == "running":
+            allocation.allocated_at = _utc_now_naive()
+            self._notify_allocation(
+                allocation,
+                notification_type="hpc.allocation_running",
+                title="HPC allocation is running",
+                body="Your HPC allocation is ready for workflow operations.",
+                severity="success",
+            )
+
+    def _start_allocation(self, allocation: HpcAllocation, config: HpcLinkConfig, *, retry: bool = False) -> None:
         allocation.status = "allocating"
+        allocation.scheduler_state = KEYED_SUBMISSION_PENDING
         allocation.partition_attempt_started_at = _utc_now_naive()
         allocation.last_error = None
         db.session.commit()
         try:
             payload = {
+                "request_id": self._submission_request_id(allocation),
                 "partition": allocation.requested_partition,
                 "gpu_type": allocation.requested_gpu_type,
                 "gpu_count": allocation.requested_gpu_count,
@@ -466,46 +617,71 @@ class HpcAllocationService:
                 "webhdp_session_id": allocation.session_id,
                 "purpose": allocation.purpose,
             }
-            response = self.client(config).post("/api/apps/webhdp/sessions", payload, timeout=60)
-            allocation.remote_session_id = response.get("session_id")
-            allocation.remote_job_id = response.get("job_id")
-            allocation.remote_session_dir = response.get("remote_session_dir")
-            allocation.remote_input_dir = response.get("input_dir")
-            allocation.remote_output_dir = response.get("output_dir")
-            allocation.scheduler_state = response.get("scheduler_state") or response.get("status")
-            remote_status = str(response.get("status") or "").lower()
-            allocation.status = "running" if remote_status == "running" else "allocating"
-            if allocation.status == "running":
-                allocation.allocated_at = _utc_now_naive()
-            allocation.expires_at = _parse_datetime(response.get("expires_at"))
-            allocation.last_health_json = json.dumps(response, sort_keys=True, default=str)
-            if allocation.status == "running":
+            client = self.client(config)
+            try:
+                response = client.post("/api/apps/webhdp/sessions/requests", payload, timeout=60)
+            except APIConnectionError as exc:
+                if retry or exc.details.get("http_status") not in {404, 405}:
+                    raise
+                # Older gateways understand only the unkeyed route. Record that
+                # this attempt cannot be replayed even after the gateway upgrades.
+                allocation.scheduler_state = LEGACY_SUBMISSION_PENDING
+                db.session.commit()
+                payload.pop("request_id")
+                response = client.post("/api/apps/webhdp/sessions", payload, timeout=60)
+            self._record_submission(allocation, response)
+        except Exception as exc:
+            allocation.last_error = str(exc)
+            http_status = exc.details.get("http_status") if isinstance(exc, APIConnectionError) else None
+            if not retry and (isinstance(exc, ValidationError) or http_status in {400, 401, 403, 422, 429}):
+                allocation.status = "failed"
+                self._append_attempt_history(allocation, status="failed", message=str(exc))
                 self._notify_allocation(
                     allocation,
-                    notification_type="hpc.allocation_running",
-                    title="HPC allocation is running",
-                    body="Your HPC allocation is ready for workflow operations.",
-                    severity="success",
+                    notification_type="hpc.allocation_failed",
+                    title="HPC allocation failed",
+                    body="HPC-Link rejected the allocation request. Contact an administrator if this keeps happening.",
+                    severity="error",
                 )
-        except Exception as exc:
-            allocation.status = "failed"
-            allocation.last_error = str(exc)
-            self._append_attempt_history(allocation, status="failed", message=str(exc))
-            self._notify_allocation(
-                allocation,
-                notification_type="hpc.allocation_failed",
-                title="HPC allocation failed",
-                body=str(exc),
-                severity="error",
-            )
+            elif allocation.remote_session_id is None:
+                self._notify_allocation(
+                    allocation,
+                    notification_type="hpc.allocation_unconfirmed",
+                    title="Waiting for HPC submission confirmation",
+                    body="HPC-Link has not confirmed the request yet. It still counts towards your allocation limit.",
+                    severity="warning",
+                )
         db.session.commit()
+
+    def _recover_submission(self, allocation: HpcAllocation, *, retry_missing: bool = False) -> None:
+        if allocation.scheduler_state != KEYED_SUBMISSION_PENDING:
+            return
+        request_id = self._submission_request_id(allocation)
+        try:
+            response = self.client().get(f"/api/apps/webhdp/sessions/requests/{request_id}", timeout=10)
+            if isinstance(response, dict) and response.get("session_id") == request_id:
+                self._record_submission(allocation, response)
+                db.session.commit()
+                return
+        except AppException:
+            return
+        # Only a gateway that supports request identity can return a successful null.
+        if (response is None and retry_missing
+                and _utc_now_naive() - allocation.partition_attempt_started_at >= SUBMISSION_RETRY_DELAY
+                and self.user_can_allocate(allocation.user, purpose=allocation.purpose)):
+            config = self.get_or_create_config()
+            if config.enabled and (allocation.session_id is None or
+                    (can_edit_session(allocation.session, allocation.user) and is_session_mutable(allocation.session))):
+                self._start_allocation(allocation, config, retry=True)
 
     def _cancel_remote_attempt(self, allocation: HpcAllocation) -> tuple[bool, str]:
         if not allocation.remote_session_id:
             return False, "No remote session was created for this attempt"
         try:
-            self.client().delete(f"/api/apps/webhdp/sessions/{allocation.remote_session_id}", timeout=30)
-            return True, "Remote HPC-Link session cancelled"
+            response = self.client().delete(f"/api/apps/webhdp/sessions/{allocation.remote_session_id}", timeout=30)
+            if response and response.get("cancelled") is True:
+                return True, "Remote HPC-Link session cancelled"
+            return False, "HPC-Link could not confirm cancellation."
         except Exception as exc:
             allocation.last_error = str(exc)
             return False, str(exc)
@@ -527,6 +703,11 @@ class HpcAllocationService:
             remote_cancelled=cancelled,
         )
         next_index = current_index + 1
+        if not cancelled:
+            allocation.last_error = "HPC-Link could not confirm cancellation. The request still uses an allocation slot."
+            allocation.partition_attempt_started_at = _utc_now_naive()
+            db.session.commit()
+            return False
         if next_index >= len(sequence):
             allocation.status = "failed"
             allocation.last_error = (
@@ -559,28 +740,84 @@ class HpcAllocationService:
             raise SecurityError("Access denied for this HPC allocation")
         return allocation
 
-    def get_active_for_session(self, session_id: int, *, user_id: Optional[int] = None) -> Optional[HpcAllocation]:
+    def get_allocation_for_compute(self, public_id: str, user: User) -> HpcAllocation:
+        allocation = self.get_allocation(public_id, user)
+        self.require_allocation_access(user, purpose=allocation.purpose)
+        if allocation.reservation_id and allocation.user_id != user.id:
+            raise SecurityError("Only the account holding this reserved GPU claim can use it")
+        if allocation.session_id is not None and (
+            not is_session_mutable(allocation.session) or not can_edit_session(allocation.session, user)
+        ):
+            raise SecurityError("Editing access to the allocation's upload session is required")
+        if (allocation.status != "running" or not allocation.remote_session_id
+                or allocation.expires_at and allocation.expires_at <= _utc_now_naive()):
+            raise ValidationError("An active HPC allocation is required for this operation.")
+        return allocation
+
+    def get_active_for_session(self, session_id: int, *, user_id: Optional[int] = None, purpose: str = "workflow") -> Optional[HpcAllocation]:
+        now = _utc_now_naive()
         candidates = (
             HpcAllocation.query.filter(
                 HpcAllocation.session_id == int(session_id),
-                HpcAllocation.status.in_(list(ACTIVE_ALLOCATION_STATES)),
+                HpcAllocation.status == "running",
+                HpcAllocation.remote_session_id.is_not(None),
+                HpcAllocation.remote_session_id != "",
+                or_(HpcAllocation.expires_at.is_(None), HpcAllocation.expires_at > now),
             )
-            .order_by(HpcAllocation.allocated_at.desc())
+            .order_by(HpcAllocation.allocated_at.desc(), HpcAllocation.id.desc())
             .all()
         )
+        actor = db.session.get(User, int(user_id)) if user_id is not None else None
+        if user_id is not None and (not actor or not self.user_can_allocate(actor, purpose=purpose)):
+            return None
         for allocation in candidates:
+            if not allocation.user or not self.user_can_allocate(allocation.user, purpose=allocation.purpose):
+                continue
             if allocation.reservation_id is None:
-                return allocation
-            if (allocation.user_id == user_id and allocation.status == "running"
-                    and allocation.expires_at and allocation.expires_at > _utc_now_naive()):
+                if actor is None or (can_edit_session(allocation.session, actor) and is_session_mutable(allocation.session)):
+                    return allocation
+                continue
+            if (allocation.user_id == user_id and allocation.expires_at and allocation.reservation.enabled
+                    and is_session_mutable(allocation.session)):
                 from services.hpc_reservation_service import HpcReservationService
 
                 if HpcReservationService(self).can_use(allocation.reservation, allocation.user):
                     return allocation
         return None
 
+    def session_allocation_status(self, session_id: int, user: User, purpose: str) -> Dict[str, Any]:
+        """Describe the caller's latest request without polling or allocating."""
+        active = self.get_active_for_session(session_id, user_id=user.id, purpose=purpose)
+        visible = active if active is not None and active.user_id == user.id else None
+        if visible is None:
+            visible = (HpcAllocation.query.filter(
+                HpcAllocation.session_id == session_id,
+                HpcAllocation.user_id == user.id,
+                or_(HpcAllocation.purpose == purpose, HpcAllocation.reservation_id.is_not(None)),
+            ).order_by(HpcAllocation.requested_at.desc(), HpcAllocation.id.desc()).first())
+        status = visible.status if visible else None
+        if status == "running" and visible is not active:
+            # The recorded request may have expired or lost its reservation grant.
+            status = "expired" if visible.expires_at and visible.expires_at <= _utc_now_naive() else None
+        return {
+            "active_hpc_allocation": active is not None,
+            "active_hpc_gpu_count": active.requested_gpu_count if active is not None else None,
+            "gpu_allocation_status": status,
+            "gpu_allocation_id": visible.public_id if status else None,
+            "gpu_allocation_gpu_count": visible.requested_gpu_count if status else None,
+            "gpu_allocation_scheduler_reason": visible.scheduler_reason if status else None,
+        }
+
     def _reservation_client(self, allocation: HpcAllocation, *, for_compute=True) -> HpcLinkClient:
         if getattr(allocation, "reservation_id", None) is None:
+            if for_compute and isinstance(allocation, HpcAllocation) and allocation.id is not None:
+                db.session.refresh(allocation)
+                db.session.refresh(allocation.user)
+                self.require_allocation_access(allocation.user, purpose=allocation.purpose)
+                if allocation.status != "running" or (allocation.expires_at and allocation.expires_at <= _utc_now_naive()):
+                    raise ValidationError("An active HPC allocation is required for this operation.")
+                if allocation.session_id is not None and not is_session_mutable(allocation.session):
+                    raise SecurityError("This read-only session cannot use an HPC allocation")
             return self.client()
         from services.hpc_reservation_service import HpcReservationService
 
@@ -590,25 +827,30 @@ class HpcAllocationService:
             if allocation.status != "running" or not allocation.expires_at or allocation.expires_at <= _utc_now_naive():
                 raise ValidationError("This reserved GPU claim has ended")
             db.session.refresh(allocation.user)
-            if not reservations.can_use(allocation.reservation, allocation.user):
+            if not is_session_mutable(allocation.session):
+                raise SecurityError("This read-only session cannot use an HPC allocation")
+            if not allocation.reservation.enabled or not reservations.can_use(allocation.reservation, allocation.user):
                 raise SecurityError("Access to this reserved GPU is no longer enabled")
         return reservations.client_for(allocation.reservation)
 
     @serialize_registry("hpc-allocation-queue")
     def attach_allocation_to_session(self, public_id: str, user: User, session_id: int) -> Dict[str, Any]:
         allocation = self.get_allocation(public_id, user)
+        self.require_allocation_access(user, purpose=allocation.purpose)
         session_row = db.session.get(DBSession, int(session_id))
         if session_row is None:
             raise ResourceNotFoundError("Session not found")
         if session_row.user_id != user.id and user.role != UserRole.ADMIN:
             raise SecurityError("Access denied for this workflow session")
+        if not is_session_mutable(session_row):
+            raise SecurityError("This read-only session cannot use an HPC allocation")
         if allocation.session_id not in (None, int(session_id)):
             raise ValidationError("HPC allocation is already attached to another workflow session")
         if HpcAllocation.query.filter(
-            HpcAllocation.session_id == int(session_id), HpcAllocation.reservation_id.is_not(None),
-            HpcAllocation.status.in_(ACTIVE_ALLOCATION_STATES), HpcAllocation.id != allocation.id,
+            HpcAllocation.session_id == int(session_id), HpcAllocation.status.in_(QUEUEABLE_ALLOCATION_STATES),
+            or_(HpcAllocation.purpose == allocation.purpose, HpcAllocation.reservation_id.is_not(None)), HpcAllocation.id != allocation.id,
         ).first():
-            raise OperationConflict("This upload session already has a reserved GPU claim")
+            raise OperationConflict("This upload session already has an HPC allocation")
         allocation.session_id = int(session_id)
         db.session.commit()
         return self.serialize_allocation(allocation)
@@ -624,6 +866,8 @@ class HpcAllocationService:
 
                 HpcReservationService(self).complete_claim(allocation)
                 return self.serialize_allocation(allocation)
+        if self._awaiting_submission_confirmation(allocation):
+            self._recover_submission(allocation, retry_missing=True)
         if not allocation.remote_session_id or allocation.status in TERMINAL_ALLOCATION_STATES:
             return self.serialize_allocation(allocation)
         previous_status = allocation.status
@@ -642,7 +886,9 @@ class HpcAllocationService:
                 allocation.allocated_at = allocation.allocated_at or _utc_now_naive()
             elif remote_status in {"finished", "expired", "failed", "cancelled"}:
                 allocation.status = "expired"
-            elif remote_status in {"queued", "allocating"} and allocation.status not in {"running", "expired"}:
+            elif remote_status in {"queued", "allocating"}:
+                if allocation.status == "running":
+                    allocation.partition_attempt_started_at = _utc_now_naive()
                 allocation.status = "allocating"
             if response.get("scheduler_state") in {"CANCELLED", "FAILED", "TIMEOUT", "OUT_OF_MEMORY", "NODE_FAIL"}:
                 allocation.status = "expired"
@@ -820,20 +1066,31 @@ class HpcAllocationService:
         db.session.commit()
         return response
 
-    def release(self, allocation: HpcAllocation) -> Dict[str, Any]:
+    @serialize_registry("hpc-allocation-queue")
+    def release(self, allocation: HpcAllocation, *, protect_running: bool = False) -> Dict[str, Any]:
+        db.session.refresh(allocation)
+        if protect_running and self.allocation_is_in_use(allocation):
+            raise OperationConflict("Wait for this session's active run before releasing its HPC allocation.")
         if allocation.reservation_id is not None:
             from services.hpc_reservation_service import HpcReservationService
 
-            with registry_lock("hpc-allocation-queue"):
-                db.session.refresh(allocation)
-                response = HpcReservationService(self).detach(allocation)
-                allocation.status = "released"
-                allocation.released_at = allocation.released_at or _utc_now_naive()
-                db.session.commit()
-                return {"allocation": self.serialize_allocation(allocation), "remote": response}
+            response = HpcReservationService(self).detach(allocation)
+            allocation.status = "released"
+            allocation.released_at = allocation.released_at or _utc_now_naive()
+            db.session.commit()
+            self.process_queue()
+            return {"allocation": self.serialize_allocation(allocation), "remote": response}
         response: Dict[str, Any] = {"cancelled": False}
-        if allocation.remote_session_id and allocation.status not in TERMINAL_ALLOCATION_STATES:
+        if allocation.status in TERMINAL_ALLOCATION_STATES:
+            return {"allocation": self.serialize_allocation(allocation), "remote": response}
+        if self._awaiting_submission_confirmation(allocation):
+            self._recover_submission(allocation)
+            if not allocation.remote_session_id:
+                raise OperationConflict("HPC-Link has not confirmed the scheduler request. It still counts towards your limit.")
+        if allocation.remote_session_id:
             response = self.client().delete(f"/api/apps/webhdp/sessions/{allocation.remote_session_id}", timeout=30) or {}
+            if response.get("cancelled") is not True:
+                raise OperationConflict("HPC-Link could not confirm release. The allocation still counts towards your limit.")
         allocation.status = "released"
         allocation.released_at = _utc_now_naive()
         self._notify_allocation(

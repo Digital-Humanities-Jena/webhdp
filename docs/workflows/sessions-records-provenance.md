@@ -22,6 +22,15 @@ for maintainers optimizing state, reports, and record-heavy views.
 
 Primary actor: session owner, collaborator, moderator, or administrator.
 
+Personal sessions and private institution sessions are visible to their owners
+and site moderation staff. An institution session can be shared explicitly
+with its members. Readers can inspect shared progress and outputs. Curators and
+higher institution roles can work on shared sessions. Only the session owner or
+site moderation staff can move the session between workspaces or change who can
+see it. Raw `.hdpc` exports are limited to the session owner. Explorer-only
+imports are available for review and download through their supported export
+options.
+
 Entry points:
 - API: `/api/v1/sessions`
 - API: `/api/v1/sessions/<session_id>`

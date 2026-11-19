@@ -60,7 +60,7 @@ def api(tmp_path, monkeypatch):
     with app.app_context():
         db.create_all()
         admin = User(email="admin@example.test", password_hash="unused", role=UserRole.ADMIN, is_verified=True)
-        demo = User(email=DEMO_EMAIL, display_name="Live demonstration", is_verified=True)
+        demo = User(email="before-demo@example.test", display_name="Live demonstration", is_verified=True)
         demo.set_password(DEMO_PASSWORD)
         db.session.add_all([admin, demo])
         db.session.commit()
@@ -72,6 +72,7 @@ def api(tmp_path, monkeypatch):
         browser_app = link.save_client({"id": "model-deposit-tests", "name": "Test application"})
         with app.test_request_context():
             existing_token = link.issue_token(browser_app, demo, service=True)["access_token"]
+        demo.email = DEMO_EMAIL
         demo.set_capabilities([DEMO_CAPABILITY])
         db.session.commit()
 
@@ -224,6 +225,7 @@ def test_closed_or_elevated_demo_cannot_sign_in_and_issue_link_credentials(api):
 
 def test_demo_login_throttling_is_independent_of_regular_logins_and_other_sources(api, monkeypatch):
     monkeypatch.setenv("LOGIN_RATE_LIMIT_ATTEMPTS", "5")
+    monkeypatch.setenv("AUTH_TRUSTED_PROXY_HOPS", "1")
     client = api["client"]
     first_ip = {"X-Forwarded-For": "192.0.2.10"}
     second_ip = {"X-Forwarded-For": "192.0.2.11"}

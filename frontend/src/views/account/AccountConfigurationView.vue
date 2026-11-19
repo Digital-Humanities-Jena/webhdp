@@ -6,6 +6,10 @@
           <div>
             <h1 class="text-2xl font-semibold text-gray-900">Account Configuration</h1>
             <p class="text-sm text-gray-500 mt-1">Manage your identity, personal Zenodo credentials, and default workspace.</p>
+            <div v-if="!passwordChangeRequired" class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm font-semibold text-indigo-700">
+              <router-link to="/account/setup" class="underline">Account setup</router-link>
+              <router-link to="/account/usage" class="underline">Usage and limits</router-link>
+            </div>
           </div>
           <div class="flex items-center gap-3">
             <div class="h-11 w-11 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-sm font-semibold">
@@ -66,15 +70,16 @@
       </section>
 
       <section class="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        <article class="xl:col-span-2 bg-white shadow-sm rounded-xl border border-gray-200">
+        <article id="profile-settings" class="xl:col-span-2 bg-white shadow-sm rounded-xl border border-gray-200">
           <div class="px-6 py-5 border-b border-gray-200">
             <h2 class="text-lg font-semibold text-gray-900">Profile</h2>
             <p class="text-sm text-gray-500 mt-1">These fields are returned with your account context and can be used as defaults across institution workspaces.</p>
           </div>
           <form class="p-6 grid grid-cols-1 md:grid-cols-2 gap-4" @submit.prevent="handleProfileUpdate">
             <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1">Email address</label>
-              <input v-model.trim="profileForm.email" type="email" required class="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm" />
+              <label for="profile-email" class="block text-sm font-medium text-gray-700 mb-1">Verified sign-in email</label>
+              <input id="profile-email" :value="profileForm.email" type="email" readonly aria-describedby="profile-email-help" class="block w-full rounded-md border-gray-300 bg-gray-50 shadow-sm sm:text-sm" />
+              <p id="profile-email-help" class="mt-1 text-xs text-gray-600">Contact account support to change this address.</p>
             </div>
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-1">Display name</label>
@@ -89,12 +94,14 @@
               <input v-model.trim="profileForm.full_name" type="text" class="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm" />
             </div>
             <div class="relative">
-              <label class="block text-sm font-medium text-gray-700 mb-1">Institutional affiliation</label>
+              <label for="institution-affiliation" class="block text-sm font-medium text-gray-700 mb-1">Institutional affiliation</label>
               <div class="flex gap-2">
                 <input
                   v-model.trim="institutionQuery"
+                  id="institution-affiliation"
                   data-testid="institution-affiliation-input"
                   type="text"
+                  maxlength="255"
                   autocomplete="off"
                   class="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
                   @input="scheduleInstitutionSuggestions"
@@ -103,14 +110,15 @@
                 />
                 <button
                   type="button"
-                  data-testid="institution-create-button"
-                  :disabled="affiliationSaving || !institutionQuery"
+                  data-testid="institution-affiliation-save"
+                  :disabled="affiliationSaving || institutionQuery === (authStore.user?.affiliation || '')"
                   class="shrink-0 rounded-md border border-indigo-200 px-3 py-2 text-xs font-medium text-indigo-700 hover:bg-indigo-50 disabled:opacity-50"
-                  @click="createAffiliation(false)"
+                  @click="saveAffiliation"
                 >
                   Set
                 </button>
               </div>
+              <p class="mt-1 text-xs text-gray-600">Affiliation is shown on your profile. Visit <router-link to="/account/institutions" class="font-medium text-indigo-700 underline">Institution Workspaces</router-link> to request a workspace or view your memberships.</p>
               <div
                 v-if="institutionDropdownOpen && institutionSuggestions.length"
                 data-testid="institution-suggestions"
@@ -121,32 +129,10 @@
                   :key="institution.id"
                   type="button"
                   class="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-indigo-50"
-                  @mousedown.prevent="selectInstitution(institution)"
+                  @click="selectInstitution(institution)"
                 >
                   <span class="font-medium text-gray-900">{{ institution.name }}</span>
-                  <span class="text-xs text-gray-500">{{ Math.round((institution.similarity || 0) * 100) }}%</span>
                 </button>
-              </div>
-              <div v-if="similarInstitutions.length" data-testid="similar-institution-warning" class="mt-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-                <p class="font-medium">A similar institution already exists.</p>
-                <div class="mt-2 flex flex-wrap gap-2">
-                  <button
-                    v-for="institution in similarInstitutions"
-                    :key="`similar-${institution.id}`"
-                    type="button"
-                    class="rounded-md bg-white px-3 py-1.5 text-xs font-medium text-amber-900 ring-1 ring-amber-200 hover:bg-amber-100"
-                    @click="selectInstitution(institution)"
-                  >
-                    Use {{ institution.name }}
-                  </button>
-                  <button
-                    type="button"
-                    class="rounded-md bg-amber-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-800"
-                    @click="createAffiliation(true)"
-                  >
-                    Create anyway
-                  </button>
-                </div>
               </div>
             </div>
             <div>
@@ -243,7 +229,7 @@
       </section>
 
       <section class="grid grid-cols-1 xl:grid-cols-2 gap-6">
-        <article class="bg-white shadow-sm rounded-xl border border-gray-200">
+        <article id="zenodo-keys" class="bg-white shadow-sm rounded-xl border border-gray-200">
           <div class="px-6 py-5 border-b border-gray-200">
             <div class="flex items-center gap-2">
               <h2 class="text-lg font-semibold text-gray-900">Zenodo Keys</h2>
@@ -318,7 +304,7 @@
               </div>
             </div>
 
-            <div v-for="environment in credentialEnvironments" :key="environment" class="space-y-3">
+            <div v-for="environment in credentialEnvironments" :id="`zenodo-${environment}`" :key="environment" class="space-y-3">
               <div class="flex items-center justify-between gap-3">
                 <div>
                   <p class="text-sm font-semibold text-gray-900">{{ formatEnvironment(environment) }}</p>
@@ -650,8 +636,13 @@ const recoveryCodesSaved = ref(false)
 
 const newCredential = reactive({
   name: '',
-  environment: 'sandbox',
+  environment: route.query.zenodo === 'production' ? 'production' : 'sandbox',
   token: '',
+})
+watch(() => route.query.zenodo, (environment) => {
+  if (!credentialEnvironments.includes(environment) || environment === newCredential.environment) return
+  newCredential.environment = environment
+  newCredential.token = ''
 })
 const credentials = ref([])
 const activeCredentials = ref({ sandbox: null, production: null })
@@ -666,7 +657,6 @@ const institutionQuery = ref(profileForm.affiliation || '')
 const institutionSuggestions = ref([])
 const institutionDropdownOpen = ref(false)
 const affiliationSaving = ref(false)
-const similarInstitutions = ref([])
 let institutionSearchTimer = null
 
 const passwordChangeRequired = computed(() => {
@@ -732,19 +722,17 @@ const applyAffiliationResponse = (response) => {
     ...(payload.user || {}),
     institutions: payload.institutions || authStore.institutions,
     memberships: payload.memberships || authStore.memberships,
-    default_institution: payload.institution || authStore.user?.default_institution || null,
+    default_institution: payload.membership ? payload.institution : null,
   })
   Object.assign(profileForm, buildProfileForm(authStore.user))
   institutionQuery.value = profileForm.affiliation || payload.institution?.name || ''
   institutionSuggestions.value = []
-  similarInstitutions.value = []
   institutionDropdownOpen.value = false
 }
 
 const loadInstitutionSuggestions = async () => {
   const query = institutionQuery.value.trim()
   profileForm.affiliation = query
-  similarInstitutions.value = []
   if (query.length < 2) {
     institutionSuggestions.value = []
     institutionDropdownOpen.value = false
@@ -752,6 +740,7 @@ const loadInstitutionSuggestions = async () => {
   }
   try {
     const response = await institutionService.suggestInstitutions(query, { limit: 8 })
+    if (query !== institutionQuery.value) return
     institutionSuggestions.value = response.data?.institutions || []
     institutionDropdownOpen.value = institutionSuggestions.value.length > 0
   } catch (error) {
@@ -788,22 +777,15 @@ const selectInstitution = async (institution) => {
   }
 }
 
-const createAffiliation = async (confirmCreate = false) => {
+const saveAffiliation = async () => {
   const name = institutionQuery.value.trim()
-  if (!name) return
   affiliationSaving.value = true
   try {
-    const response = await institutionService.configureAffiliation({ name, confirm_create: Boolean(confirmCreate) })
+    const response = await institutionService.configureAffiliation({ name })
     applyAffiliationResponse(response)
-    toast.success(response.data?.created ? 'Institution created and assigned' : 'Institutional affiliation updated')
+    toast.success('Institutional affiliation updated')
   } catch (error) {
-    const details = error?.error?.details || error?.details || {}
-    if (error?.error?.code === 'SIMILAR_INSTITUTION_EXISTS' && Array.isArray(details.similar)) {
-      similarInstitutions.value = details.similar
-      institutionDropdownOpen.value = false
-    } else {
-      toast.error(error?.error?.message || error?.message || 'Failed to update affiliation')
-    }
+    toast.error(error?.error?.message || error?.message || 'Failed to update affiliation')
   } finally {
     affiliationSaving.value = false
   }
@@ -836,7 +818,6 @@ const handleProfileUpdate = async () => {
   profileSaving.value = true
   try {
     await authStore.updateCurrentUser({
-      email: profileForm.email,
       slug: profileForm.slug,
       display_name: profileForm.display_name,
       full_name: profileForm.full_name,
@@ -969,9 +950,11 @@ const createCredential = async () => {
 const validateCredentialById = async (credentialId) => {
   credentialLoading.value = true
   try {
-    await authService.validateZenodoCredentialById(credentialId)
+    const response = await authService.validateZenodoCredentialById(credentialId)
     await loadCredentials()
-    toast.success('Zenodo key validated')
+    const credential = response.data?.credential
+    if (credential?.validation_status === 'valid') toast.success('Zenodo key validated')
+    else toast.warning(credential?.validation_report?.summary || 'Review the Zenodo key validation report.')
   } catch (error) {
     toast.error(error?.error?.message || error?.message || 'Failed to validate Zenodo key')
   } finally {

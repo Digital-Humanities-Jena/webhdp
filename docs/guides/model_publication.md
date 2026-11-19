@@ -2,13 +2,32 @@
 
 [Prepare a 3D model](https://hdp.3drepo.eu/model-publication) packages one model using a CPU worker, checks its texture references, maps its metadata and creates a Zenodo Sandbox draft. The results are available during the run, with a confirmed file inventory when Sandbox finishes receiving them. The workflow is also available from the Uploads area.
 
+## Practise with the 3D tutorial
+
+Open the [3D tutorial](https://hdp.3drepo.eu/tutorial/3d) after signing in.
+Select the Glazed Bowl, review its spreadsheet values and start the practice run. The CPU worker checks
+the source and relinks or removes texture references using the same repair and
+export steps as the Sandbox workflow. The result includes the self-contained
+GLB, a preview image, the original CSV and the mapped metadata as JSON. Open
+the repair report to see what changed, and compare the CSV row with the mapped
+metadata before downloading the files.
+
+The tutorial uses the built-in sample library. It needs only a verified WebHDP
+account and the CPU worker. Practice files stay in WebHDP, and you can run the
+tutorial again at any time. Only your account can see and download its results.
+Finished runs and practice files are available for 48 hours. To generate the five publication metadata formats
+and check the result in Zenodo Sandbox, use **Prepare a 3D model** with your own
+Sandbox credential.
+
+Practice and Sandbox runs share the allowance shown under **Account → Usage and limits**. Each account can have three requests in progress and submit ten per rolling 24 hours. Its working files and prepared results share a 256 MiB workspace. Finished results can free space as they expire after 48 hours. Pending jobs reserve some space and release the unused portion when processing finishes.
+
 ## Try a model
 
 The [sample library](https://hdp.3drepo.eu/model-publication/samples) is public. The ZIP files include original CC0 models and a Metadata Source File (MSF).
 
 | Model | Package | What to look for |
 | --- | --- | --- |
-| Terracotta Vessel | Nested OBJ, MTL and texture folders | The existing references and folder structure carry through into the prepared ZIP. |
+| Terracotta Vessel | Nested OBJ, MTL and texture folders | WebHDP preserves the usable references and embeds the textures in the GLB. |
 | Painted Floor Tile | glTF with separate geometry and image folders | WebHDP reconnects the uniquely identifiable texture when its filename has a transposed letter. |
 | Bronze Seal | OBJ and MTL at the archive root | The workflow reports the absent texture and uses the bronze material colour. |
 | Glazed Bowl | OBJ with texture folders | WebHDP relinks the glaze from its new folder and omits the unreadable detail image. The working glaze still appears in the prepared package. |
@@ -49,7 +68,9 @@ Each prepared account can open one window. Prepare a fresh account for another e
 
 ### Deployment and recovery
 
-Include `docker-compose.model-publication.yml` after the main and hosting profiles. Use the same released backend image for the dedicated worker and API. Both need the same persistent `/app/instance` mount on a single Linux host. Only the dedicated worker starts queue processing. The ordinary Celery services can continue running existing pipelines. The feature stays unavailable until the worker reports a fresh heartbeat and the user has an appropriate Sandbox credential.
+Include `docker-compose.model-publication.yml` after the main and hosting profiles. Set `WEBHDP_INSTANCE_PATH` to the persistent host directory that the API and dedicated worker both mount at `/app/instance`. Use the same backend image for both services. Set `WEBHDP_BACKEND_IMAGE` to that image if the hosting profile uses a custom name or tag. The ordinary Celery worker continues processing the existing pipelines. Practice runs are available when the dedicated worker reports a fresh tutorial heartbeat. Sandbox drafts also require an authorized Sandbox credential. The site tour and public sample library remain available on installations that run without this profile.
+
+Set `LOCAL_EDM_VALIDATOR_URL` to a validator reachable from the dedicated worker. When the validator runs in the same Compose project with `docker-compose.edm-validator.yml`, set `LOCAL_EDM_VALIDATOR_URL=http://local-edm-validator:8080` in `.env`. The host-side loopback address is for checks run on the host. Test the validator from the worker's network before enabling Sandbox runs. The CPU practice tutorial can run without the validator or a Zenodo credential.
 
 The queue and workspaces are under `instance/model-publication`. Finished results expire locally after 48 hours. This leaves the remote drafts in the owner's Sandbox account. After a worker interruption, queued jobs continue, and confirmed remote draft IDs are reused. If a draft creation request had an uncertain outcome, review the Sandbox account before repeating the job. An operator can read the private `remote-draft.json` checkpoint and `results/lod-generation.json` validation report in the job workspace.
 

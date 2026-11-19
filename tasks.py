@@ -14,6 +14,7 @@ from services.pipeline_execution_lock import PipelineAlreadyRunning
 from services.directory_upload_recovery import guard_upload_coordinator
 
 from constants import (
+    CLOUD_BATCH_INPUT_DIR,
     UPLOAD_PROGRESS_FIELD,
     UPLOAD_STORAGE_MODE_FIELD,
     UPLOAD_TASK_ID_FIELD,
@@ -28,6 +29,7 @@ from services import zenodo_moderation_service
 from services.hdpc_local_service import read_hdpc_zenodo_records
 from services.hdpc_provenance_service import build_hdpc_provenance
 from services.publishing_context_service import PublishingContextService
+from services.session_access_service import can_edit_session, can_use_mounted_inputs, is_platform_moderator_or_admin, is_session_mutable
 from services.session_batch_history_service import (
     record_task_launch as record_session_batch_task_launch,
     update_task_entry as update_session_batch_task_entry,
@@ -263,7 +265,8 @@ def finalize_session_upload(self, results, session_id):
 
 @celery.task(bind=True)
 @guard_upload_coordinator
-def start_upload_coordinator(self, session_id, zip_path, msf_path, storage_mode, msf_parse_options=None, input_directory_path=None):
+def start_upload_coordinator(self, session_id, zip_path, msf_path, storage_mode, msf_parse_options=None, input_directory_path=None,
+                             requested_by_user_id=None):
     """
     Coordinator task to initialize a session, scan files, and register upload metadata.
     """
@@ -284,6 +287,13 @@ def start_upload_coordinator(self, session_id, zip_path, msf_path, storage_mode,
         if not db_session:
             logger.error(f"Session {session_id} not found during background task")
             return {"status": "failed", "error": "Session not found"}
+        if storage_mode == STORAGE_MODE_LOCAL:
+            actor = db.session.get(User, requested_by_user_id or db_session.user_id)
+            if not can_use_mounted_inputs(actor) or not can_edit_session(db_session, actor):
+                message = "The requesting account no longer has mounted input access for this session."
+                _persist_upload_operation_progress(session_id, {"current_stage": "failed", "status_message": message},
+                                                    update_session_status="failed")
+                return {"status": "failed", "error": message}
 
         uploads_path = getattr(db_session, 'uploads_path', None)
         if not uploads_path:
@@ -321,6 +331,8 @@ def start_upload_coordinator(self, session_id, zip_path, msf_path, storage_mode,
         effective_input_directory = input_directory_path if input_directory_path else extract_dir
 
         extracted_from_zip = False
+        prepared_cloud_input = os.path.join(uploads_path, CLOUD_BATCH_INPUT_DIR)
+        use_prepared_cloud_input = False
 
         try:
             if storage_mode == STORAGE_MODE_LOCAL and zip_path and os.path.exists(zip_path):
@@ -353,6 +365,9 @@ def start_upload_coordinator(self, session_id, zip_path, msf_path, storage_mode,
                     input_directory_path = os.path.join(extract_dir, extracted_items[0])
                 else:
                     effective_input_directory = extract_dir
+            elif storage_mode == STORAGE_MODE_PURE_CLOUD and os.path.isdir(prepared_cloud_input):
+                effective_input_directory = prepared_cloud_input
+                use_prepared_cloud_input = True
             else:
                 if storage_mode != STORAGE_MODE_LOCAL:
                     raise FileProcessingError("ZIP file missing for non-local mode")
@@ -493,7 +508,7 @@ def start_upload_coordinator(self, session_id, zip_path, msf_path, storage_mode,
 
             # Move files to upload path if not local
         original_input_directory = effective_input_directory
-        should_persist_input_files = storage_mode != STORAGE_MODE_LOCAL or extracted_from_zip
+        should_persist_input_files = not use_prepared_cloud_input and (storage_mode != STORAGE_MODE_LOCAL or extracted_from_zip)
         if should_persist_input_files:
             for item in os.listdir(effective_input_directory):
                 s = os.path.join(effective_input_directory, item)
@@ -1017,12 +1032,14 @@ def execute_session_batch_operation_task(
 
     try:
         session = db.session.get(DBSession, session_id)
-        if session is None:
-            raise ValueError("Session not found")
+        if not can_edit_session(session, requester) or not is_session_mutable(session):
+            raise ValueError("This account no longer has edit access to the session")
         is_sandbox = bool((options or {}).get("is_sandbox", True))
         token_context = publishing_context_service.resolve_token_for_session(
             session,
             "sandbox" if is_sandbox else "production",
+            actor_user_id=requester.id,
+            require_credential=True,
         )
 
         result = execute_session_batch_operation(
@@ -1107,7 +1124,11 @@ def execute_zenodo_batch_community_operation(
     remove_mode=None,
     community_identifier=None,
     selected_records=None,
+    requested_by_user_id=None,
 ):
+    requester = db.session.get(User, requested_by_user_id) if requested_by_user_id else None
+    if not requester or not requester.is_verified or requester.force_password_change or not is_platform_moderator_or_admin(requester):
+        raise ValueError("A verified moderator or administrator must initiate this operation")
     selected_records = list(selected_records or [])
     total_records = len(selected_records)
     grouped_records = defaultdict(list)
@@ -1230,7 +1251,9 @@ def execute_zenodo_batch_community_operation(
                     record_environment = _resolve_record_environment(session, item)
                     token_context = token_context_by_environment.get(record_environment)
                     if token_context is None:
-                        token_context = publishing_context_service.resolve_token_for_session(session, record_environment)
+                        token_context = publishing_context_service.resolve_token_for_session(
+                            session, record_environment, actor_user_id=requester.id, require_credential=True,
+                        )
                         token_context_by_environment[record_environment] = token_context
                     if operation == "append_if_missing":
                         api_response = current_app.project_service.append_community_to_record(

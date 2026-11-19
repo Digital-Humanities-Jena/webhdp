@@ -1,0 +1,9 @@
+diff --git a/metis-sandbox-rest/docker/local/application.yml b/metis-sandbox-rest/docker/local/application.yml
+--- a/metis-sandbox-rest/docker/local/application.yml
++++ b/metis-sandbox-rest/docker/local/application.yml
+@@ -120 +120 @@
+-    edm-sorter-url: http://ftp.eanadev.org/schema_zips/edm_sorter.xsl
++    edm-sorter-url: http://ftp.eanadev.org/schema_zips/edm_sorter-20260409.xsl
+@@ -133 +133 @@
+-    xslt-url: https://metis-core-rest.test.eanadev.org/datasets/xslt/default
++    xslt-url: https://raw.githubusercontent.com/europeana/metis-framework/cb34feb8e328c37ac5986d11095cf72da90a43cf/metis-transformation/metis-transformation-service/src/main/resources/default_transformation.xslt
