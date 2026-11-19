@@ -11,7 +11,6 @@ import shutil
 import threading
 import time
 from urllib.parse import quote, urlencode
-from zipfile import ZIP_DEFLATED, ZipFile
 
 import requests
 
@@ -127,95 +126,148 @@ def _send_assets(client, draft, bucket, destination, assets, report):
             "title": final.get("metadata", {}).get("title"), "files": assets}
 
 
-def _bundle(prepared, destination, model):
+def export_glb(prepared, destination, model):
+    """Package the repaired geometry and textures as one self-contained model."""
+    source = prepared / model["model"]
     if model["format"] == "glb":
-        name = "model.glb"
-        shutil.copyfile(prepared / model["model"], destination / name)
-    else:
-        name = "model.zip"
-        with ZipFile(destination / name, "w", compression=ZIP_DEFLATED, compresslevel=1) as archive:
-            for relative in model["files"]:
-                archive.write(prepared / relative, relative)
-    return name
+        shutil.copyfile(source, destination)
+        return
+
+    import trimesh
+
+    try:
+        scene = trimesh.load_scene(source, process=False)
+        if scene.is_empty:
+            raise ValueError("No usable model geometry was found.")
+        data = scene.export(file_type="glb")
+        if data[:4] != b"glTF" or len(data) > 64 * 1024**2:
+            raise ValueError("The GLB export is invalid or exceeds 64 MiB.")
+        destination.write_bytes(data)
+    except (OSError, IndexError, TypeError, ValueError) as exc:
+        raise ValueError("The prepared model could not be exported as GLB. Check its geometry and materials.") from exc
 
 
 def _file(destination, name, fmt):
     return {"name": name, "size": (destination / name).stat().st_size, "format": fmt}
 
 
+def _record_metadata(mapped, mode, source, msf):
+    return {"title": mapped["title"], "creators": [{"name": person["name"]} for person in mapped["creators"]],
+            "license": mapped.get("license"), "source": "form" if mode == "form" else "msf",
+            "description": mapped.get("description"), "keywords": mapped.get("keywords", []),
+            "model_path": source, "spreadsheet": msf.name if msf else None}
+
+
+def _deposit_record(client, record, mapped, destination, workspace, report, allow_preview):
+    from services.model_deposit_metadata import generate_deposit_metadata
+
+    report("creating_draft")
+    draft, bucket = _open_draft(client, mapped["zenodo"], workspace / "remote-draft.json")
+    report("generating_metadata")
+    files = record["files"]
+    outputs = generate_deposit_metadata(
+        destination, draft=draft, metadata=mapped, main_file_key="model.glb",
+        additional_files=[{"key": item["name"], "size": item["size"]} for item in files],
+        progress=lambda standard, i, total: report("generating_metadata", f"{i + 1} of {total} formats" if standard else None),
+    )
+    files.extend(_file(destination, name, fmt) for fmt, name in outputs.items())
+    report("uploading")
+    record["draft"] = _send_assets(client, draft, bucket, destination, files, lambda detail, _: report("uploading", detail))
+    if allow_preview:
+        try:
+            preview = client.preview_link(record["draft"]["id"], workspace / "sandbox-preview.json")
+            if preview:
+                record["draft"]["preview_url"] = preview
+        except (ValueError, RuntimeError, requests.RequestException):
+            record["warnings"].append("Sandbox could not provide a separate preview link.")
+
+
 def process(app, base, job):
     from routes.model_publication_routes import LIBRARY, sample_catalog
-    from services.model_deposit_metadata import read_deposit_metadata, generate_deposit_metadata
-    from services.model_preparation_service import prepare_model
+    from services.model_deposit_metadata import read_deposit_metadata
+    from services.model_preparation_service import prepare_model, prepare_sample_batch
 
     job_id = job["id"]
     workspace = base / job_id
     prepared = workspace / "prepared"
     destination = workspace / "results"
+    parameters = json.loads(job["input_json"])
+    mode = parameters["metadata_source"]
+    sample_id = parameters["sample_id"]
+    is_batch = parameters.get("model_count", 1) > 1
+    result = {"sample_id": sample_id}
+    if is_batch:
+        result["records"] = []
 
-    def report(stage, detail=None, result=None):
+    def report(stage, detail=None):
         queue.update(base, job_id, stage, detail=detail, result=result)
 
-    parameters = json.loads(job["input_json"])
     try:
         with app.app_context():
             token = sandbox_token(job["user_id"], bool(job["demo_window"]))
             if not token:
                 raise ValueError("The active Zenodo Sandbox credential is missing.")
-            if parameters["sample_id"]:
-                entry = next(item for item in sample_catalog() if item["id"] == parameters["sample_id"])
-                archive = LIBRARY / entry["filename"]
-            else:
-                archive = workspace / ("model" + parameters["extension"])
+            library = {entry["id"]: entry for entry in sample_catalog()}
+            entry = library[sample_id] if sample_id else None
+            archive = LIBRARY / entry["filename"] if entry else workspace / ("model" + parameters["extension"])
             shutil.rmtree(prepared, ignore_errors=True)
-            destination.mkdir(mode=0o700, exist_ok=True)
-            model = prepare_model(archive, prepared)
-            main = _bundle(prepared, destination, model)
-            msf = None
-            mode = parameters["metadata_source"]
-            if mode == "upload":
-                msf = workspace / ("metadata" + parameters["msf_extension"])
-            elif mode == "archive":
-                if not model.get("msf"):
-                    raise ValueError("No Metadata Source File (MSF) was found in this model package.")
-                msf = prepared / model["msf"]
-            model_source = parameters.get("original_filename") if parameters["extension"] == ".glb" else model["model"]
-            model_source = model_source or model["model"]
-            files = [_file(destination, main, "Model")]
-            if parameters["sample_id"]:
-                shutil.copyfile(LIBRARY / entry["preview"], destination / "preview.png")
-                files.append(_file(destination, "preview.png", "Preview"))
-            result = {"sample_id": parameters["sample_id"], "model": model["model"], "files": files,
-                      "repairs": model["repairs"], "warnings": model.get("warnings", [])}
-            report("mapping_metadata", result=result)
-            metadata = read_deposit_metadata(model_source, msf_path=msf, form_metadata=parameters["metadata"])
-            mapped = metadata["zenodo"]
-            result["metadata"] = {"title": mapped["title"], "creators": [{"name": person["name"]} for person in mapped["creators"]],
-                                  "license": mapped.get("license"), "source": "form" if mode == "form" else "msf"}
-            report("creating_draft", result=result)
+            models = (prepare_sample_batch(archive, prepared, [row["filename"] for row in entry["records"]])
+                      if is_batch else [prepare_model(archive, prepared)])
+            mapped_records = []
+            for index, model in enumerate(models, 1):
+                relative = str(index) if is_batch else ""
+                model_dir = prepared / relative
+                record_dir = destination / relative
+                record_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+                export_glb(model_dir, record_dir / "model.glb", model)
+                files = [_file(record_dir, "model.glb", "Model")]
+                record_sample_id = entry["records"][index - 1]["sample_id"] if is_batch else sample_id
+                if record_sample_id:
+                    shutil.copyfile(LIBRARY / library[record_sample_id]["preview"], record_dir / "preview.png")
+                    files.append(_file(record_dir, "preview.png", "Preview"))
+
+                msf = None
+                if mode == "upload":
+                    msf = workspace / ("metadata" + parameters["msf_extension"])
+                elif mode == "archive":
+                    if not is_batch and not model.get("msf"):
+                        raise ValueError("No Metadata Source File (MSF) was found in this model package.")
+                    msf = prepared / ("metadata.csv" if is_batch else model["msf"])
+                source = parameters.get("original_filename") if parameters["extension"] == ".glb" else model["model"]
+                source = source or model["model"]
+                record = {"sample_id": record_sample_id, "model": model["model"], "input_format": model["format"],
+                          "source_files": model["files"], "files": files, "repairs": model["repairs"],
+                          "warnings": model["warnings"]}
+                if is_batch:
+                    result["records"].append(record)
+                    for item in files:
+                        item["path"] = f"{relative}/{item['name']}"
+                else:
+                    result.update(record)
+                    record = result
+                report("mapping_metadata")
+                mapped = read_deposit_metadata(source, msf_path=msf, form_metadata=parameters["metadata"])
+                record["metadata"] = _record_metadata(mapped["zenodo"], mode, source, msf)
+                mapped_records.append((mapped, record, record_dir, relative))
+
             client = DraftClient(token)
             try:
-                draft, bucket = _open_draft(client, metadata["zenodo"], workspace / "remote-draft.json")
-                report("generating_metadata")
-                outputs = generate_deposit_metadata(
-                    destination, draft=draft, metadata=metadata, main_file_key=main,
-                    additional_files=[{"key": item["name"], "size": item["size"]} for item in files],
-                    progress=lambda standard, i, total: report("generating_metadata", f"{i + 1} of {total} formats" if standard else None),
-                )
-                files.extend(_file(destination, name, fmt) for fmt, name in outputs.items())
-                report("uploading", result=result)
-                result["draft"] = _send_assets(client, draft, bucket, destination, files,
-                                               lambda detail, _: report("uploading", detail))
-                if job["demo_window"] and parameters["sample_id"]:
-                    try:
-                        preview = client.preview_link(result["draft"]["id"], workspace / "sandbox-preview.json")
-                        if preview:
-                            result["draft"]["preview_url"] = preview
-                    except (ValueError, RuntimeError, requests.RequestException):
-                        app.logger.warning("Sandbox preview unavailable for model publication run %s.", job_id)
+                for index, (mapped, record, record_dir, relative) in enumerate(mapped_records, 1):
+                    def record_report(stage, detail=None):
+                        if is_batch:
+                            for item in record["files"]:
+                                item["path"] = f"{relative}/{item['name']}"
+                            label = f"Model {index} of {len(mapped_records)}"
+                            detail = f"{label} · {detail}" if detail else label
+                        report(stage, detail)
+                    worker_dir = workspace / "records" / relative if is_batch else workspace
+                    worker_dir.mkdir(parents=True, exist_ok=True)
+                    _deposit_record(client, record, mapped, record_dir, worker_dir, record_report,
+                                    bool(job["demo_window"] and sample_id))
+                    record_report("uploading")
             finally:
                 client._session.close()
-            report("completed", result=result)
+            report("completed")
             if archive.parent == workspace:
                 archive.unlink(missing_ok=True)
             if mode == "upload":

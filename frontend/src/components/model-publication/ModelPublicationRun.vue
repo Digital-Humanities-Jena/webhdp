@@ -10,6 +10,7 @@
           <p aria-live="polite" class="mt-2 text-sm leading-6 text-slate-700">
             {{ progressText }}
           </p>
+          <div class="mt-3"><ModelPublicationDetails :job="job" /></div>
           <p v-if="job.status === 'running' && job.detail" class="mt-1 text-xs font-medium text-slate-600">{{ job.detail }}</p>
           <div v-if="refreshError" role="status" class="mt-3 rounded-md bg-amber-50 p-3 text-sm text-amber-950">
             {{ refreshError }}
@@ -40,6 +41,18 @@
           {{ step }}
         </li>
       </ol>
+    </section>
+
+    <section v-if="props.job.model_count > 1 && props.job.records?.length" aria-label="Batch results"
+      class="rounded-xl border border-slate-200 bg-white p-4 sm:p-6">
+      <label class="block max-w-md text-sm font-semibold">
+        Model in this batch
+        <select v-model="recordIndex" class="mt-1 block w-full rounded-md border border-slate-300 bg-white px-3 py-2">
+          <option v-for="(record, index) in props.job.records" :key="record.model" :value="index">
+            {{ record.metadata?.title || record.model }}{{ record.draft ? ' (draft ready)' : '' }}
+          </option>
+        </select>
+      </label>
     </section>
 
     <section v-if="job.draft" aria-labelledby="draft-heading" class="rounded-xl border border-teal-200 bg-teal-50 p-4 text-teal-950 sm:p-6">
@@ -89,8 +102,12 @@
       </dl>
     </section>
 
-    <section v-if="job.repairs?.length" aria-labelledby="repair-heading" class="rounded-xl border border-slate-200 bg-white p-4 sm:p-6">
-      <h3 id="repair-heading" class="text-lg font-semibold">Texture repairs</h3>
+    <section v-if="job.model" aria-labelledby="repair-heading" class="rounded-xl border border-slate-200 bg-white p-4 sm:p-6">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <h3 id="repair-heading" class="text-lg font-semibold">Texture repairs</h3>
+        <ModelPublicationDetails :job="job" repair-only />
+      </div>
+      <p v-if="!job.repairs?.length" class="mt-2 text-sm text-slate-700">No texture changes were needed.</p>
       <ul class="mt-3 space-y-3">
         <li v-for="(repair, index) in job.repairs" :key="index" class="break-words rounded-lg bg-slate-50 p-3 text-sm">
           <p class="font-semibold">
@@ -119,7 +136,7 @@
           </div>
           <button type="button" :disabled="downloading.includes(file.name)" :aria-label="'Download ' + file.name"
             class="inline-flex items-center gap-1 rounded-md px-2 py-1.5 text-sm font-semibold text-indigo-700 hover:bg-indigo-50 disabled:opacity-50"
-            @click="download(file.name)">
+            @click="download(file)">
             <ArrowDownTrayIcon class="h-4 w-4" aria-hidden="true" />
             {{ downloading.includes(file.name) ? 'Downloading…' : 'Download' }}
           </button>
@@ -133,6 +150,7 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { ArrowDownTrayIcon, ArrowTopRightOnSquareIcon, CheckIcon } from '@heroicons/vue/24/outline'
+import ModelPublicationDetails from '@/components/model-publication/ModelPublicationDetails.vue'
 import publicationService, { sampleUrl, sandboxDraftPreviewUrl, sandboxDraftUrl } from '@/services/modelPublication.service'
 
 const props = defineProps({
@@ -143,6 +161,13 @@ const props = defineProps({
 })
 defineEmits(['refresh'])
 
+const recordIndex = ref(0)
+const job = computed(() => {
+  const record = props.job.records?.[recordIndex.value]
+  return record ? { ...props.job, ...record } : props.job
+})
+
+
 const steps = ['Check and repair model', 'Map metadata and generate files', 'Create Sandbox draft']
 const formatLabels = { edm: 'EDM', iiif: 'IIIF', mets: 'METS/MODS', cidoc_crm: 'CIDOC CRM', jsonld: 'JSON-LD' }
 const stageIndex = { preparing_model: 0, mapping_metadata: 1, creating_draft: 1, generating_metadata: 1, uploading: 2 }
@@ -152,7 +177,7 @@ const currentStep = computed(() => props.job.status === 'completed'
 const statusText = computed(() => ({
   queued: 'In the queue',
   running: 'Processing model',
-  completed: 'Draft ready',
+  completed: props.job.model_count > 1 ? 'Drafts ready' : 'Draft ready',
   failed: 'This request needs attention',
 }[props.job.status] || 'Waiting for an update'))
 const stageText = {
@@ -170,17 +195,19 @@ const progressText = computed(() => {
     }
     return 'WebHDP accepted your request. Processing will start automatically.'
   }
-  if (props.job.status === 'completed') return 'Your model and linked data files are ready to review and download.'
+  if (props.job.status === 'completed') return props.job.model_count > 1
+    ? 'Each model has its own Sandbox draft. Choose a model to review below.'
+    : 'Your model and linked data files are ready to review and download.'
   if (props.job.status === 'failed') return 'Review the details below and prepare another request when ready.'
   return stageText[props.job.stage] || 'WebHDP is preparing your files.'
 })
-const draftUrl = computed(() => sandboxDraftUrl(props.job.draft?.url))
-const previewUrl = computed(() => sandboxDraftPreviewUrl(props.job.draft?.preview_url, props.job.draft?.id))
-const draftFileCount = computed(() => Array.isArray(props.job.draft?.files)
-  ? props.job.draft.files.length
-  : (props.job.draft?.files ?? 0))
+const draftUrl = computed(() => sandboxDraftUrl(job.value.draft?.url))
+const previewUrl = computed(() => sandboxDraftPreviewUrl(job.value.draft?.preview_url, job.value.draft?.id))
+const draftFileCount = computed(() => Array.isArray(job.value.draft?.files)
+  ? job.value.draft.files.length
+  : (job.value.draft?.files ?? 0))
 const errorMessage = computed(() => typeof props.job.error === 'string' ? props.job.error : props.job.error?.message || '')
-const creatorNames = computed(() => props.job.metadata?.creators?.map(creator => creator.name).filter(Boolean).join(', '))
+const creatorNames = computed(() => job.value.metadata?.creators?.map(creator => creator.name).filter(Boolean).join(', '))
 const downloading = ref([])
 const downloadError = ref('')
 const previewFailed = ref(false)
@@ -191,12 +218,13 @@ function sizeLabel(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-async function download(filename) {
+async function download(file) {
+  const filename = file.name
   if (downloading.value.includes(filename)) return
   downloading.value = [...downloading.value, filename]
   downloadError.value = ''
   try {
-    const blob = await publicationService.file(props.job.id, filename)
+    const blob = await publicationService.file(props.job.id, file.path || filename)
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url

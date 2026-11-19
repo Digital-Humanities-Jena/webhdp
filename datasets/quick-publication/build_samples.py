@@ -229,6 +229,33 @@ def sample(identifier, title, description, layout, texture_status, model, files,
                 filename=filename, format=Path(model).suffix[1:], preview=preview, creator=CREATOR, license=LICENSE)
 
 
+def batch(samples):
+    filename = "three-model-batch.zip"
+    metadata = StringIO(newline="")
+    rows = []
+    with ZipFile(DIRECTORY / filename, "w", compression=ZIP_DEFLATED, compresslevel=9) as target:
+        for item in samples:
+            prefix = item["id"] + "/"
+            with ZipFile(DIRECTORY / item["filename"]) as source:
+                row = next(csv.DictReader(source.read("metadata.csv").decode().splitlines()))
+                row["filename"] = prefix + row["filename"]
+                rows.append({"sample_id": item["id"], **row})
+                for name in source.namelist():
+                    if name != "metadata.csv":
+                        entry = ZipInfo(prefix + name)
+                        entry.create_system = 3
+                        entry.external_attr = 0o100644 << 16
+                        target.writestr(entry, source.read(name), compress_type=ZIP_DEFLATED, compresslevel=9)
+        fields = [key for key in rows[0] if key != "sample_id"]
+        writer = csv.DictWriter(metadata, fieldnames=fields, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(rows)
+        target.writestr(ZipInfo("metadata.csv"), metadata.getvalue().encode("utf-8"))
+    return {"id": "three-model-batch", "title": "Three-model batch", "format": "batch", "filename": filename,
+            "description": "Prepare the Glazed Bowl, Painted Floor Tile and Bronze Seal in one request.",
+            "layout": "Three model folders and one shared metadata.csv", "license": LICENSE, "records": rows}
+
+
 def build():
     clay = material_texture("clay")
     ceramic = material_texture("tile")
@@ -279,6 +306,7 @@ def build():
             thumbnail(bowl, (glaze, "glaze"), (220, 229, 229), (73, 136, 139), camera=(.47, .70)),
         ),
     ]
+    datasets.append(batch([datasets[3], datasets[1], datasets[2]]))
     (DIRECTORY / "manifest.json").write_text(json.dumps({"datasets": datasets}, indent=2) + "\n", encoding="utf-8")
 
 

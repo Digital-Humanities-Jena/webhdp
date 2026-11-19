@@ -47,6 +47,47 @@
       "preview": "glazed-bowl.png",
       "creator": "Digital Humanities Jena",
       "license": "cc0-1.0"
+    },
+    {
+      "id": "three-model-batch",
+      "title": "Three-model batch",
+      "format": "batch",
+      "filename": "three-model-batch.zip",
+      "description": "Prepare the Glazed Bowl, Painted Floor Tile and Bronze Seal in one request.",
+      "layout": "Three model folders and one shared metadata.csv",
+      "license": "cc0-1.0",
+      "records": [
+        {
+          "sample_id": "glazed-bowl",
+          "filename": "glazed-bowl/bowl.obj",
+          "title": "Glazed Bowl",
+          "description": "A shallow ceramic bowl with a moved glaze image and a damaged detail texture. WebHDP reconnects the glaze and omits the damaged map.",
+          "creator": "Digital Humanities Jena",
+          "license": "cc0-1.0",
+          "keywords": "3D model, cultural heritage, WebHDP sample",
+          "language": "eng"
+        },
+        {
+          "sample_id": "painted-floor-tile",
+          "filename": "painted-floor-tile/tile/tile.gltf",
+          "title": "Painted Floor Tile",
+          "description": "A glazed tile model with a transposed letter in its texture reference. WebHDP reconnects the correct image.",
+          "creator": "Digital Humanities Jena",
+          "license": "cc0-1.0",
+          "keywords": "3D model, cultural heritage, WebHDP sample",
+          "language": "eng"
+        },
+        {
+          "sample_id": "bronze-seal",
+          "filename": "bronze-seal/seal.obj",
+          "title": "Bronze Seal",
+          "description": "A stamped seal model without its surface texture. WebHDP keeps the geometry and uses the bronze material colour.",
+          "creator": "Digital Humanities Jena",
+          "license": "cc0-1.0",
+          "keywords": "3D model, cultural heritage, WebHDP sample",
+          "language": "eng"
+        }
+      ]
     }
   ]
 }

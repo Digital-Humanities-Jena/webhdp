@@ -7547,6 +7547,7 @@
             "name": "filename",
             "required": true,
             "schema": {
+              "description": "Path segment",
               "type": "string"
             }
           }

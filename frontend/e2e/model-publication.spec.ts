@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { createHash } from 'node:crypto'
 import { apiV1, defaultUser, fulfillJson, mockCurrentUser, mockLogin, mockSetupStatus, seedAuthToken } from './support/api'
 
 const dataset = {
@@ -11,6 +12,8 @@ const dataset = {
   texture_status: 'Misnamed texture',
   filename: 'painted-floor-tile.zip',
   license: 'CC0',
+  sha256: createHash('sha256').update('sample').digest('hex'),
+  records: [{ filename: 'tile.gltf', title: 'Painted floor tile', creator: 'WebHDP sample collection', description: 'A small glazed tile.', license: 'cc0-1.0' }],
 }
 
 const baseJob = { id: 'sample-request', title: dataset.title, files: [], repairs: [], draft: null }
@@ -18,6 +21,8 @@ const completedJob = {
   ...baseJob,
   stage: 'completed',
   status: 'completed',
+  model: 'tile.gltf',
+  source_files: ['tile.gltf', 'tile-pattern.png'],
   files: [{ name: 'edm.xml', size: 256, format: 'EDM' }, { name: 'metadata.csv', size: 640, format: 'MSF' }],
   repairs: [
     { kind: 'relinked', reference: 'texture-missing.png', replacement: 'tile-pattern.png' },
@@ -77,7 +82,7 @@ test('offers download links publicly and retains the workflow after sign in', as
   await expect(page.getByRole('button', { name: 'Sign out' })).toBeVisible()
   await expect(page.getByRole('link', { name: 'Account', exact: true })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Upload a sample ZIP' })).toBeVisible()
-  await expect(page.getByRole('region', { name: 'Selected sample' })).toContainText(dataset.title)
+  await expect(page.getByRole('region', { name: 'Selected sample' }).getByLabel('Title')).toHaveValue(dataset.title)
   await expect(page.getByRole('region', { name: 'Processing queue' })).toContainText('0 waiting')
   await expect(page.getByRole('region', { name: 'Processing queue' })).toContainText('Demo access ends at')
 })
@@ -108,6 +113,7 @@ test('shows queue, texture repair, private draft, and downloads, then restores o
   await expect(queue).toContainText('0 waiting')
   await page.getByRole('button', { name: 'Use Painted floor tile' }).click()
   await expect(page.getByRole('region', { name: 'Selected sample' })).toBeFocused()
+  await expect(page.getByRole('region', { name: 'Selected sample' }).getByLabel('Creator')).toHaveValue(dataset.creator)
   await page.getByRole('button', { name: 'Prepare Sandbox draft' }).click()
   await expect(queue).toContainText('Your place in the queue is 4.')
   await expect(page.getByText('3 requests are ahead of yours.', { exact: false })).toBeVisible()
@@ -116,7 +122,17 @@ test('shows queue, texture repair, private draft, and downloads, then restores o
   await expect(page.getByText('Draft ready', { exact: true })).toBeVisible()
   await expect(page.getByText('Texture relinked', { exact: true })).toBeVisible()
   await expect(page.getByText('Unreadable texture replaced', { exact: true })).toBeVisible()
-  await expect(page.getByText('tile-pattern.png')).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Texture repairs' }).getByText('tile-pattern.png')).toBeVisible()
+  await page.getByRole('button', { name: 'Inspect texture repairs' }).click()
+  const repairDetails = page.getByRole('dialog', { name: 'Texture repair details' })
+  await expect(repairDetails.getByText('texture-missing.png', { exact: true })).toBeVisible()
+  await expect(repairDetails.locator('dl').getByText('tile-pattern.png', { exact: true })).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(repairDetails).toBeHidden()
+  await page.getByRole('button', { name: 'Pipeline details' }).click()
+  const pipeline = page.getByRole('dialog', { name: 'Model publication pipeline' })
+  await expect(pipeline.getByText('Export a model and match its metadata', { exact: false })).toBeVisible()
+  await pipeline.getByRole('button', { name: 'Close' }).click()
   await expect(page.getByText('Draft 482 · 2 files uploaded')).toBeVisible()
   await expect(page.getByText('Metadata spreadsheet (MSF)', { exact: true })).toBeVisible()
   await expect(page.getByRole('link', { name: 'Open private draft in Zenodo Sandbox' })).toHaveCount(0)
@@ -152,6 +168,7 @@ test('keeps the queue in view during upload setup and updates when the worker re
   await expect(page.getByRole('alert')).toContainText('Choose a nonempty sample ZIP')
   await archive.setInputFiles({ name: 'sample.zip', mimeType: 'application/zip', buffer: Buffer.from('sample') })
   const submit = page.getByRole('button', { name: 'Prepare Sandbox draft' })
+  await expect(page.getByRole('region', { name: 'Selected sample' }).getByLabel('Title')).toHaveValue(dataset.title)
   await expect(submit).toBeDisabled()
   await submit.scrollIntoViewIfNeeded()
   await expect(queue).toBeInViewport()

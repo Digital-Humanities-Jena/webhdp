@@ -70,7 +70,8 @@ def publish_sample(job_id):
     if not job:
         raise SystemExit("Choose a completed demonstration job.")
     parameters = json.loads(job["input_json"])
-    if parameters["metadata_source"] != "archive" or parameters["sample_id"] not in {entry["id"] for entry in sample_catalog()}:
+    if (parameters["metadata_source"] != "archive" or parameters.get("model_count", 1) != 1
+            or parameters["sample_id"] not in {entry["id"] for entry in sample_catalog()}):
         raise SystemExit("Publication is limited to a sample with its original, reviewed metadata.")
     result = json.loads(job["result_json"])
     identity = result["draft"]["id"]

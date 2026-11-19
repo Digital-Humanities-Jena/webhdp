@@ -19,25 +19,32 @@
         See a finished record in Zenodo Sandbox
       </a>
       <div v-if="samples.length" class="mt-7 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <ModelSampleCard v-for="sample in samples" :key="sample.id" :sample="sample" />
+        <ModelSampleCard v-for="sample in singleSamples" :key="sample.id" :sample="sample" />
       </div>
       <p v-else-if="loading" role="status" class="mt-7 text-sm text-slate-600">Loading sample models…</p>
       <div v-else role="alert" class="mt-7 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
         <p>Sample downloads could not be loaded.</p>
         <button type="button" class="mt-2 font-semibold underline" @click="loadSamples">Try again</button>
       </div>
+      <section v-if="batchSample" aria-labelledby="batch-title" class="mt-9 max-w-xl">
+        <h2 id="batch-title" class="text-xl font-semibold">Batch sample</h2>
+        <p class="mb-4 mt-1 text-sm text-slate-600">Three models share one metadata spreadsheet. WebHDP creates one Sandbox draft for each row.</p>
+        <ModelSampleCard :sample="batchSample" />
+      </section>
     </main>
     <footer class="border-t border-slate-200 bg-white px-4 py-5"><LegalLinks /></footer>
   </div>
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import ModelSampleCard from '@/components/model-publication/ModelSampleCard.vue'
 import LegalLinks from '@/components/legal/LegalLinks.vue'
 import publicationService, { sandboxDraftUrl } from '@/services/modelPublication.service'
 
 const samples = ref([])
+const batchSample = computed(() => samples.value.find(sample => sample.format === 'batch'))
+const singleSamples = computed(() => samples.value.filter(sample => sample.format !== 'batch'))
 const loading = ref(true)
 const publishedExample = ref('')
 

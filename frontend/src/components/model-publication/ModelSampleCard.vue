@@ -9,7 +9,7 @@
       </div>
     </div>
     <div class="flex flex-1 flex-col p-4">
-      <p class="text-xs font-medium text-teal-800">{{ sample.format === 'gltf' ? 'glTF' : sample.format.toUpperCase() }}</p>
+      <p class="text-xs font-medium text-teal-800">{{ sample.format === 'batch' ? '3 MODELS + MSF' : sample.format === 'gltf' ? 'glTF' : sample.format.toUpperCase() }}</p>
       <h3 class="mt-1 text-base font-semibold text-slate-950">{{ sample.title }}</h3>
       <p class="mt-1 text-sm leading-5 text-slate-600">{{ sample.description }}</p>
       <dl class="mt-3 space-y-1 text-xs leading-5 text-slate-600">

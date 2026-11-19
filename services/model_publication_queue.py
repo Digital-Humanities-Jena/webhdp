@@ -111,13 +111,15 @@ def reserve(base, *, user_id, sign_in, request_key, demo_window, parameters):
         ).fetchone()
         if active >= MAX_ACTIVE or (not demo_window and regular_active >= MAX_ACTIVE - DEMO_QUEUE_RESERVE):
             raise QueueError("The queue is full. Please try again in a moment.", 429)
+        model_count = parameters.get("model_count", 1)
         if demo_window:
             total, own = conn.execute(
-                """SELECT count(*), count(CASE WHEN sign_in=? AND status IN ('staging','queued','running') THEN 1 END)
+                """SELECT coalesce(sum(coalesce(json_extract(input_json, '$.model_count'), 1)), 0),
+                          count(CASE WHEN sign_in=? AND status IN ('staging','queued','running') THEN 1 END)
                    FROM jobs WHERE user_id=? AND demo_window=?""",
                 (sign_in, user_id, demo_window),
             ).fetchone()
-            if total >= 30 or own:
+            if total + model_count > 30 or own:
                 raise QueueError("This demonstration has reached its run limit, or a run on this browser is already in progress.", 429)
         else:
             own, recent = conn.execute(
@@ -127,7 +129,7 @@ def reserve(base, *, user_id, sign_in, request_key, demo_window, parameters):
             ).fetchone()
             if own >= 3 or recent >= 10:
                 raise QueueError("Your processing limit has been reached. Please try again later.", 429)
-        budget = SAMPLE_RESERVATION if parameters.get("sample_id") else RUN_RESERVATION
+        budget = SAMPLE_RESERVATION * model_count if parameters.get("sample_id") else RUN_RESERVATION
         allocated, regular_storage = conn.execute(
             "SELECT coalesce(sum(reserved), 0), coalesce(sum(CASE WHEN demo_window=0 THEN reserved END), 0) FROM jobs"
         ).fetchone()
@@ -224,5 +226,6 @@ def serialize(job):
     data.setdefault("title", (data.get("draft") or {}).get("title") or parameters.get("title"))
     fields = ("id", "status", "stage", "detail", "error", "created", "updated")
     return {**data, **{field: job[field] for field in fields},
+            "model_count": parameters.get("model_count", 1),
             "ahead": job["ahead"] if job["status"] == "queued" else None,
             "position": job["ahead"] + 1 if job["status"] == "queued" else None}

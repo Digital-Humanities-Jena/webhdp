@@ -1,5 +1,6 @@
 """Public sample library and authenticated access to guided model publication."""
 
+import csv
 from functools import lru_cache
 import hashlib
 import json
@@ -8,6 +9,7 @@ from pathlib import Path
 import re
 import shutil
 from uuid import uuid4
+from zipfile import ZipFile
 
 from flask import Blueprint, request, send_file
 from flask_jwt_extended import get_jwt, get_jwt_identity, jwt_required
@@ -32,13 +34,19 @@ LIBRARY = Path(__file__).resolve().parents[1] / "datasets" / "quick-publication"
 
 @lru_cache(maxsize=1)
 def sample_catalog():
-    return json.loads((LIBRARY / "manifest.json").read_text(encoding="utf-8"))["datasets"]
+    entries = json.loads((LIBRARY / "manifest.json").read_text(encoding="utf-8"))["datasets"]
+    for entry in entries:
+        archive = LIBRARY / entry["filename"]
+        entry["sha256"] = hashlib.sha256(archive.read_bytes()).hexdigest()
+        if "records" not in entry:
+            with ZipFile(archive) as bundle:
+                entry["records"] = list(csv.DictReader(bundle.read("metadata.csv").decode().splitlines()))
+    return entries
 
 
 @lru_cache(maxsize=1)
 def sample_hashes():
-    return {hashlib.sha256((LIBRARY / entry["filename"]).read_bytes()).hexdigest(): entry["id"]
-            for entry in sample_catalog()}
+    return {entry["sha256"]: entry["id"] for entry in sample_catalog()}
 
 
 @model_publication_bp.route("/samples")
@@ -53,7 +61,9 @@ def _sample_file(sample_id, *, preview=False):
     entry = next((item for item in sample_catalog() if item["id"] == sample_id), None)
     if entry is None:
         return APIResponse.not_found("Sample model")
-    filename = entry["preview"] if preview else entry["filename"]
+    filename = entry.get("preview") if preview else entry["filename"]
+    if not filename:
+        return APIResponse.not_found("Sample preview")
     return send_file(LIBRARY / filename, as_attachment=not preview, max_age=3600)
 
 
@@ -103,14 +113,20 @@ def job_status(job_id):
     return APIResponse.success({"job": queue.serialize(owned[0])})
 
 
-@model_publication_bp.route("/jobs/<job_id>/files/<filename>")
+@model_publication_bp.route("/jobs/<job_id>/files/<path:filename>")
 @jwt_required()
 def job_file(job_id, filename):
     owned = _owned_jobs(job_id)
-    if not owned or filename not in {item["name"] for item in queue.serialize(owned[0]).get("files", [])}:
+    if not owned:
         return APIResponse.not_found("Result file")
-    path = queue.root() / job_id / "results" / filename
-    if not path.is_file():
+    job = queue.serialize(owned[0])
+    results = job.get("records") or [job]
+    allowed = {item.get("path", item["name"]) for record in results for item in record.get("files", [])}
+    if filename not in allowed:
+        return APIResponse.not_found("Result file")
+    folder = (queue.root() / job_id / "results").resolve()
+    path = (folder / filename).resolve()
+    if not path.is_relative_to(folder) or not path.is_file():
         return APIResponse.not_found("Result file")
     response = send_file(path, as_attachment=True, mimetype="application/octet-stream")
     response.headers["Cache-Control"] = "private, no-store"
@@ -151,7 +167,9 @@ def _read_input(user):
         raise queue.QueueError("Select one metadata source.")
     if is_demo(user) and (mode != "archive" or any(metadata.values())):
         raise queue.QueueError("The demonstration uses the sample package's metadata.")
-    sample_title = next((entry["title"] for entry in sample_catalog() if entry["id"] == sample_id), None)
+    sample = next((entry for entry in sample_catalog() if entry["id"] == sample_id), None)
+    if sample and sample["format"] == "batch" and mode != "archive":
+        raise queue.QueueError("The batch sample needs its original metadata spreadsheet.")
     msf_suffix = Path(msf.filename).suffix.lower() if msf else ""
     if msf:
         size = msf.stream.seek(0, os.SEEK_END)
@@ -164,7 +182,8 @@ def _read_input(user):
     if suffix == ".glb" and mode == "archive":
         raise queue.QueueError("For a standalone GLB, enter metadata or select an MSF.")
     return request_key, archive, msf, {"sample_id": sample_id, "extension": suffix, "msf_extension": msf_suffix,
-                                        "title": metadata.get("title") or sample_title,
+                                        "title": metadata.get("title") or (sample["title"] if sample else None),
+                                        "model_count": len(sample["records"]) if sample else 1,
                                         "original_filename": Path(archive.filename).name if archive else None,
                                         "metadata_source": mode, "metadata": metadata if mode == "form" else {}}
 

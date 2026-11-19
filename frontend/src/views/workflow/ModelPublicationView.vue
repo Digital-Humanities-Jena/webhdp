@@ -7,6 +7,7 @@
         Choose a sample or upload your model. WebHDP checks texture references, maps your metadata, and
         prepares a draft with linked data files in the Zenodo test environment.
       </p>
+      <div v-if="showForm" class="mt-4"><ModelPublicationDetails /></div>
     </header>
 
     <div class="publication-queue mb-5" :style="{ '--publication-nav-offset': demoAccount ? '0px' : `${navigationHeight}px` }">
@@ -49,7 +50,7 @@
 
           <div v-if="mode === 'sample'" class="mt-4">
             <div v-if="samples.length" class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <ModelSampleCard v-for="sample in samples" :key="sample.id" :sample="sample"
+              <ModelSampleCard v-for="sample in singleSamples" :key="sample.id" :sample="sample"
                 :selected="sample.id === selectedSample?.id" selectable @select="chooseSample" />
             </div>
             <p v-else-if="loadingSamples" role="status" class="text-sm text-slate-600">Loading samples…</p>
@@ -57,6 +58,12 @@
               Sample models could not be loaded.
               <button type="button" class="ml-1 font-semibold underline" @click="loadSamples">Try again</button>
             </div>
+            <details v-if="batchSample" class="mt-4 rounded-lg border border-slate-200 p-3" :open="selectedSample?.id === batchSample.id || undefined">
+              <summary class="cursor-pointer text-sm font-semibold">Optional batch sample</summary>
+              <div class="mt-3 max-w-md">
+                <ModelSampleCard :sample="batchSample" :selected="selectedSample?.id === batchSample.id" selectable @select="chooseSample" />
+              </div>
+            </details>
           </div>
 
           <div v-else class="mt-5">
@@ -74,7 +81,7 @@
           </div>
         </section>
 
-        <section v-if="mode === 'upload' && !demoAccount" class="rounded-xl border border-slate-200 bg-white p-4 sm:p-6" aria-labelledby="metadata-heading">
+        <section v-if="mode === 'upload' && !demoAccount && uploadedSample?.format !== 'batch'" class="rounded-xl border border-slate-200 bg-white p-4 sm:p-6" aria-labelledby="metadata-heading">
           <h2 id="metadata-heading" class="text-lg font-semibold">Describe the model</h2>
           <label for="metadata-source" class="mt-3 block text-sm font-semibold">Metadata source</label>
           <select id="metadata-source" v-model="metadataSource"
@@ -113,10 +120,12 @@
           </div>
         </section>
 
-        <section v-if="selectedSample && mode === 'sample'" ref="selectedSampleSummary" aria-label="Selected sample" tabindex="-1"
-          class="rounded-xl border border-teal-100 bg-teal-50 p-4 text-sm text-teal-950 focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal-600">
+        <ModelPublicationMetadata
+          v-if="reviewSample?.records?.length" :key="reviewSample.id" ref="selectedSampleSummary" :sample="reviewSample"
+        />
+        <section v-else-if="selectedSample && mode === 'sample'" ref="selectedSampleSummary" aria-label="Selected sample" tabindex="-1"
+          class="rounded-xl border border-teal-100 bg-teal-50 p-4 text-sm text-teal-950">
           <p class="font-semibold">Using the spreadsheet supplied with {{ selectedSample.title }}</p>
-          <p v-if="selectedSample.creator" class="mt-1">Creator {{ selectedSample.creator }}</p>
         </section>
 
         <div v-if="availabilityError || missingCredential" role="status" class="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
@@ -132,11 +141,12 @@
         <div class="flex flex-wrap items-center gap-3">
           <button type="submit" :disabled="submitting || !canSubmit"
             class="rounded-md bg-indigo-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-800 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-600">
-            {{ submitting ? 'Sending model…' : 'Prepare Sandbox draft' }}
+            {{ submitting ? 'Sending model…' : reviewSample?.format === 'batch' ? 'Prepare 3 Sandbox drafts' : 'Prepare Sandbox draft' }}
           </button>
           <p class="text-sm text-slate-600">
             <template v-if="processingOffline">You can set up your request while the worker is offline.</template>
             <template v-else-if="demoAccount && activeJob">Wait for your current request before starting another.</template>
+            <template v-else-if="reviewSample?.format === 'batch'">Creates one private draft per model.</template>
             <template v-else>Creates a private draft for review.</template>
           </p>
         </div>
@@ -171,6 +181,8 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import ModelPublicationQueue from '@/components/model-publication/ModelPublicationQueue.vue'
+import ModelPublicationDetails from '@/components/model-publication/ModelPublicationDetails.vue'
+import ModelPublicationMetadata from '@/components/model-publication/ModelPublicationMetadata.vue'
 import ModelPublicationRun from '@/components/model-publication/ModelPublicationRun.vue'
 import ModelSampleCard from '@/components/model-publication/ModelSampleCard.vue'
 import publicationService, { sandboxDraftUrl } from '@/services/modelPublication.service'
@@ -186,6 +198,11 @@ const mode = ref('sample')
 const selectedSample = ref(null)
 const archive = ref(null)
 const archiveError = ref('')
+const uploadedSample = ref(null)
+const checkingArchive = ref(false)
+const batchSample = computed(() => samples.value.find(sample => sample.format === 'batch'))
+const singleSamples = computed(() => samples.value.filter(sample => sample.format !== 'batch'))
+const reviewSample = computed(() => mode.value === 'sample' ? selectedSample.value : uploadedSample.value)
 const msf = ref(null)
 const msfError = ref('')
 const metadataSource = ref('form')
@@ -199,7 +216,7 @@ const queueUnavailable = ref(false)
 const processingOffline = computed(() => (queueUnavailable.value ? availability.value?.ready : queue.value?.ready ?? availability.value?.ready) === false)
 const canSubmit = computed(() => {
   if (!availability.value?.credential_ready || availabilityError.value || processingOffline.value || (demoAccount.value && activeJob.value)) return false
-  return mode.value === 'sample' ? Boolean(selectedSample.value) : Boolean(archive.value && (demoAccount.value || metadataSource.value !== 'upload' || msf.value))
+  return mode.value === 'sample' ? Boolean(selectedSample.value) : Boolean(archive.value && !checkingArchive.value && (demoAccount.value ? uploadedSample.value : uploadedSample.value?.format === 'batch' || metadataSource.value !== 'upload' || msf.value))
 })
 const submitting = ref(false)
 const uploadPercent = ref(null)
@@ -264,6 +281,32 @@ function setArchive(event) {
   archive.value = file
   if (standaloneGlb.value && metadataSource.value === 'archive') metadataSource.value = 'form'
 }
+
+watch([archive, samples], async ([file, catalog], _, onCleanup) => {
+  let cancelled = false
+  onCleanup(() => { cancelled = true })
+  uploadedSample.value = null
+  checkingArchive.value = false
+  if (!file || !file.name.toLowerCase().endsWith('.zip') || !catalog.length) return
+  if (file.size <= 4 * 1024 ** 2) {
+    checkingArchive.value = true
+    try {
+      const hash = await crypto.subtle.digest('SHA-256', await file.arrayBuffer())
+      const digest = Array.from(new Uint8Array(hash), byte => byte.toString(16).padStart(2, '0')).join('')
+      if (!cancelled) uploadedSample.value = catalog.find(sample => sample.sha256 === digest) ?? null
+    } catch {
+      if (!cancelled && demoAccount.value) {
+        archiveError.value = 'The browser could not verify the ZIP. Select the sample in WebHDP instead.'
+        return
+      }
+    } finally {
+      if (!cancelled) checkingArchive.value = false
+    }
+  }
+  if (!cancelled && demoAccount.value && !uploadedSample.value) {
+    archiveError.value = 'Choose an unchanged ZIP from Sample downloads.'
+  }
+})
 
 function setMsf(event) {
   const file = event.target.files[0] ?? null
@@ -415,7 +458,7 @@ async function submit() {
     form.set('metadata_source', 'archive')
   } else {
     form.set('archive', archive.value)
-    const source = demoAccount.value ? 'archive' : metadataSource.value
+    const source = demoAccount.value || uploadedSample.value?.format === 'batch' ? 'archive' : metadataSource.value
     form.set('metadata_source', source)
     if (source === 'form') {
       for (const [key, value] of Object.entries(metadata.value)) form.set(key, value)

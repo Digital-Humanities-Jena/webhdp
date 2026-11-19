@@ -515,7 +515,30 @@ def _read_bundle(archive: Path) -> dict[str, bytes]:
 
 def prepare_model(archive: Path, output_dir: Path) -> dict:
     """Write the selected model and local dependencies to a private output directory."""
-    bundle = _Bundle(_read_bundle(Path(archive)))
+    return _prepare_model(_read_bundle(Path(archive)), output_dir)
+
+
+def prepare_sample_batch(archive: Path, output_dir: Path, record_paths: list[str]) -> list[dict]:
+    """Prepare each sample's dependencies in its own folder, with one shared MSF."""
+    files = _read_bundle(Path(archive))
+    if not 2 <= len(record_paths) <= 3 or "metadata.csv" not in files:
+        raise ValueError("A sample batch needs two or three models and a shared metadata.csv.")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / "metadata.csv").write_bytes(files["metadata.csv"])
+    records = []
+    for index, source in enumerate(record_paths, 1):
+        prefix = source.split("/", 1)[0] + "/"
+        scoped = {name: contents for name, contents in files.items() if name.startswith(prefix)}
+        folder = output_dir / str(index)
+        record = _prepare_model(scoped, folder)
+        if record["model"] != source:
+            raise ValueError("A model does not match the batch manifest.")
+        records.append(record)
+    return records
+
+
+def _prepare_model(files: dict[str, bytes], output_dir: Path) -> dict:
+    bundle = _Bundle(files)
     models = [name for name in bundle.files if PurePosixPath(name).suffix.lower() in MODEL_SUFFIXES]
     if len(models) != 1:
         raise ValueError("The upload must contain exactly one OBJ, glTF or GLB model.")

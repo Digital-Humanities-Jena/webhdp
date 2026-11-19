@@ -17,7 +17,8 @@ from services.iiif_service import IiifService
 from services.linked_data_service import CRM
 from services.mets_service import MetsService
 from services.model_deposit_metadata import generate_deposit_metadata, read_deposit_metadata
-from services.model_preparation_service import prepare_model
+from services.model_preparation_service import _unpack_glb, prepare_model, prepare_sample_batch
+from services.model_publication_worker import export_glb
 from test_edm_service_minimum_viable import _build_generation_app
 
 SOURCE = 'collection/Maßstab.obj'
@@ -141,7 +142,7 @@ SAMPLE_LIBRARY = Path(__file__).resolve().parents[1] / "datasets" / "quick-publi
 SAMPLES = json.loads((SAMPLE_LIBRARY / "manifest.json").read_text(encoding="utf-8"))["datasets"]
 
 
-@pytest.mark.parametrize("sample", SAMPLES, ids=lambda sample: sample["id"])
+@pytest.mark.parametrize("sample", [sample for sample in SAMPLES if sample["format"] != "batch"], ids=lambda sample: sample["id"])
 def test_public_model_msf_produces_all_valid_metadata_files(tmp_path, sample):
     prepared = prepare_model(SAMPLE_LIBRARY / sample["filename"], tmp_path / "model")
     metadata = read_deposit_metadata(prepared["model"], msf_path=tmp_path / "model" / prepared["msf"])
@@ -149,6 +150,13 @@ def test_public_model_msf_produces_all_valid_metadata_files(tmp_path, sample):
     assert metadata["zenodo"]["creators"] == [{"name": sample["creator"]}]
     assert metadata["zenodo"]["license"] == sample["license"]
     assert metadata["zenodo"]["description"] == sample["description"]
+    glb = tmp_path / "model.glb"
+    export_glb(tmp_path / "model", glb, prepared)
+    json_chunk, binary_chunk = _unpack_glb(glb.read_bytes())
+    gltf = json.loads(json_chunk)
+    assert binary_chunk and gltf["meshes"]
+    assert all("uri" not in image for image in gltf.get("images", []))
+    assert bool(gltf.get("images")) == (sample["id"] != "bronze-seal")
 
     app = _build_generation_app(tmp_path)
     app.edm_service = EdmService()
@@ -159,9 +167,23 @@ def test_public_model_msf_produces_all_valid_metadata_files(tmp_path, sample):
     with app.app_context():
         db.create_all()
         outputs = generate_deposit_metadata(
-            target, draft={"id": 6789}, metadata=metadata, main_file_key="model.zip",
+            target, draft={"id": 6789}, metadata=metadata, main_file_key="model.glb",
             additional_files=[{"key": "preview.png", "size": (SAMPLE_LIBRARY / sample["preview"]).stat().st_size}],
         )
     assert set(outputs.values()) == {"edm.xml", "iiif.json", "mets.xml", "cidoc-crm.xml", "metadata.jsonld"}
     report = json.loads((target / "lod-generation.json").read_text())
     assert all(entry["validation"]["valid"] for entry in report["formats"].values())
+
+
+def test_batch_prepares_three_independent_models_and_matches_one_msf(tmp_path):
+    sample = next(sample for sample in SAMPLES if sample["format"] == "batch")
+    rows = sample["records"]
+    prepared = prepare_sample_batch(SAMPLE_LIBRARY / sample["filename"], tmp_path, [row["filename"] for row in rows])
+    for index, (model, row) in enumerate(zip(prepared, rows, strict=True), 1):
+        assert model["model"] == row["filename"]
+        assert all(path.startswith(row["sample_id"] + "/") for path in model["files"])
+        metadata = read_deposit_metadata(model["model"], msf_path=tmp_path / "metadata.csv")
+        assert metadata["zenodo"]["title"] == row["title"]
+        out = tmp_path / f"model-{index}.glb"
+        export_glb(tmp_path / str(index), out, model)
+        assert _unpack_glb(out.read_bytes())[1]

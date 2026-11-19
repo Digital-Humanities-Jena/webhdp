@@ -24,6 +24,7 @@ dependencies = [
     "xlrd>=2.0.2",
     "pandas>=2.0.0",
     "pillow>=12.3.0",
+    "trimesh>=4.12.2",
     "pydantic[email]>=2.12.5",
     "pyyaml>=6.0",
     "python-dotenv>=1.2.2",
@@ -54,5 +55,4 @@ dev = [
     "pygltflib>=1.16.5",
     "pypdf>=6.12.0",
     "pytest>=9.0.0",
-    "trimesh>=4.12.2",
 ]

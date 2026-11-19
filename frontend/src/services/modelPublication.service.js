@@ -58,7 +58,7 @@ export default {
     return response.data.job
   },
   file(jobId, filename) {
-    return api.get(`${prefix}/jobs/${encodeURIComponent(jobId)}/files/${encodeURIComponent(filename)}`, {
+    return api.get(`${prefix}/jobs/${encodeURIComponent(jobId)}/files/${filename.split('/').map(encodeURIComponent).join('/')}`, {
       ...quiet,
       responseType: 'blob'
     })
