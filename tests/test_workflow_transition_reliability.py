@@ -118,13 +118,17 @@ def test_current_policy_blocks_already_uploaded_outputs_and_retry_restores_readi
     generate(specification())
     assert upload_files_for_deposition(hdpc, 1, http=http)['success']
     app.config['LOCAL_EDM_VALIDATOR_REQUIRED'] = True
-    assert record_lod_readiness(hdpc, 1)['revalidation_required']
+    readiness = record_lod_readiness(hdpc, 1)
+    assert readiness['revalidation_required']
+    assert readiness['blocked_formats'] == ['edm']
     assert not upload_files_for_deposition(hdpc, 1, http=http)['success']
     generate(specification())
     assert not record_lod_readiness(hdpc, 1)['ready']
     app.edm_service.validate_edm_document.return_value = {'valid': True, 'details': {'remote': {'valid': True}}}
-    generate(specification())
+    _, manifest = generate(specification())
     assert record_lod_readiness(hdpc, 1)['ready']
+    assert all(manifest['formats'][standard]['reused'] for standard in ('iiif', 'mets', 'cidoc_crm', 'jsonld'))
+    assert app.iiif_service.generate_iiif_manifest_with_report.call_count == 1
 
 
 @pytest.mark.parametrize('uploaded', [False, True])

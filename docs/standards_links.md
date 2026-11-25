@@ -7,7 +7,7 @@ Use the official upstream documentation for normative guidance:
 | Standard or service | Official source |
 | --- | --- |
 | Europeana Data Model and EDM resources | https://github.com/europeana/edm-resources |
-| Europeana EDM XSD schemas | https://github.com/europeana/edm-resources/tree/main/xsd |
+| Europeana EDM XSD schemas for Metis | https://github.com/europeana/metis-schema/tree/v15/src/main/resources/schema_xsds |
 | Europeana Publishing Framework and EDM guidance | https://europeana.atlassian.net/wiki/spaces/EF/ |
 | IIIF Presentation API | https://iiif.io/api/presentation/ |
 | METS | https://www.loc.gov/standards/mets/ |

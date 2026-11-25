@@ -14,7 +14,7 @@ The local EDM validator source is not vendored in this repository. WebHDP uses a
 
 `https://github.com/Digital-Humanities-Jena/local-edm-validator.git`
 
-The setup script checks out the pinned commit configured in `.env.example` and applies WebHDP's tracked Docker build patch from `patches/local-edm-validator/`. The upstream validator retains its own license and release process.
+The setup script checks out the pinned commit configured in `.env.example` and initializes its Metis Schema `v15` submodule. Both upstream projects retain their own terms and release process.
 
 ## Standards And Reference Documentation
 
@@ -24,11 +24,7 @@ The `docs/metsmods/` and `schema_xsds/` materials are runtime validation schemas
 
 ### Europeana EDM XSD Schemas
 
-The `.xsd` files in `schema_xsds/` were sourced from Europeana's EDM resources repository:
-
-`https://github.com/europeana/edm-resources/tree/main/xsd`
-
-The upstream `europeana/edm-resources` repository is published under the European Union Public Licence v. 1.2 (`EUPL-1.2`). WebHDP preserves these files as validation/reference schemas; they remain attributable to Europeana and retain the upstream EUPL-1.2 terms.
+The files in `schema_xsds/` follow Europeana's Metis schema archive dated 2026-07-20, also available in the Metis Schema `v15` tag. WebHDP preserves these resources for offline validation with local whitespace normalization. They remain attributable to Europeana and retain their upstream terms. [Europeana schema archive](http://ftp.eanadev.org/schema_zips/europeana_schemas-20260720.zip) · [Metis Schema v15](https://github.com/europeana/metis-schema/tree/v15/src/main/resources/schema_xsds)
 
 ### METS/MODS Schemas
 

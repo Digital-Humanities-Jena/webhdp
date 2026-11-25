@@ -1,9 +1,10 @@
 from lxml import etree
 from flask import Flask
+import pytest
 
 from database.database import db, init_db
 from database.lod_template_bootstrap import ensure_default_lod_templates
-from services.edm_service import EdmService
+from services.edm_service import EDM_SCHEMA_VERSION, EdmService
 
 
 def _parse(xml_text: str):
@@ -100,8 +101,10 @@ def test_license_mapping_accepts_common_public_domain_identifiers(tmp_path):
         assert service._map_license_to_uri("Public Domain Mark") == "http://creativecommons.org/publicdomain/mark/1.0/"
 
 
-def test_generation_without_main_file_key_handles_string_resource_type_and_keeps_3d_schema(tmp_path):
+@pytest.mark.parametrize("emit_advisory_fields", [False, True])
+def test_generation_without_main_file_key_handles_string_resource_type_and_keeps_3d_schema(tmp_path, emit_advisory_fields):
     app = _build_generation_app(tmp_path)
+    app.config["EMIT_EUROPEANA_3D_ADVISORY_FIELDS"] = emit_advisory_fields
     with app.app_context():
         db.create_all()
         ensure_default_lod_templates()
@@ -147,12 +150,11 @@ def test_generation_without_main_file_key_handles_string_resource_type_and_keeps
             "//edm:WebResource/dc:type[@rdf:resource='http://data.europeana.eu/vocabulary/modelType/3DMesh']",
             namespaces=ns,
         )
-        assert not doc.xpath("//edm:WebResource/schema:digitalSourceType", namespaces=ns)
-        assert not doc.xpath("//edm:WebResource/edm:intendedUsage", namespaces=ns)
-        assert not doc.xpath(
-            "//edm:WebResource/edm:polygonCount | //edm:WebResource/edm:vertexCount",
-            namespaces=ns,
-        )
+        for field in ("schema:digitalSourceType", "edm:intendedUsage", "edm:polygonCount", "edm:vertexCount"):
+            assert bool(doc.xpath(f"//edm:WebResource/{field}", namespaces=ns)) is emit_advisory_fields
+        report = service.validate_edm_document(generation["content"], include_remote=False)
+        assert report["valid"] is True, report["errors"]
+        assert report["details"]["xsd"]["schema_version"] == EDM_SCHEMA_VERSION
 
 
 def test_document_generation_uses_text_edm_type(tmp_path):

@@ -28,7 +28,7 @@ async function mockAppShell(page: Page) {
 }
 
 test.describe('Local EDM Validator browser coverage', () => {
-  test('shows validator reachability on EDM configuration', async ({ page }) => {
+  test('shows validator reachability and reported schema versions on EDM configuration', async ({ page }) => {
     await mockAppShell(page)
     await page.route(apiV1('/admin/edm-config'), async (route) => {
       await fulfillJson(route, {
@@ -41,6 +41,7 @@ test.describe('Local EDM Validator browser coverage', () => {
         },
       })
     })
+    let reportsSchemaVersions = true
     await page.route(apiV1('/admin/edm-validator/status'), async (route) => {
       await fulfillJson(route, {
         success: true,
@@ -60,6 +61,7 @@ test.describe('Local EDM Validator browser coverage', () => {
               git_commit_short: 'b1ba678',
               build_time: '2026-04-30T13:12:00Z',
               image_tag: 'local-edm-validator:test',
+              ...(reportsSchemaVersions ? { edm_schema_version: '20260720', metis_schema_version: '15' } : {}),
             },
           },
         },
@@ -75,6 +77,16 @@ test.describe('Local EDM Validator browser coverage', () => {
     await expect(page.getByText('1.0.0-local')).toBeVisible()
     await expect(page.getByText('b1ba678')).toBeVisible()
     await expect(page.getByText('local-edm-validator:test')).toBeVisible()
+    await expect(page.getByText('EDM Schema', { exact: true })).toBeVisible()
+    await expect(page.getByText('20260720', { exact: true })).toBeVisible()
+    await expect(page.getByText('Metis Schema', { exact: true })).toBeVisible()
+    await expect(page.getByText('15', { exact: true })).toBeVisible()
+
+    reportsSchemaVersions = false
+    await page.getByRole('button', { name: 'Refresh' }).click()
+    await expect(page.getByText('EDM Schema', { exact: true })).toHaveCount(0)
+    await expect(page.getByText('Metis Schema', { exact: true })).toHaveCount(0)
+    await expect(page.getByText('Reachable')).toBeVisible()
   })
 
   test('renders full local validator steps after template validation', async ({ page }) => {

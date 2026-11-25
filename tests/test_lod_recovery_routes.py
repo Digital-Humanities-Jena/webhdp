@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -7,9 +8,10 @@ from flask_jwt_extended import JWTManager, create_access_token
 
 from test_lod_reliability import services_app, specification
 from test_hdpc_zenodo_service import _create_hdpc_with_source, _DummyZenodoHttp
-from services.hdpc_local_service import create_local_record_with_metadata
+from services.hdpc_local_service import create_local_record_with_metadata, read_hdpc_record_context
+from services.hdpc_schema_service import connect_hdpc
 from services.hdpc_zenodo_service import create_api_draft
-from services.lod_artifact_service import generate_artifacts
+from services.lod_artifact_service import generate_artifacts, record_lod_readiness
 
 
 @pytest.fixture
@@ -62,6 +64,73 @@ def test_recovery_rejects_published_records_and_unauthorized_access(recovery):
     assert app.test_client().get('/sessions/42/records/1/lod', headers=headers).status_code == 404
     assert app.test_client().post('/sessions/42/records/1/lod', headers=headers).status_code == 404
     assert app.test_client().get('/sessions/42/records/1/lod').status_code == 401
+
+
+@pytest.mark.parametrize('record_status', ['published', 'done', 'submitted', 'completed'])
+def test_finalized_record_uses_saved_validation_and_checks_integrity(recovery, record_status):
+    app, _, headers, hdpc = recovery
+    client = app.test_client()
+    url = '/sessions/42/records/1/lod'
+    app.edm_service.validate_edm_document.return_value = {'valid': True}
+    assert client.post(url, headers=headers).status_code == 200
+    with connect_hdpc(hdpc) as conn:
+        conn.execute('UPDATE zenodo_records SET record_status = ? WHERE record_id = 1', (record_status,))
+    app.config.update(LOCAL_EDM_VALIDATOR_REQUIRED=True, LOCAL_EDM_VALIDATOR_URL='http://new-validator')
+
+    report = client.get(url, headers=headers).json['data']
+    assert report['formats']['edm']['status'] == 'generated'
+    assert report['formats']['edm']['validation']['valid'] is True
+    assert report['readiness']['ready'] and not report['readiness']['revalidation_required']
+    with app.app_context():
+        assert read_hdpc_record_context(hdpc, 1)['zenodo_status']['lod_readiness']['ready']
+        assert not record_lod_readiness(hdpc, 1)['ready']
+    assert client.get(f'{url}?format=edm', headers=headers).data == b'<rdf/>'
+    assert client.post(url, headers=headers).status_code == 400
+    assert app.edm_service.generate_edm_xml_with_report.call_count == 2
+
+    path = Path(hdpc).parent / 'outputs/record-1/model/edm.xml'
+    path.write_text('tampered')
+    assert client.get(f'{url}?format=edm', headers=headers).status_code == 400
+    assert client.get(url, headers=headers).json['data']['formats']['edm']['status'] == 'failed'
+    path.write_text('<rdf/>')
+    with connect_hdpc(hdpc) as conn:
+        conn.execute("UPDATE zenodo_records SET zenodo_record_id = '9102' WHERE record_id = 1")
+    assert client.get(f'{url}?format=edm', headers=headers).status_code == 400
+    assert client.get(url, headers=headers).json['data']['readiness']['record_changed']
+
+
+def test_draft_validator_policy_change_keeps_unrelated_downloads(recovery):
+    app, _, headers, _ = recovery
+    client = app.test_client()
+    url = '/sessions/42/records/1/lod'
+    app.edm_service.validate_edm_document.return_value = {'valid': True}
+    assert client.post(url, headers=headers).status_code == 200
+    app.config.update(ENABLE_LOCAL_EDM_VALIDATION=True, LOCAL_EDM_VALIDATOR_REQUIRED=True,
+                      LOCAL_EDM_VALIDATOR_URL='http://new-validator')
+
+    report = client.get(url, headers=headers).json['data']
+    assert report['readiness']['blocked_formats'] == ['edm']
+    assert report['formats']['edm']['status'] == 'revalidation_required'
+    assert client.get(f'{url}?format=edm', headers=headers).status_code == 400
+    for standard in ('iiif', 'mets', 'cidoc_crm', 'jsonld'):
+        assert report['formats'][standard]['status'] == 'generated'
+        assert client.get(f'{url}?format={standard}', headers=headers).status_code == 200
+
+
+def test_legacy_fingerprint_without_captured_policy_still_marks_all_drift(recovery):
+    app, _, headers, hdpc = recovery
+    client = app.test_client()
+    url = '/sessions/42/records/1/lod'
+    path = Path(hdpc).parent / 'outputs/record-1/model/lod-generation.json'
+    manifest = json.loads(path.read_text())
+    del manifest['validation_policy']
+    path.write_text(json.dumps(manifest))
+
+    assert client.get(f'{url}?format=iiif', headers=headers).status_code == 200
+    app.config['LOCAL_EDM_VALIDATOR_URL'] = 'http://new-validator'
+    assert client.get(f'{url}?format=iiif', headers=headers).status_code == 400
+    report = client.get(url, headers=headers).json['data']
+    assert set(report['readiness']['blocked_formats']) == set(manifest['formats'])
 
 
 def test_download_checks_validation_and_file_integrity(recovery):

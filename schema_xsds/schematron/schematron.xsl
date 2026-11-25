@@ -1083,9 +1083,10 @@
 
     <!--ASSERT -->
     <xsl:choose>
-      <xsl:when test="@rdf:resource = 'https://cv.iptc.org/newscodes/digitalsourcetype/digitalCapture' or
-                       @rdf:resource = 'https://cv.iptc.org/newscodes/digitalsourcetype/dataDrivenMedia' or
-                       @rdf:resource = 'https://cv.iptc.org/newscodes/digitalsourcetype/digitalCreation'"/>
+      <xsl:when test="@rdf:resource =
+                       ('https://cv.iptc.org/newscodes/digitalsourcetype/digitalCapture',
+                        'https://cv.iptc.org/newscodes/digitalsourcetype/dataDrivenMedia',
+                        'https://cv.iptc.org/newscodes/digitalsourcetype/digitalCreation')"/>
       <xsl:otherwise>
         <svrl:failed-assert xmlns:svrl="http://purl.oclc.org/dsdl/svrl"
           test="@rdf:resource = (...)">
@@ -1116,20 +1117,21 @@
 
     <!--ASSERT -->
     <xsl:choose>
-      <xsl:when test="@rdf:resource = 'http://data.europeana.eu/vocabulary/usageArea/Knowledge' or
-                       @rdf:resource = 'http://data.europeana.eu/vocabulary/usageArea/Research' or
-                       @rdf:resource = 'http://data.europeana.eu/vocabulary/usageArea/Education' or
-                       @rdf:resource = 'http://data.europeana.eu/vocabulary/usageArea/Infotainment' or
-                       @rdf:resource = 'http://data.europeana.eu/vocabulary/usageArea/Tourism' or
-                       @rdf:resource = 'http://data.europeana.eu/vocabulary/usageArea/Gaming' or
-                       @rdf:resource = 'http://data.europeana.eu/vocabulary/usageArea/Exhibition' or
-                       @rdf:resource = 'http://data.europeana.eu/vocabulary/usageArea/Creativity' or
-                       @rdf:resource = 'http://data.europeana.eu/vocabulary/usageArea/Design' or
-                       @rdf:resource = 'http://data.europeana.eu/vocabulary/usageArea/Art' or
-                       @rdf:resource = 'http://data.europeana.eu/vocabulary/usageArea/Curation' or
-                       @rdf:resource = 'http://data.europeana.eu/vocabulary/usageArea/Maintenance' or
-                       @rdf:resource = 'http://data.europeana.eu/vocabulary/usageArea/Restoration' or
-                       @rdf:resource = 'http://data.europeana.eu/vocabulary/usageArea/Documentation'"/>
+      <xsl:when test="@rdf:resource =
+                       ('http://data.europeana.eu/vocabulary/usageArea/Knowledge',
+                        'http://data.europeana.eu/vocabulary/usageArea/Research',
+                        'http://data.europeana.eu/vocabulary/usageArea/Education',
+                        'http://data.europeana.eu/vocabulary/usageArea/Infotainment',
+                        'http://data.europeana.eu/vocabulary/usageArea/Tourism',
+                        'http://data.europeana.eu/vocabulary/usageArea/Gaming',
+                        'http://data.europeana.eu/vocabulary/usageArea/Exhibition',
+                        'http://data.europeana.eu/vocabulary/usageArea/Creativity',
+                        'http://data.europeana.eu/vocabulary/usageArea/Design',
+                        'http://data.europeana.eu/vocabulary/usageArea/Art',
+                        'http://data.europeana.eu/vocabulary/usageArea/Curation',
+                        'http://data.europeana.eu/vocabulary/usageArea/Maintenance',
+                        'http://data.europeana.eu/vocabulary/usageArea/Restoration',
+                        'http://data.europeana.eu/vocabulary/usageArea/Documentation')"/>
       <xsl:otherwise>
         <svrl:failed-assert xmlns:svrl="http://purl.oclc.org/dsdl/svrl"
           test="@rdf:resource = (allowed set)">

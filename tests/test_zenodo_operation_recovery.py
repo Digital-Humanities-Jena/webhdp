@@ -83,7 +83,7 @@ def prepare_published_request(path, payload, monkeypatch):
     http = Mock()
     http.post.return_value = _DummyResponse(201, payload)
     assert create_api_draft(path, 1, http=http)['success']
-    monkeypatch.setattr('services.lod_artifact_service.record_lod_readiness', lambda *args: {'ready': True, 'pending_upload_count': 0})
+    monkeypatch.setattr('services.lod_artifact_service.record_lod_readiness', lambda *args, **kwargs: {'ready': True, 'pending_upload_count': 0})
     return http
 
 
@@ -97,7 +97,7 @@ def test_lost_publication_response_reconciles_without_another_post(remote_record
     for operation in (create_api_draft, discard_draft, upload_files_for_deposition):
         assert operation(path, 1, http=http)['reconciliation_required']
     monkeypatch.setenv('ZENODO_PUBLISH_ENABLED', 'false')
-    monkeypatch.setattr('services.lod_artifact_service.record_lod_readiness', lambda *args: {'ready': False})
+    monkeypatch.setattr('services.lod_artifact_service.record_lod_readiness', lambda *args, **kwargs: {'ready': False})
     http.get.side_effect = None
     http.get.return_value = _DummyResponse(200, published)
     assert publish_record(path, 1, http=http)['success']

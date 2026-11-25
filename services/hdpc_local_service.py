@@ -1555,8 +1555,10 @@ def read_hdpc_record_context(hdpc_path: str, record_id: int) -> dict[str, Any] |
             {},
         )
         link_map = {item.get("link_rel"): item.get("link_url") for item in links if item.get("link_rel")}
-        from services.lod_artifact_service import record_lod_readiness
-        lod_readiness = record_lod_readiness(hdpc_path, record_id)
+        from services.lod_artifact_service import lod_record_is_finalized, record_lod_readiness
+        lod_readiness = record_lod_readiness(
+            hdpc_path, record_id, check_current_policy=not lod_record_is_finalized(record.get("record_status")),
+        )
         from services.zenodo_operation_service import pending_operations
         unresolved = pending_operations(cursor, record_id) if table_exists(cursor, 'zenodo_remote_operations') else []
         zenodo_status = {

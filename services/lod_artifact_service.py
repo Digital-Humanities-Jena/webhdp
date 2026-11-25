@@ -7,9 +7,16 @@ import json
 import os
 from pathlib import Path
 from flask import current_app, has_app_context
+from services.edm_service import EDM_SCHEMA_VERSION
 from services.lod_reliability import FORMATS, assert_public_document, atomic_write, digest, pinned_templates
 
 FILENAMES = dict(edm='edm.xml', iiif='iiif.json', mets='mets.xml', cidoc_crm='cidoc-crm.xml', jsonld='metadata.jsonld')
+EDM_POLICY_KEYS = ('LOCAL_EDM_VALIDATOR_REQUIRED', 'ENABLE_LOCAL_EDM_VALIDATION', 'ENABLE_METIS_VALIDATION',
+                   'LOCAL_EDM_VALIDATOR_URL', 'METIS_SANDBOX_URL', 'ENABLE_XSD_VALIDATION')
+
+
+def lod_record_is_finalized(record_status):
+    return str(record_status or '').strip().lower() in {'published', 'done', 'submitted', 'completed'}
 
 
 def current_record_context(hdpc_path, record_id):
@@ -64,12 +71,22 @@ def load_record_manifest(hdpc_path, record_id):
 
 
 def validation_policy():
-    keys = ('LOCAL_EDM_VALIDATOR_REQUIRED', 'ENABLE_LOCAL_EDM_VALIDATION', 'ENABLE_METIS_VALIDATION',
-            'LOCAL_EDM_VALIDATOR_URL', 'METIS_SANDBOX_URL', 'ENABLE_XSD_VALIDATION')
-    policy = {key: current_app.config.get(key) for key in keys} if has_app_context() else {}
+    policy = {key: current_app.config.get(key) for key in EDM_POLICY_KEYS} if has_app_context() else {}
     from services.iiif_validation import PROFILE_VERSION
     policy['iiif_profile'] = PROFILE_VERSION
     return policy
+
+
+def _generation_fingerprint(specification, policy):
+    return digest(json.dumps({'request': specification, 'validation_policy': policy}, sort_keys=True, default=str))
+
+
+def _policy_changed_for_format(captured, current, standard):
+    if standard == 'edm' or not isinstance(captured, dict):
+        return captured != current
+    captured_shared = {key: value for key, value in captured.items() if key not in EDM_POLICY_KEYS}
+    current_shared = {key: value for key, value in current.items() if key not in EDM_POLICY_KEYS}
+    return captured_shared != current_shared
 
 
 def policy_error(manifest, standard, status):
@@ -77,8 +94,8 @@ def policy_error(manifest, standard, status):
     if not policy:
         return None
     captured = manifest.get('validation_policy')
-    legacy_changed = captured is None and manifest.get('fingerprint') and manifest['fingerprint'] != digest(json.dumps({'request': manifest.get('request'), 'validation_policy': policy}, sort_keys=True, default=str))
-    if (captured is not None and captured != policy) or legacy_changed:
+    legacy_changed = captured is None and manifest.get('fingerprint') and manifest['fingerprint'] != _generation_fingerprint(manifest.get('request'), policy)
+    if (captured is not None and _policy_changed_for_format(captured, policy, standard)) or legacy_changed:
         return 'Validation requirements changed. Revalidate metadata before continuing.'
     report = status.get('validation') or {}
     if standard == 'edm' and policy.get('LOCAL_EDM_VALIDATOR_REQUIRED') and ((report.get('details') or {}).get('remote') or {}).get('valid') is not True:
@@ -117,8 +134,8 @@ def complete_format_states(manifest):
     return manifest
 
 
-def record_lod_readiness(hdpc_path, record_id):
-    """Current artifact readiness, independent of historical pipeline results."""
+def record_lod_readiness(hdpc_path, record_id, *, check_current_policy=True):
+    """Read artifact readiness. Finalized records can be viewed using saved validation."""
     from services.hdpc_schema_service import connect_hdpc
     root = Path(hdpc_path).resolve().parent / 'outputs' / f'record-{int(record_id)}'
     blocked_formats = []
@@ -137,7 +154,7 @@ def record_lod_readiness(hdpc_path, record_id):
                 if standard in FILENAMES and status.get('success') and (status.get('validation') or {}).get('valid') is True:
                     artifact = path.parent / FILENAMES[standard]
                     intact = artifact.resolve().is_relative_to(root) and artifact.is_file() and digest(artifact.read_bytes()) == status.get('sha256')
-                policy_issue = policy_error(manifest, standard, status)
+                policy_issue = policy_error(manifest, standard, status) if check_current_policy else None
                 revalidation_required = revalidation_required or bool(policy_issue)
                 if record_changed or policy_issue or (not intact and manifest.get('request', {}).get('lod_policy', 'required') == 'required'):
                     blocked_formats.append(standard)
@@ -177,17 +194,28 @@ def generate_artifacts(output_dir, specification, register, progress=None, *, hd
                 conn.execute("INSERT INTO zenodo_record_snapshots (record_id, snapshot_stage, payload_json) VALUES (?, 'lod_generation', ?)",
                              (int(record_id), json.dumps({'directory': str(directory), 'manifest': manifest}, default=str)))
         atomic_write(manifest_path, json.dumps(manifest, indent=2, default=str))
-    fingerprint = digest(json.dumps({'request': specification, 'validation_policy': current_policy}, sort_keys=True, default=str))
+    fingerprint = _generation_fingerprint(specification, current_policy)
     try:
         with open(manifest_path, encoding='utf-8') as stream:
             previous = complete_format_states(json.load(stream))
     except (OSError, ValueError):
         previous = {}
-    cached = previous.get('previous_formats')
-    previous_formats = {key: value for key, value in cached.items() if isinstance(value, dict)} if isinstance(cached, dict) and previous.get('fingerprint') == fingerprint else {}
-    previous_formats.update({key: value for key, value in (previous.get('formats') or {}).items() if value.get('success')})
+    previous_policy = previous.get('validation_policy')
+    previous_fingerprint = previous.get('fingerprint')
+    same_request = previous_fingerprint == fingerprint or (
+        isinstance(previous_policy, dict) and previous_fingerprint == _generation_fingerprint(specification, previous_policy)
+    )
+    previous_formats = {}
+    if same_request:
+        cached = previous.get('previous_formats')
+        if isinstance(cached, dict):
+            previous_formats.update({key: value for key, value in cached.items() if isinstance(value, dict)})
+        previous_formats.update({key: value for key, value in previous['formats'].items() if value.get('success')})
+        if previous_policy is not None:
+            previous_formats = {key: value for key, value in previous_formats.items()
+                                if not _policy_changed_for_format(previous_policy, current_policy, key)}
     manifest = complete_format_states({'version': 1, 'fingerprint': fingerprint, 'request': specification, 'validation_policy': current_policy, 'formats': {},
-                                      'previous_formats': previous_formats if previous.get('fingerprint') == fingerprint else {}})
+                                      'previous_formats': previous_formats})
     save_manifest(manifest)
     outputs = {}
     options = specification['options']
@@ -206,11 +234,17 @@ def generate_artifacts(output_dir, specification, register, progress=None, *, hd
                 path = os.path.join(output_dir, FILENAMES[standard])
                 try:
                     old = previous_formats.get(standard) or {}
-                    if previous.get('fingerprint') == fingerprint and old.get('success') and (old.get('validation') or {}).get('valid') is True and old.get('sha256') and old.get('sha256') == old['validation'].get('sha256') and os.path.isfile(path):
+                    old_validation = old.get('validation') or {}
+                    current_edm_schema = standard != 'edm' or (
+                        ((old_validation.get('details') or {}).get('xsd') or {}).get('schema_version') == EDM_SCHEMA_VERSION
+                    )
+                    if (old.get('success') and current_edm_schema and old_validation.get('valid') is True
+                            and not policy_error(manifest, standard, old) and old.get('sha256')
+                            and old.get('sha256') == old_validation.get('sha256') and os.path.isfile(path)):
                         with open(path, 'rb') as stream:
                             unchanged = digest(stream.read()) == old['sha256']
                         if unchanged:
-                            register(path, old['validation'])
+                            register(path, old_validation)
                             status.update(old, reused=True)
                             outputs[standard] = path
                             save_manifest(manifest)

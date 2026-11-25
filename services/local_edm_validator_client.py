@@ -188,7 +188,7 @@ class LocalEdmValidatorClient:
             or (str(commit_id)[:12] if commit_id else None)
         )
 
-        return {
+        summary = {
             "title": app.get("title") or build.get("artifact"),
             "description": app.get("description"),
             "version": app.get("version") or build.get("version"),
@@ -201,3 +201,8 @@ class LocalEdmValidatorClient:
             "git_commit_short": short_commit,
             "git_commit_time": commit.get("time") or git.get("commit.time"),
         }
+        if edm_schema_version := app.get("edm-schema-version"):
+            summary["edm_schema_version"] = str(edm_schema_version)
+        if metis_schema_version := build.get("metis-schema-version"):
+            summary["metis_schema_version"] = str(metis_schema_version)
+        return summary

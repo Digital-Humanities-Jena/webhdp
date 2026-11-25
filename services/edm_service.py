@@ -16,6 +16,8 @@ from services.local_edm_validator_client import (
 
 logger = logging.getLogger(__name__)
 
+EDM_SCHEMA_VERSION = "20260720"
+
 
 class DotDict(dict):
     """
@@ -1463,7 +1465,7 @@ class EdmService:
         include_remote: bool = False,
     ) -> Dict[str, Any]:
         basic_result = self.validate_xml(xml_string)
-        xsd_result = self.validate_with_xsd(xml_string)
+        xsd_result = {**self.validate_with_xsd(xml_string), "schema_version": EDM_SCHEMA_VERSION}
         schematron_result = self.validate_with_schematron(xml_string)
         business_result = self.validate_edm_business_rules(xml_string)
 
@@ -1710,6 +1712,7 @@ class EdmService:
             f"{{{ns['edm']}}}pointCount",
             f"{{{ns['edm']}}}polygonCount",
             f"{{{ns['edm']}}}vertexCount",
+            f"{{{ns['edm']}}}gaussianCount",
             f"{{{ns['rdfs']}}}seeAlso",
             f"{{{ns['ebucore']}}}orientation",
             f"{{{ns['ebucore']}}}audioChannelNumber",
@@ -1719,6 +1722,7 @@ class EdmService:
             f"{{{ns['edm']}}}type",
             f"{{{ns['schema']}}}digitalSourceType",
             f"{{{ns['edm']}}}intendedUsage",
+            f"{{{ns['edm']}}}isRepresentationOf",
         ]
 
         for web_resource in root.xpath("//edm:WebResource", namespaces=ns):

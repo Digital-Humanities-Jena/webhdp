@@ -84,7 +84,10 @@ LOCAL_EDM_VALIDATOR_URL="${LOCAL_EDM_VALIDATOR_URL:-http://127.0.0.1:$LOCAL_EDM_
 LOCAL_EDM_VALIDATOR_CONTINUE_ON_ERROR="${LOCAL_EDM_VALIDATOR_CONTINUE_ON_ERROR:-false}"
 LOCAL_EDM_FFMPEG_BIN_DIR="${LOCAL_EDM_FFMPEG_BIN_DIR:-$ROOT/tools/ffmpeg-8/bin}"
 LOCAL_EDM_VALIDATOR_APP_JAR="${LOCAL_EDM_VALIDATOR_APP_JAR:-$ROOT/tools/local-edm-validator/app.jar}"
-LOCAL_EDM_XSLT_URL="${LOCAL_EDM_XSLT_URL:-http://127.0.0.1:$LOCAL_EDM_XSLT_PORT/default-edm-sorter.xsl}"
+local_edm_sorter_url="http://127.0.0.1:$LOCAL_EDM_XSLT_PORT/default-edm-sorter.xsl"
+local_edm_transformation_url="http://127.0.0.1:$LOCAL_EDM_XSLT_PORT/default_transformation.xslt"
+LOCAL_EDM_XSLT_URL="${LOCAL_EDM_XSLT_URL:-$local_edm_sorter_url}"
+LOCAL_EDM_TRANSFORMATION_URL="${LOCAL_EDM_TRANSFORMATION_URL:-$local_edm_transformation_url}"
 LOAD_CUDA_ENV="${LOAD_CUDA_ENV:-true}"
 REQUIRE_GPU="${REQUIRE_GPU:-true}"
 ENABLE_RENDERER_NV="${ENABLE_RENDERER_NV:-true}"
@@ -96,6 +99,7 @@ NVIDIA_VISIBLE_DEVICES_VALUE="${NVIDIA_VISIBLE_DEVICES:-${CUDA_VISIBLE_DEVICES_V
 
 app_env_opts=(
   --env "ENABLE_LOCAL_EDM_VALIDATION=$ENABLE_LOCAL_EDM_VALIDATION"
+  --env "LOCAL_EDM_VALIDATOR_REQUIRED=$LOCAL_EDM_VALIDATOR_REQUIRED"
   --env "LOCAL_EDM_VALIDATOR_CONTINUE_ON_ERROR=$LOCAL_EDM_VALIDATOR_CONTINUE_ON_ERROR"
   --env "LOCAL_EDM_VALIDATOR_URL=$LOCAL_EDM_VALIDATOR_URL"
 )
@@ -241,6 +245,32 @@ wait_for_http() {
   return 1
 }
 
+edm_resource_matches() {
+  local file="$1" checksum="$2" actual_checksum
+  [[ -f "$file" ]] || return 1
+  actual_checksum="$(sha256sum <"$file")" || return 1
+  [[ "${actual_checksum%% *}" == "$checksum" ]]
+}
+
+download_edm_resource() {
+  local url="$1" destination="$2" checksum="$3" temp_path
+
+  if edm_resource_matches "$destination" "$checksum"; then
+    return 0
+  fi
+
+  temp_path="$(mktemp "${destination}.XXXXXX")" || return 1
+  if env -u LD_LIBRARY_PATH curl -fsSL --retry 2 --connect-timeout 10 --max-time 60 "$url" -o "$temp_path" &&
+    edm_resource_matches "$temp_path" "$checksum" &&
+    mv -f "$temp_path" "$destination"; then
+    return 0
+  fi
+
+  rm -f "$temp_path"
+  echo "Could not fetch or verify EDM resource at $url" >&2
+  return 1
+}
+
 wait_for_port() {
   local name="$1"
   local host="$2"
@@ -319,7 +349,7 @@ else
 fi
 
 if [[ "$ENABLE_LOCAL_EDM_VALIDATOR_STACK" == "true" ]]; then
-  echo "Starting mandatory local EDM validator stack..."
+  echo "Starting local EDM validator stack..."
   mkdir -p \
     "$ROOT/local-edm/postgres" \
     "$ROOT/local-edm/postgres-run" \
@@ -331,19 +361,16 @@ if [[ "$ENABLE_LOCAL_EDM_VALIDATOR_STACK" == "true" ]]; then
     "$ROOT/local-edm/xslt" \
     "$ROOT/local-edm/tmp"
 
-  cat >"$ROOT/local-edm/xslt/default-edm-sorter.xsl" <<'EOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<xsl:stylesheet version="1.0"
-  xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
-  <xsl:output method="xml" indent="yes" encoding="UTF-8"/>
-  <xsl:strip-space elements="*"/>
-  <xsl:template match="@*|node()">
-    <xsl:copy>
-      <xsl:apply-templates select="@*|node()"/>
-    </xsl:copy>
-  </xsl:template>
-</xsl:stylesheet>
-EOF
+  if [[ "$LOCAL_EDM_XSLT_URL" == "$local_edm_sorter_url" ]]; then
+    download_edm_resource "http://ftp.eanadev.org/schema_zips/edm_sorter-20260630.xsl" \
+      "$ROOT/local-edm/xslt/default-edm-sorter.xsl" \
+      "421d1b942a06979f20ff338cb55944d86ab35f3bca6e711e20dcdf91ad4851a1"
+  fi
+  if [[ "$LOCAL_EDM_TRANSFORMATION_URL" == "$local_edm_transformation_url" ]]; then
+    download_edm_resource "https://raw.githubusercontent.com/europeana/metis-framework/6bc36a5c692eda22542fbc3f552e1b9e3c1b4eae/metis-transformation/metis-transformation-service/src/main/resources/default_transformation.xslt" \
+      "$ROOT/local-edm/xslt/default_transformation.xslt" \
+      "fa6e1ac795777b3c190c65088d752aa8eb721da778f69d86ee67f686f4016f1b"
+  fi
 
   cat >"$ROOT/local-edm/config/application.yml" <<EOF
 info:
@@ -351,6 +378,7 @@ info:
     title: Local EDM Validator
     description: Local EDM validation and METIS Sandbox operations for WebHDP
     version: 1.0.0-local-hpc
+    edm-schema-version: "20260720"
     contact:
       name: WebHDP Local EDM Validator
       email: noreply@webhdp.local
@@ -444,15 +472,15 @@ sandbox:
       pool-size: 10
     predefinedSchemas:
       EDM-INTERNAL:
-        url: http://ftp.eanadev.org/schema_zips/europeana_schemas-20241127.zip
+        url: http://ftp.eanadev.org/schema_zips/europeana_schemas-20260720.zip
         rootLocation: EDM-INTERNAL.xsd
         schematronLocation: schematron/schematron-internal.xsl
       EDM-EXTERNAL:
-        url: http://ftp.eanadev.org/schema_zips/europeana_schemas-20241127.zip
+        url: http://ftp.eanadev.org/schema_zips/europeana_schemas-20260720.zip
         rootLocation: EDM.xsd
         schematronLocation: schematron/schematron.xsl
   transformation:
-    xslt-url: ${LOCAL_EDM_XSLT_URL}
+    xslt-url: ${LOCAL_EDM_TRANSFORMATION_URL}
     xslt-update-frequency: 0 0 * * * *
   enrichment:
     enabled: false
@@ -540,7 +568,8 @@ EOF
 
   start_with_pidfile "local_edm_xslt" "$PID_DIR/local_edm_xslt.pid" \
     python3 -m http.server "$LOCAL_EDM_XSLT_PORT" --bind 127.0.0.1 --directory "$ROOT/local-edm/xslt"
-  wait_for_http "local_edm_xslt" "$LOCAL_EDM_XSLT_URL" 30 1
+  wait_for_http "local_edm_sorter" "$LOCAL_EDM_XSLT_URL" 30 1
+  wait_for_http "local_edm_transformation" "$LOCAL_EDM_TRANSFORMATION_URL" 30 1
 
   local_edm_validator_binds=(
     -B "$ROOT/local-edm/config:/config:ro"
@@ -562,6 +591,11 @@ EOF
     exit 1
   fi
   if [[ -f "$LOCAL_EDM_VALIDATOR_APP_JAR" ]]; then
+    if ! unzip -Z1 "$LOCAL_EDM_VALIDATOR_APP_JAR" | grep -Fx 'BOOT-INF/lib/metis-schema-15.jar' >/dev/null; then
+      echo "The validator app JAR at $LOCAL_EDM_VALIDATOR_APP_JAR must contain Metis Schema 15." >&2
+      echo "Rebuild the validator SIF and regenerate the override with scripts/hpc_singularity/remote/patch_local_edm_validator_jar.sh." >&2
+      exit 1
+    fi
     echo "Using patched local EDM validator app JAR from $LOCAL_EDM_VALIDATOR_APP_JAR"
     local_edm_validator_binds+=(
       -B "$LOCAL_EDM_VALIDATOR_APP_JAR:/app.jar:ro"

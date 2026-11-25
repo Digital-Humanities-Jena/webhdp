@@ -837,7 +837,7 @@ When enabled, matching source-file hashes become warning candidates in batch rec
 
 `GET /api/v1/admin/edm-validator/status`
 
-Returns the configured local EDM validator endpoint, whether validation is enabled, whether validation continues after errors, health details from `/actuator/health`, and build/source metadata from `/actuator/info`.
+Returns the configured local EDM validator endpoint, whether validation is enabled or required, whether it continues after errors, health details from `/actuator/health`, and build and source metadata from `/actuator/info`. The `info.summary` response includes schema versions reported by the validator when available.
 
 Example response:
 
@@ -846,6 +846,7 @@ Example response:
   "success": true,
   "data": {
     "enabled": true,
+    "required": true,
     "url": "http://local-edm-validator:8080",
     "continue_on_error": true,
     "health": {
@@ -867,11 +868,13 @@ Example response:
         "title": "Local EDM Validator",
         "version": "1.0.0-local",
         "repository": "https://github.com/Digital-Humanities-Jena/local-edm-validator",
-        "source_ref": "b1ba678",
+        "source_ref": "a7b3ad4",
         "image_tag": "local-edm-validator:local",
         "git_branch": "main",
-        "git_commit_short": "b1ba678",
-        "build_time": "2026-04-30T10:58:46.055Z"
+        "git_commit_short": "a7b3ad4",
+        "build_time": "2026-04-30T10:58:46.055Z",
+        "edm_schema_version": "20260720",
+        "metis_schema_version": "15"
       }
     }
   }

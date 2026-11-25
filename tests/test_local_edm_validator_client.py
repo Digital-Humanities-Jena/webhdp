@@ -171,3 +171,13 @@ def test_local_edm_validator_info_summarizes_build_and_git_metadata(monkeypatch)
         "git_commit_short": "b1ba678",
         "git_commit_time": "2026-04-29T10:00:00Z",
     }
+
+
+def test_local_edm_validator_info_includes_reported_schema_versions():
+    summary = LocalEdmValidatorClient._summarize_info({
+        "app": {"edm-schema-version": "20260720"},
+        "build": {"metis-schema-version": 15},
+    })
+
+    assert summary["edm_schema_version"] == "20260720"
+    assert summary["metis_schema_version"] == "15"

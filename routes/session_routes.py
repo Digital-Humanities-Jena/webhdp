@@ -4958,7 +4958,11 @@ def record_lod_recovery(session_id, local_record_id):
     """Inspect or retry local metadata generation without remote side effects."""
     from pathlib import Path
     from contextlib import nullcontext
-    from services.lod_artifact_service import generate_artifacts, suspend_previous_artifacts, FILENAMES, load_record_manifest, record_lod_readiness, policy_error, record_context_changed, current_record_context
+    from services.hdpc_schema_service import connect_hdpc
+    from services.lod_artifact_service import (
+        FILENAMES, current_record_context, generate_artifacts, load_record_manifest, lod_record_is_finalized,
+        policy_error, record_context_changed, record_lod_readiness, suspend_previous_artifacts,
+    )
     from services.lod_reliability import digest
     from flask import send_file
     import io
@@ -4980,13 +4984,16 @@ def record_lod_recovery(session_id, local_record_id):
             if request.method == 'POST' or request.args.get('format'):
                 return APIResponse.validation_error('The saved metadata report is missing. Start a new pipeline run to regenerate metadata.')
             return APIResponse.success(data={'formats': {}, 'available': False, 'readiness': record_lod_readiness(session.hdpc_path, local_record_id)})
+        with connect_hdpc(session.hdpc_path, readonly=True) as conn:
+            row = conn.execute('SELECT record_status FROM zenodo_records WHERE record_id = ?', (local_record_id,)).fetchone()
+        finalized = row is not None and lod_record_is_finalized(row[0])
         record_changed = record_context_changed(manifest, session.hdpc_path, local_record_id)
         requested_format = request.args.get('format')
         if request.method == 'GET' and requested_format:
             status = (manifest.get('formats') or {}).get(requested_format) or {}
             if requested_format not in FILENAMES or status.get('status') != 'generated' or (status.get('validation') or {}).get('valid') is not True:
                 return APIResponse.validation_error('Only validated metadata exports can be downloaded')
-            if policy_error(manifest, requested_format, status):
+            if not finalized and policy_error(manifest, requested_format, status):
                 return APIResponse.validation_error('Validation requirements changed. Revalidate metadata before downloading.')
             if record_changed:
                 return APIResponse.validation_error('The Zenodo draft changed. Regenerate metadata before downloading.')
@@ -5001,10 +5008,7 @@ def record_lod_recovery(session_id, local_record_id):
                 return APIResponse.validation_error('The export changed after validation. Retry generation.')
             return send_file(io.BytesIO(content), as_attachment=True, download_name=artifact.name, mimetype='application/octet-stream')
         if request.method == 'POST':
-            from services.hdpc_schema_service import connect_hdpc
-            with connect_hdpc(session.hdpc_path) as conn:
-                row = conn.execute('SELECT record_status FROM zenodo_records WHERE record_id = ?', (local_record_id,)).fetchone()
-            if not row or str(row[0]).lower() in ('published', 'done', 'submitted'):
+            if not row or finalized:
                 return APIResponse.validation_error('Only an existing unpublished draft can regenerate metadata')
             suspend_previous_artifacts(session.hdpc_path, local_record_id)
             def register(path, validation):
@@ -5022,7 +5026,7 @@ def record_lod_recovery(session_id, local_record_id):
             if record_changed:
                 status.update(success=False, status='regeneration_required', error='The Zenodo draft changed. Regenerate metadata to update its record links.')
                 continue
-            issue = policy_error(manifest, standard, status)
+            issue = None if finalized else policy_error(manifest, standard, status)
             if issue:
                 status.update(success=False, status='revalidation_required', error=issue)
                 continue
@@ -5036,4 +5040,5 @@ def record_lod_recovery(session_id, local_record_id):
                 status['validation'] = {'valid': False, 'errors': ['Stored artifact integrity check failed']}
     # Do not expose the private request or local paths in the report.
     formats = {key: {field: value for field, value in status.items() if field not in ('path',)} for key, status in manifest['formats'].items()}
-    return APIResponse.success(data={'formats': formats, 'available': True, 'readiness': record_lod_readiness(session.hdpc_path, local_record_id)})
+    readiness = record_lod_readiness(session.hdpc_path, local_record_id, check_current_policy=not finalized)
+    return APIResponse.success(data={'formats': formats, 'available': True, 'readiness': readiness})

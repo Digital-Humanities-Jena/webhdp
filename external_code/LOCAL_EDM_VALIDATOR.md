@@ -10,8 +10,9 @@ make local-edm-validator-setup
 ```
 
 This clones `https://github.com/Digital-Humanities-Jena/local-edm-validator`,
-checks out the pinned commit recorded in `.env.example`, and applies the tracked
-WebHDP Docker build patch from `patches/local-edm-validator/`.
+checks out the pinned commit recorded in `.env.example` and initializes the
+validator's Metis Schema `v15` submodule. The validator builds its bundled XSDs
+and RDF bindings from that source.
 
 Verify the checkout before building the EDM validator overlay:
 

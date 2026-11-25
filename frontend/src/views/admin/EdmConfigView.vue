@@ -88,6 +88,14 @@
                   {{ validatorInfoSummary.image_tag || 'Unknown' }}
                 </dd>
               </div>
+              <div v-if="validatorInfoSummary.edm_schema_version" class="rounded-md bg-gray-50 p-4">
+                <dt class="text-xs font-semibold uppercase text-gray-500">EDM Schema</dt>
+                <dd class="mt-1 break-all text-sm text-gray-900">{{ validatorInfoSummary.edm_schema_version }}</dd>
+              </div>
+              <div v-if="validatorInfoSummary.metis_schema_version" class="rounded-md bg-gray-50 p-4">
+                <dt class="text-xs font-semibold uppercase text-gray-500">Metis Schema</dt>
+                <dd class="mt-1 break-all text-sm text-gray-900">{{ validatorInfoSummary.metis_schema_version }}</dd>
+              </div>
             </dl>
             <p v-if="validatorStatus?.health?.message" class="mt-3 text-sm text-red-600">
               {{ validatorStatus.health.message }}

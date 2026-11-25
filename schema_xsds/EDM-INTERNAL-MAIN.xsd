@@ -5,7 +5,7 @@
     xmlns:dc="http://purl.org/dc/elements/1.1/"
     xmlns:owl="http://www.w3.org/2002/07/owl#"
     xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
-    xmlns:dcterms="http://purl.org/dc/terms/"  elementFormDefault="qualified"
+    xmlns:dcterms="http://purl.org/dc/terms/"
     xmlns:wgs84="http://www.w3.org/2003/01/geo/wgs84_pos#"
     xmlns:skos="http://www.w3.org/2004/02/skos/core#"
     xmlns:ore="http://www.openarchives.org/ore/terms/"
@@ -15,9 +15,11 @@
     xmlns:cc="http://creativecommons.org/ns#"
     xmlns:svcs="http://rdfs.org/sioc/services#"
     xmlns:dqv="http://www.w3.org/ns/dqv#"
-        xmlns:doap="http://usefulinc.com/ns/doap#"
+    xmlns:doap="http://usefulinc.com/ns/doap#"
     xmlns:sch="http://purl.oclc.org/dsdl/schematron"
-    xmlns:as="http://www.w3.org/ns/activitystreams#">
+    xmlns:as="http://www.w3.org/ns/activitystreams#"
+    xmlns:prov="http://www.w3.org/ns/prov#"
+    elementFormDefault="qualified">
 
     <import namespace="http://purl.org/dc/elements/1.1/" schemaLocation="DC.xsd"/>
     <import namespace="http://purl.org/dc/terms/" schemaLocation="DCTERMS.xsd"/>
@@ -30,11 +32,12 @@
     <import namespace="http://www.openarchives.org/ore/terms/" schemaLocation="ORE.xsd"/>
     <import namespace="http://www.w3.org/2004/02/skos/core#" schemaLocation="SKOS.xsd"/>
     <import namespace="http://www.w3.org/ns/dcat#" schemaLocation="DCAT.xsd"/>
-	<import namespace="http://creativecommons.org/ns#" schemaLocation="CC.xsd"/>
+    <import namespace="http://creativecommons.org/ns#" schemaLocation="CC.xsd"/>
     <import namespace="http://rdfs.org/sioc/services#" schemaLocation="SVCS.xsd"/>
     <import namespace="http://www.w3.org/ns/dqv#" schemaLocation="DQV.xsd"/>
     <import namespace="http://usefulinc.com/ns/doap#" schemaLocation="DOAP.xsd"/>
     <import namespace="http://www.w3.org/ns/activitystreams#" schemaLocation="AS.xsd"/>
+    <import namespace="http://www.w3.org/ns/prov#" schemaLocation="PROV.xsd"/>
     <include schemaLocation="EDM-COMMON-MAIN.xsd"/>
     <include schemaLocation="CONTEXTS.xsd"/>
 
@@ -52,6 +55,7 @@
                 <sch:ns prefix="rdf" uri="http://www.w3.org/1999/02/22-rdf-syntax-ns#" />
                 <sch:ns prefix="rdfs" uri="http://www.w3.org/2000/01/rdf-schema#" />
                 <sch:ns prefix="skos" uri="http://www.w3.org/2004/02/skos/core#" />
+                <sch:ns prefix="prov" uri="http://www.w3.org/ns/prov#"/>
             </appinfo>
         </annotation>
         <sequence minOccurs="1" maxOccurs="1">
@@ -99,6 +103,7 @@
                     <element ref="dc:creator" maxOccurs="1" minOccurs="0"/>
                     <element ref="edm:aggregatedCHO" maxOccurs="1" minOccurs="1"/>
                     <element ref="edm:dataProvider" maxOccurs="1" minOccurs="0"/>
+                    <element ref="edm:intermediateProvider" maxOccurs="unbounded" minOccurs="0"/>
                     <element ref="edm:provider" maxOccurs="1" minOccurs="0"/>
                     <element ref="edm:collectionName" maxOccurs="1" minOccurs="0"/>
                     <element ref="edm:datasetName" maxOccurs="1" minOccurs="0"/>
@@ -114,6 +119,7 @@
                     <element ref="dcterms:created" maxOccurs="1" minOccurs="0"/>
                     <element ref="dcterms:modified" maxOccurs="1" minOccurs="0"/>
                     <element ref="dqv:hasQualityAnnotation" maxOccurs="unbounded" minOccurs="0"/>
+                    <element ref="prov:wasGeneratedBy" maxOccurs="1" minOccurs="0"/>
                 </sequence>
             </extension>
         </complexContent>

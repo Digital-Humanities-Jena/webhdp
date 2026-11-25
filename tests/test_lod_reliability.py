@@ -4,7 +4,7 @@ from unittest.mock import Mock
 import pytest
 from flask import Flask
 
-from services.edm_service import EdmService
+from services.edm_service import EDM_SCHEMA_VERSION, EdmService
 from services.lod_reliability import MetadataRows, assert_public_document, atomic_write, digest, public_url
 from services.lod_artifact_service import generate_artifacts
 from services.linked_data_service import generate_linked_data, validate_linked_data
@@ -112,6 +112,24 @@ def test_changed_settings_regenerate_outputs_and_missing_valid_is_rejected(tmp_p
         outputs, manifest = generate_artifacts(str(tmp_path), spec, Mock())
     assert 'iiif' not in outputs
     assert manifest['formats']['iiif']['success'] is False
+
+
+def test_edm_retry_revalidates_older_schema_without_regenerating_other_formats(tmp_path):
+    app = services_app()
+    spec = specification()
+    register = Mock()
+    with app.app_context():
+        app.edm_service.validate_edm_document.return_value = {'valid': True}
+        generate_artifacts(str(tmp_path), spec, register)
+        app.edm_service.validate_edm_document.return_value = {
+            'valid': True, 'details': {'xsd': {'schema_version': EDM_SCHEMA_VERSION}},
+        }
+        _, updated = generate_artifacts(str(tmp_path), spec, register)
+        _, retried = generate_artifacts(str(tmp_path), spec, register)
+    assert not updated['formats']['edm'].get('reused')
+    assert updated['formats']['iiif']['reused'] is True
+    assert retried['formats']['edm']['reused'] is True
+    assert app.edm_service.validate_edm_document.call_count == 2
 
 
 def test_graph_validation_rejects_missing_relationships_and_remote_context():

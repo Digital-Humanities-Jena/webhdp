@@ -761,7 +761,7 @@
             <appinfo>
                 <sch:pattern>
                     <sch:rule context="edm:rights">
-                        <sch:assert test="isValidRightsField(@rdf:resource,../../cc:License)">
+                        <sch:assert test="not(isValidRightsField(@rdf:resource,../../cc:License))">
                             Not valid Rights Statement
                         </sch:assert>
                     </sch:rule>
@@ -853,6 +853,11 @@
         <documentation>the number of vertices in the 3D model</documentation>
       </annotation>
     </element>
+  <element name="gaussianCount" type="rdf:NonNegativeIntegerWithoutDataTypeType">
+    <annotation>
+      <documentation>the number of gaussians in the 3D model</documentation>
+    </annotation>
+  </element>
     <element name="intermediateProvider" type="rdf:ResourceOrLiteralType">
         <annotation>
             <documentation>The name or identifier of the intermediate organization that selects, collates, or curates data

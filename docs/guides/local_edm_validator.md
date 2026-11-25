@@ -18,22 +18,24 @@ WebHDP uses [Digital-Humanities-Jena/local-edm-validator](https://github.com/Dig
 
 Template validation:
 
-1. The admin edits or previews an EDM template.
+1. The admin requests validation of an EDM template.
 2. WebHDP renders the template with sample or session metadata.
-3. `EdmService` sends the rendered XML to `LocalEdmValidatorClient`.
+3. WebHDP runs its built-in checks and sends the rendered XML to `LocalEdmValidatorClient` when either validator flag is true.
 4. The frontend displays structural status, warnings/errors, problem patterns, local validator steps, and elapsed time.
 
 LOD generation:
 
-1. Native pipeline LOD generation writes `edm.xml`.
-2. WebHDP validates the generated XML with local-edm-validator when `ENABLE_LOCAL_EDM_VALIDATION=true`.
-3. The pipeline writes `edm.validation.json`.
+1. Native pipeline LOD generation renders the EDM attachment when that format is enabled and a Zenodo draft is available.
+2. For new EDM output, WebHDP calls local-edm-validator when `ENABLE_LOCAL_EDM_VALIDATION` or `LOCAL_EDM_VALIDATOR_REQUIRED` is true. A retry can reuse an intact artifact validated with the current XSD release.
+3. The pipeline records validation evidence and writes `edm.xml` only after the requested checks pass.
 4. The local `.hdpc` `source_files` row for `edm.xml` stores the full report and first error message for audit and troubleshooting.
 
 Admin status:
 
 1. `GET /api/v1/admin/edm-validator/status` calls `/actuator/health` and `/actuator/info`.
-2. Settings -> EDM Config shows enabled state, endpoint, reachability, response time, version, commit/source ref, build time, and image tag.
+2. Settings -> EDM Config shows the configured enable flag, endpoint, reachability, response time, version, commit/source ref, build time, and image tag. The admin status API probes the endpoint even when workflow validation is disabled and returns the required flag separately.
+
+The same flags govern explicit template validation, EDM mapping tests, and session EDM validation samples. A render-only template preview does not call the standalone validator. The administrator's local-storage Tools output preview calls it only on explicit request. When both flags are false, normal EDM checks still run XML, XSD, and business validation in WebHDP. Schematron runs in the standalone validator only. When requested, a rejected or unavailable standalone check prevents successful generation of new EDM output.
 
 ## Configuration
 
@@ -57,8 +59,8 @@ Managed Compose overlay variables:
 ```bash
 LOCAL_EDM_VALIDATOR_REPO=./external_code/local-edm-validator
 LOCAL_EDM_VALIDATOR_SOURCE_REPOSITORY=https://github.com/Digital-Humanities-Jena/local-edm-validator.git
-LOCAL_EDM_VALIDATOR_SOURCE_REF=b1ba67802ae1581c88ba8ea0ae9740cf663a0176
-LOCAL_EDM_VALIDATOR_IMAGE=local-edm-validator:webhdp-b1ba67802ae1
+LOCAL_EDM_VALIDATOR_SOURCE_REF=a7b3ad461e6d35de7d8f5cee5531a43768d2e158
+LOCAL_EDM_VALIDATOR_IMAGE=local-edm-validator:webhdp-a7b3ad461e6d-edm-20260720
 LOCAL_EDM_VALIDATOR_PORT=18080
 ```
 
@@ -89,24 +91,26 @@ make local-edm-validator-verify
 docker compose -f docker-compose.yml -f docker-compose.edm-validator.yml up -d --build
 ```
 
-The setup script checks out upstream commit
-`b1ba67802ae1581c88ba8ea0ae9740cf663a0176` and applies the Docker build and
-EDM resource patches in [`patches/local-edm-validator`](../../patches/local-edm-validator).
-Run setup again before rebuilding an existing checkout of that commit. It
-keeps an applied Dockerfile patch and upgrades the resource URLs independently.
+The setup script checks out validator commit `a7b3ad461e6d35de7d8f5cee5531a43768d2e158`
+and initializes its Metis Schema `v15` submodule at `a1201cd7e6be618bec67f8258348d8bddb93059b`.
+The build uses that source for the first XSD pass and for the RDF bindings
+used by problem-pattern analysis. Run setup again before rebuilding an existing
+validator checkout. For Singularity, rebuild the validator image and regenerate
+any optional FFmpeg-patched `app.jar` from the updated image.
 
-The resource patch pairs the validator's bundled 2024 schema with the official
-2024-11-27 schema archive, April 2026 sorter and a transformation pinned to
-Europeana Metis commit `cb34feb8e328c37ac5986d11095cf72da90a43cf`.
+The validator pins Europeana's 2026-07-20 Metis schema archive, the
+2026-06-30 sorter and the default Metis Framework `v18` transformation.
+The archive matches the current archive on Europeana's download server and
+the schema files in Metis Schema `v15`. [Europeana schema archives](http://ftp.eanadev.org/schema_zips/) · [Metis Schema v15](https://github.com/europeana/metis-schema/tree/v15/src/main/resources/schema_xsds) · [Metis Framework v18](https://github.com/europeana/metis-framework/releases/tag/v18)
+
 The validator reads both complete schema entries, including their root XSD
-and Schematron paths. Use the full entries if you mirror the archives. A newer
-transformation may add terms that the bundled schema rejects.
+and Schematron paths. Use the full entries if you mirror the archives.
 
 | Resource | SHA-256 |
 | --- | --- |
-| `europeana_schemas-20241127.zip` | `722cfb4092aacb2866800f524d9a28b6a620bd15d674f645ff30db43ab8e07e8` |
-| `edm_sorter-20260409.xsl` | `e4f45fb040399f1641cc981cb6df5da91e5a9091da738329b52367e97eb01d2e` |
-| `default_transformation.xslt` | `1237d3379ad121046578394d8dc29be730e648169a1b89e2b417e2090e2fdb4e` |
+| `europeana_schemas-20260720.zip` | `96093672357c46ee1f4644819fccb36f29395dffc78317c907dbe9895b74adbf` |
+| `edm_sorter-20260630.xsl` | `421d1b942a06979f20ff338cb55944d86ab35f3bca6e711e20dcdf91ad4851a1` |
+| `default_transformation.xslt` | `fa6e1ac795777b3c190c65088d752aa8eb721da778f69d86ee67f686f4016f1b` |
 
 Production deployments should use the same overlay with `docker-compose.prod.yml` or provide an equivalent always-on validator endpoint:
 
@@ -137,11 +141,12 @@ curl http://localhost:${LOCAL_EDM_VALIDATOR_PORT:-18080}/actuator/health
 curl http://localhost:${LOCAL_EDM_VALIDATOR_PORT:-18080}/actuator/info
 ```
 
-Check from WebHDP:
+Check through WebHDP using an administrator access token stored in `TOKEN`.
 
 ```bash
+WEBHDP_ORIGIN=https://hdp.example.org
 curl -H "Authorization: Bearer $TOKEN" \
-  "$BASE_URL/admin/edm-validator/status"
+  "$WEBHDP_ORIGIN/api/v1/admin/edm-validator/status"
 ```
 
 Expected status response shape:
@@ -163,10 +168,12 @@ Expected status response shape:
       "summary": {
         "version": "1.0.0-local",
         "repository": "https://github.com/Digital-Humanities-Jena/local-edm-validator",
-        "source_ref": "b1ba678",
+        "source_ref": "a7b3ad4",
         "image_tag": "local-edm-validator:local",
-        "git_commit_short": "b1ba678",
-        "build_time": "2026-04-30T10:58:46.055Z"
+        "git_commit_short": "a7b3ad4",
+        "build_time": "2026-11-25T10:00:00Z",
+        "edm_schema_version": "20260720",
+        "metis_schema_version": "15"
       }
     }
   }
@@ -178,10 +185,10 @@ Expected status response shape:
 - Keep `LOCAL_EDM_VALIDATOR_SOURCE_REF` aligned with the pinned validator commit before building the image.
 - Record the image tag and source ref in release notes when validation behavior changes.
 - If `LOCAL_EDM_VALIDATOR_CONTINUE_ON_ERROR=true`, the validator returns all available step results instead of stopping at the first failure.
-- Keep `LOCAL_EDM_VALIDATOR_REQUIRED=true` in deployments. With required validation, EDM output is not considered successfully generated unless the local validator accepts it.
-- Keep `EMIT_EUROPEANA_3D_ADVISORY_FIELDS=false` until the active local validator schema accepts the newer Europeana 3D advisory fields (`schema:digitalSourceType`, `edm:intendedUsage`, and 3D count properties). WebHDP still emits validator-compatible 3D identifiers such as `edm:type` and `dc:type`.
-- `ENABLE_LOCAL_EDM_VALIDATION=false` is only for isolated developer troubleshooting; deployments should leave it enabled and run the managed validator overlay.
-- Check reachability in **Settings → EDM Config**. Before rollout, generate a representative EDM attachment with the target WebHDP worker and confirm `VALIDATE_EXTERNAL` and `VALIDATE_INTERNAL` both pass. Check that an invalid fixture is rejected.
+- Set `LOCAL_EDM_VALIDATOR_REQUIRED=true` for workflows that require the standalone validator. Both its external and internal validation stages must pass for the EDM attachment to be accepted.
+- The July 2026 schema accepts the optional Europeana 3D advisory fields (`schema:digitalSourceType`, `edm:intendedUsage`, and 3D count properties). Set `EMIT_EUROPEANA_3D_ADVISORY_FIELDS=true` when you want WebHDP to emit them. WebHDP emits `edm:type` and `dc:type` for 3D regardless of this setting.
+- Deployments that rely on WebHDP's built-in checks can set both `ENABLE_LOCAL_EDM_VALIDATION=false` and `LOCAL_EDM_VALIDATOR_REQUIRED=false`. Review the saved validation report to distinguish passed checks from skipped standalone stages.
+- If the standalone validator is enabled, check reachability in **Settings → EDM Config**. Before rollout, generate a representative EDM attachment with the target WebHDP worker and confirm `VALIDATE_EXTERNAL` and `VALIDATE_INTERNAL` both pass. Check that an invalid fixture is rejected.
 
 ## Troubleshooting
 

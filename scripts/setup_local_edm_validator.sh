@@ -3,14 +3,12 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEFAULT_REPO_URL="https://github.com/Digital-Humanities-Jena/local-edm-validator.git"
-DEFAULT_REF="b1ba67802ae1581c88ba8ea0ae9740cf663a0176"
+DEFAULT_REF="a7b3ad461e6d35de7d8f5cee5531a43768d2e158"
+EDM_SCHEMA_VERSION="20260720"
 TARGET_DIR="${LOCAL_EDM_VALIDATOR_REPO:-$ROOT_DIR/external_code/local-edm-validator}"
+METIS_SCHEMA_PATH="metis-sandbox-rest/webhdp-metis-schema"
 REPO_URL="${LOCAL_EDM_VALIDATOR_SOURCE_REPOSITORY:-$DEFAULT_REPO_URL}"
 PINNED_REF="${LOCAL_EDM_VALIDATOR_SOURCE_REF:-$DEFAULT_REF}"
-PATCH_FILES=(
-  "$ROOT_DIR/patches/local-edm-validator/webhdp-dockerfile-local.patch"
-  "$ROOT_DIR/patches/local-edm-validator/webhdp-edm-resources.patch"
-)
 VERIFY_ONLY=false
 FORCE=false
 
@@ -27,7 +25,7 @@ Environment:
 
 Options:
   --verify-only  Check the current checkout without cloning or changing files.
-  --force        Allow replacing an existing wrong checkout when it is clean.
+  --force        Fetch the pinned commit again before verifying an up-to-date checkout.
 USAGE
 }
 
@@ -61,33 +59,37 @@ short_ref() {
   printf '%s' "$1" | cut -c1-12
 }
 
-ensure_patch_state() {
-  local patch_file="$1"
-  if git -C "$TARGET_DIR" apply --unidiff-zero --reverse --check "$patch_file" >/dev/null 2>&1; then
-    return 0
+# Released WebHDP versions patched two files in the validator checkout.
+# Clear those exact files when upgrading a managed checkout.
+restore_legacy_patch() {
+  local path blob
+  local files=()
+  local changes_message="$TARGET_DIR has local changes. Commit or stash them before switching refs."
+  git -C "$TARGET_DIR" diff --cached --quiet || fail "$changes_message"
+  [[ -z "$(git -C "$TARGET_DIR" ls-files --others --exclude-standard)" ]] || fail "$changes_message"
+  while IFS= read -r path; do
+    [[ -n "$path" ]] || continue
+    blob="$(git -C "$TARGET_DIR" hash-object "$path")" || fail "$changes_message"
+    case "$path:$blob" in
+      metis-sandbox-rest/Dockerfile.local:fdb027c78dbb004f7b2eb51f521ecd1e31bd05f8|\
+      metis-sandbox-rest/docker/local/application.yml:c73a545dc38043c0bc303518541ca7299d35d045)
+        files+=("$path")
+        ;;
+      *) fail "$changes_message" ;;
+    esac
+  done <<<"$(git -C "$TARGET_DIR" diff --name-only)"
+  if [[ ${#files[@]} -gt 0 ]]; then
+    git -C "$TARGET_DIR" restore --worktree -- "${files[@]}"
   fi
-  if [[ "$VERIFY_ONLY" == "true" ]]; then
-    fail "WebHDP local-edm-validator patch is not applied in $TARGET_DIR: $patch_file"
-  fi
-  if git -C "$TARGET_DIR" apply --unidiff-zero --check "$patch_file" >/dev/null 2>&1; then
-    git -C "$TARGET_DIR" apply --unidiff-zero "$patch_file"
-    return 0
-  fi
-  fail "Cannot apply WebHDP patch cleanly: $patch_file"
 }
 
-for patch_file in "${PATCH_FILES[@]}"; do
-  [[ -f "$patch_file" ]] || fail "Missing WebHDP patch file: $patch_file"
-done
-
-if [[ ! -d "$TARGET_DIR/.git" ]]; then
+if [[ ! -e "$TARGET_DIR/.git" ]]; then
   if [[ "$VERIFY_ONLY" == "true" ]]; then
     fail "Missing local-edm-validator git checkout at $TARGET_DIR"
   fi
   if [[ -e "$TARGET_DIR" ]] && [[ -n "$(find "$TARGET_DIR" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]]; then
     fail "$TARGET_DIR exists but is not an empty git checkout. Move it aside or set LOCAL_EDM_VALIDATOR_REPO."
   fi
-  rm -rf "$TARGET_DIR"
   git clone "$REPO_URL" "$TARGET_DIR"
 fi
 
@@ -101,18 +103,23 @@ if [[ "$current_ref" != "$PINNED_REF" ]]; then
   if [[ "$VERIFY_ONLY" == "true" ]]; then
     fail "local-edm-validator is at $current_ref, expected $PINNED_REF"
   fi
-  if [[ -n "$(git -C "$TARGET_DIR" status --porcelain)" ]]; then
-    fail "$TARGET_DIR has local changes. Commit/stash them or use a clean checkout before switching refs."
-  fi
   git -C "$TARGET_DIR" fetch --tags origin "$PINNED_REF"
+  if [[ "$current_ref" == "b1ba67802ae1581c88ba8ea0ae9740cf663a0176" ]]; then
+    restore_legacy_patch
+  fi
+  [[ -z "$(git -C "$TARGET_DIR" status --porcelain)" ]] || fail "$TARGET_DIR has local changes. Commit or stash them before switching refs."
   git -C "$TARGET_DIR" checkout --detach "$PINNED_REF"
 elif [[ "$FORCE" == "true" && "$VERIFY_ONLY" != "true" ]]; then
-  git -C "$TARGET_DIR" fetch --tags origin "$PINNED_REF" || true
+  git -C "$TARGET_DIR" fetch --tags origin "$PINNED_REF"
 fi
 
-for patch_file in "${PATCH_FILES[@]}"; do
-  ensure_patch_state "$patch_file"
-done
+# The validator builds the schema and JiBX bindings from its pinned submodule.
+if [[ "$VERIFY_ONLY" != "true" ]]; then
+  git -C "$TARGET_DIR" submodule update --init -- "$METIS_SCHEMA_PATH"
+fi
+metis_schema_status="$(git -C "$TARGET_DIR" submodule status -- "$METIS_SCHEMA_PATH")"
+[[ "$metis_schema_status" == " "* ]] || fail "Metis Schema submodule is missing or at a different revision. Run setup again."
+[[ -z "$(git -C "$TARGET_DIR" status --porcelain)" ]] || fail "$TARGET_DIR has local changes."
 
 for required_path in \
   metis-sandbox-rest/Dockerfile.local \
@@ -130,8 +137,8 @@ echo "local-edm-validator checkout ready"
 echo "  path:       $TARGET_DIR"
 echo "  upstream:   $REPO_URL"
 echo "  source ref: $PINNED_REF"
-printf '  patch:      %s\n' "${PATCH_FILES[@]}"
+echo "  EDM schema: $EDM_SCHEMA_VERSION (Metis Schema${metis_schema_status})"
 echo
 echo "Use this source ref when building:"
 echo "  export LOCAL_EDM_VALIDATOR_SOURCE_REF=$PINNED_REF"
-echo "  export LOCAL_EDM_VALIDATOR_IMAGE=local-edm-validator:webhdp-$(short_ref "$PINNED_REF")"
+echo "  export LOCAL_EDM_VALIDATOR_IMAGE=local-edm-validator:webhdp-$(short_ref "$PINNED_REF")-edm-$EDM_SCHEMA_VERSION"
