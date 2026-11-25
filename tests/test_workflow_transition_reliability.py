@@ -131,6 +131,30 @@ def test_current_policy_blocks_already_uploaded_outputs_and_retry_restores_readi
     assert app.iiif_service.generate_iiif_manifest_with_report.call_count == 1
 
 
+def test_iiif_profile_upgrade_only_invalidates_iiif_for_open_draft(record, monkeypatch):
+    from services import iiif_validation
+    from services.edm_service import EDM_SCHEMA_VERSION
+
+    app, hdpc, http, generate = record
+    app.edm_service.validate_edm_document.return_value = {
+        'valid': True, 'details': {'xsd': {'schema_version': EDM_SCHEMA_VERSION}},
+    }
+    current_profile = iiif_validation.PROFILE_VERSION
+    monkeypatch.setattr(iiif_validation, 'PROFILE_VERSION', 'presentation-3-media-2')
+    generate(specification())
+    assert upload_files_for_deposition(hdpc, 1, http=http)['success']
+
+    monkeypatch.setattr(iiif_validation, 'PROFILE_VERSION', current_profile)
+    readiness = record_lod_readiness(hdpc, 1)
+    assert readiness['blocked_formats'] == ['iiif']
+    assert not upload_files_for_deposition(hdpc, 1, http=http)['success']
+    _, manifest = generate(specification())
+    assert record_lod_readiness(hdpc, 1)['ready']
+    assert manifest['validation_policy']['iiif_profile'] == current_profile
+    assert all(manifest['formats'][standard]['reused'] for standard in ('edm', 'mets', 'cidoc_crm', 'jsonld'))
+    assert app.iiif_service.generate_iiif_manifest_with_report.call_count == 2
+
+
 @pytest.mark.parametrize('uploaded', [False, True])
 def test_disable_retry_sync_and_reenable_preserve_consistent_attachment_set(record, uploaded):
     _, hdpc, http, generate = record

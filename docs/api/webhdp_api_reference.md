@@ -492,7 +492,24 @@ Headers used by `/stream`:
 
 | Method | Path | Auth | Access | Purpose |
 |---|---|---|---|---|
-| POST | `/test-mapping` | Yes | Any authenticated | IIIF manifest generation and validation test |
+| POST | `/test-mapping` | Yes | Any authenticated | Generate and validate a IIIF Presentation 4.0 RC manifest for the selected source row |
+| GET, HEAD, OPTIONS | `/<environment>/<record_id>/manifest.json` | No | Public when configured | Serve `iiif.json` from a published, open Zenodo record |
+
+Set `IIIF_PUBLIC_BASE_URL` to the public HTTPS origin to use this route for new
+default manifest IDs. The `environment` must be `zenodo` or `sandbox`, and
+`record_id` must be numeric. The route serves the deposited bytes with IIIF
+profile headers, cross-origin access, and an ETag. Drafts and restricted files
+return 404. The deposited manifest remains available through Zenodo.
+
+The response includes the generated `json`, applied mappings, adjustments, and
+the local validation profile in `validation.details.profile`. For saved IIIF
+templates, `POST /api/v1/templates/preview` accepts `template_id`. Administrators
+can preview unsaved IIIF Jinja content with `standard: "iiif"` and `content`.
+The preview returns `json` and `adjustments`. Send the generated manifest to
+`POST /api/v1/templates/validate` with `standard: "iiif"` and `json` for standalone
+validation. The `json` value can be a manifest object or a JSON string.
+The optional `presentation_version: "3.0"` selects WebHDP's historical
+validation profile for archived manifests.
 
 ### METS (`/api/v1/mets`)
 
@@ -837,7 +854,7 @@ When enabled, matching source-file hashes become warning candidates in batch rec
 
 `GET /api/v1/admin/edm-validator/status`
 
-Returns the configured local EDM validator endpoint, whether validation is enabled or required, whether it continues after errors, health details from `/actuator/health`, and build and source metadata from `/actuator/info`. The `info.summary` response includes schema versions reported by the validator when available.
+Returns the configured local EDM validator endpoint, whether validation is enabled or required, whether it continues after errors, health details from `/actuator/health`, and build and source metadata from `/actuator/info`. The `active` value is true when either policy flag activates validation. The `info.summary` response includes schema versions reported by the validator when available.
 
 Example response:
 
@@ -847,6 +864,7 @@ Example response:
   "data": {
     "enabled": true,
     "required": true,
+    "active": true,
     "url": "http://local-edm-validator:8080",
     "continue_on_error": true,
     "health": {
@@ -868,10 +886,10 @@ Example response:
         "title": "Local EDM Validator",
         "version": "1.0.0-local",
         "repository": "https://github.com/Digital-Humanities-Jena/local-edm-validator",
-        "source_ref": "a7b3ad4",
+        "source_ref": "443227f",
         "image_tag": "local-edm-validator:local",
         "git_branch": "main",
-        "git_commit_short": "a7b3ad4",
+        "git_commit_short": "443227f",
         "build_time": "2026-04-30T10:58:46.055Z",
         "edm_schema_version": "20260720",
         "metis_schema_version": "15"

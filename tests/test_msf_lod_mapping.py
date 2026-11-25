@@ -103,6 +103,40 @@ def test_apply_lod_mapping_preserves_surname_first_creator_notation():
     assert mapped["creators"] == [{"name": "Schild, Romuald"}]
 
 
+def test_iiif_mappings_keep_timeline_and_geographic_values_distinct_from_scene_coordinates():
+    values = {
+        "iiif:timelineId": "https://example.org/timeline/1",
+        "iiif:timelineLabel": "Oral history",
+        "iiif:latitude": "50",
+        "iiif:longitude": "11",
+        "iiif:altitude": "26",
+        "iiif:pointX": "0",
+    }
+    mapping = {key: {"source": "static", "value": value} for key, value in values.items()}
+    assert MSFService().apply_lod_mapping(pd.Series(dtype=object), {}, mapping, include_defaults=False) == {
+        "iiif_timeline_id": "https://example.org/timeline/1",
+        "iiif_timeline_label": "Oral history",
+        "iiif_latitude": "50",
+        "iiif_longitude": "11",
+        "iiif_altitude": "26",
+        "iiif_point_x": "0",
+    }
+
+
+def test_iiif_content_id_keeps_legacy_template_value_and_prefers_current_mapping():
+    old = {"iiif:modelId": {"source": "static", "value": "https://example.org/model.glb"}}
+    updated = {"iiif:contentId": {"source": "static", "value": "https://example.org/replacement.glb"}}
+    service = MSFService()
+    row = pd.Series(dtype=object)
+
+    legacy = service.apply_lod_mapping(row, {}, old, include_defaults=False)
+    current = service.apply_lod_mapping(row, {}, {**old, **updated}, include_defaults=False)
+
+    assert legacy["iiif_model_id"] == legacy["iiif_content_id"] == old["iiif:modelId"]["value"]
+    assert current["iiif_model_id"] == legacy["iiif_model_id"]
+    assert current["iiif_content_id"] == updated["iiif:contentId"]["value"]
+
+
 def test_get_metadata_for_file_passes_through_3d_analysis_fields():
     service = MSFService()
     df = pd.DataFrame(

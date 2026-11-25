@@ -119,6 +119,11 @@
 
           <div v-else-if="columnsError" role="alert" class="p-4 text-sm text-rose-800">{{ columnsError }} <button type="button" class="underline" @click="fetchColumns">Retry loading fields</button></div>
           <div v-else class="space-y-4">
+            <div v-if="activeStandard === 'iiif'" class="text-sm text-slate-700">
+              <p class="font-medium">{{ IIIF_PRESENTATION_LABEL }}</p>
+              <p v-if="activeModality === '3d'" class="mt-1 text-xs">Scene placement uses local X, Y and Z coordinates.</p>
+              <p v-if="activeModality === 'sound'" class="mt-1 text-xs">Supply a duration to play audio on a Timeline. Audio without a duration is offered as a download.</p>
+            </div>
             <div
               v-if="activeStandard === 'zenodo' && communityOverride.enabled"
               class="p-3 rounded-lg border border-amber-200 bg-amber-50 text-amber-800 text-xs"
@@ -229,7 +234,7 @@
       <div class="flex flex-wrap gap-3 items-center justify-between p-4 bg-gray-50 border-b">
         <div class="flex items-center gap-3">
           <span :class="['px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider', testResult.validation.valid ? 'bg-green-100 text-green-700' : validationUnavailable ? 'bg-amber-100 text-amber-800' : 'bg-red-100 text-red-700']">
-            {{ testResult.validation.valid ? `Valid ${activeStandardLabel}` : validationUnavailable ? 'Unverified · validator unavailable' : 'Validation Failed' }}
+            {{ testResult.validation.valid ? (activeStandard === 'iiif' ? 'IIIF checks passed' : `Valid ${activeStandardLabel}`) : validationUnavailable ? 'Unverified · validator unavailable' : 'Validation Failed' }}
           </span>
           <h3 class="text-sm font-bold text-gray-900">Preview · {{ sampleLabel }} - {{ activeStandard.toUpperCase() }}</h3>
         </div>
@@ -260,10 +265,13 @@
           </div>
           <p class="mt-4 text-xs text-gray-500">This check covers the selected record. {{ testResult.validation.details?.scope || 'Review generated defaults and warnings before processing the batch.' }}</p>
         </div>
-        <details class="min-w-0 flex-1 overflow-auto p-4">
-          <summary class="cursor-pointer text-sm text-indigo-700">Generated document</summary>
-          <pre class="p-4 bg-gray-900 text-green-300 overflow-x-auto rounded-md font-mono text-xs leading-relaxed">{{ testPreviewOutput }}</pre>
-        </details>
+        <div class="min-w-0 flex-1 space-y-3 overflow-auto p-4">
+          <IiifManifestPreview v-if="activeStandard === 'iiif'" :content="testResult.json" />
+          <details>
+            <summary class="cursor-pointer text-sm text-indigo-700">Generated document</summary>
+            <pre class="p-4 bg-gray-900 text-green-300 overflow-x-auto rounded-md font-mono text-xs leading-relaxed">{{ testPreviewOutput }}</pre>
+          </details>
+        </div>
       </div>
     </div>
   </div>
@@ -275,6 +283,8 @@ import api from '@/services/api'
 import { useToast } from '@/composables/useToast'
 import { useWorkflowStore } from '@/stores/workflow'
 import MetadataReview from '@/components/workflow/MetadataReview.vue'
+import IiifManifestPreview from '@/components/workflow/IiifManifestPreview.vue'
+import { IIIF_PRESENTATION_LABEL } from '@/utils/iiifPresentation'
 
 const toast = useToast()
 const workflowStore = useWorkflowStore()
@@ -434,31 +444,39 @@ const tagsByModality = {
     { id: 'edm:country', name: 'Country', required: true, description: 'Origin country.', options: ['Netherlands', 'France', 'Germany', 'Italy', 'Spain', 'Europe'] },
     { id: 'edm:language', name: 'Language', required: true, description: 'Primary language.', options: ['en', 'it', 'nl', 'fr', 'de', 'es', 'mul'] }
   ],
-  'iiif_3d': [
+  'iiif': [
     { id: 'label', name: 'Label', required: true, description: 'The title of the Manifest.' },
     { id: 'summary', name: 'Summary', required: false, description: 'A brief description of the object.' },
     { id: 'iiif:manifestId', name: 'Manifest ID', required: false, description: 'Persistent IIIF Manifest ID URL.' },
-    { id: 'iiif:sceneId', name: 'Canvas ID', required: false, description: 'Scene identifier URI.' },
-    { id: 'iiif:sceneLabel', name: 'Canvas Label', required: false, description: 'Human-readable scene label.' },
+    { id: 'iiif:sceneId', name: 'Scene ID', description: 'Persistent Scene identifier URL.', modalities: ['3d'] },
+    { id: 'iiif:sceneLabel', name: 'Scene Label', description: 'Human-readable label for the 3D Scene.', modalities: ['3d'] },
+    { id: 'iiif:timelineId', name: 'Timeline ID', description: 'Persistent identifier URL for timed audio.', modalities: ['sound'] },
+    { id: 'iiif:timelineLabel', name: 'Timeline Label', description: 'Human-readable label for timed audio.', modalities: ['sound'] },
+    { id: 'iiif:canvasId', name: 'Canvas ID', description: 'Persistent Canvas identifier URL. For audio, used when duration is unavailable.', modalities: ['image', 'video', 'sound', 'text'] },
+    { id: 'iiif:canvasLabel', name: 'Canvas Label', description: 'Display label for the Canvas. For audio, used when duration is unavailable.', modalities: ['image', 'video', 'sound', 'text'] },
     { id: 'iiif:annotationPageId', name: 'Annotation Page ID', required: false, description: 'Annotation page identifier URI.' },
     { id: 'iiif:annotationId', name: 'Annotation ID', required: false, description: 'Annotation identifier URI.' },
-    { id: 'iiif:modelId', name: 'Content URL', required: false, description: 'Direct model URL used in body.source.' },
-    { id: 'iiif:modelFormat', name: 'Model Format', required: false, description: 'Model media type.', options: ['model/gltf-binary', 'model/gltf+json', 'model/obj', 'application/octet-stream'] },
-    { id: 'iiif:width', name: 'Canvas Width', required: false, description: 'Positive integer. Supply with height to set the presentation aspect ratio.' },
-    { id: 'iiif:height', name: 'Canvas Height', required: false, description: 'Positive integer. Without dimensions, a square virtual frame is used.' },
-    { id: 'iiif:duration', name: 'Duration (seconds)', required: false, description: 'Positive duration for audio/video playback. Without it, the source is offered as a download.' },
-    { id: 'iiif:translateX', name: 'Translate X', required: false, description: 'Translate transform X value.' },
-    { id: 'iiif:translateY', name: 'Translate Y', required: false, description: 'Translate transform Y value.' },
-    { id: 'iiif:translateZ', name: 'Translate Z', required: false, description: 'Translate transform Z value.' },
-    { id: 'iiif:rotateX', name: 'Rotate X', required: false, description: 'Rotate transform X angle.' },
-    { id: 'iiif:rotateY', name: 'Rotate Y', required: false, description: 'Rotate transform Y angle.' },
-    { id: 'iiif:rotateZ', name: 'Rotate Z', required: false, description: 'Rotate transform Z angle.' },
-    { id: 'iiif:scaleX', name: 'Scale X', required: false, description: 'Scale transform X multiplier.' },
-    { id: 'iiif:scaleY', name: 'Scale Y', required: false, description: 'Scale transform Y multiplier.' },
-    { id: 'iiif:scaleZ', name: 'Scale Z', required: false, description: 'Scale transform Z multiplier.' },
-    { id: 'iiif:pointX', name: 'Point X', required: false, description: 'Scene-space PointSelector X coordinate.' },
-    { id: 'iiif:pointY', name: 'Point Y', required: false, description: 'Scene-space PointSelector Y coordinate.' },
-    { id: 'iiif:pointZ', name: 'Point Z', required: false, description: 'Scene-space PointSelector Z coordinate.' },
+    { id: 'iiif:contentId', name: 'Content URL', description: 'Direct URL of an alternative source asset of the same media type.' },
+    { id: 'iiif:modelLabel', name: 'Model Label', description: 'Human-readable label for the referenced model.', modalities: ['3d'] },
+    { id: 'iiif:modelFormat', name: 'Model Format', description: 'Media type of the referenced model.', modalities: ['3d'], options: ['model/gltf-binary', 'model/gltf+json', 'model/obj', 'application/octet-stream'] },
+    { id: 'iiif:width', name: 'Canvas Width', description: 'Positive integer. Supply with height to set the presentation aspect ratio.', modalities: ['image', 'video', 'text'] },
+    { id: 'iiif:height', name: 'Canvas Height', description: 'Positive integer. Without dimensions, a square virtual frame is used.', modalities: ['image', 'video', 'text'] },
+    { id: 'iiif:duration', name: 'Duration (seconds)', description: 'Positive duration for audio or video playback. Without it, the source is offered as a download.', modalities: ['sound', 'video'] },
+    { id: 'iiif:translateX', name: 'Translate X', description: 'X translation in Scene units.', modalities: ['3d'] },
+    { id: 'iiif:translateY', name: 'Translate Y', description: 'Y translation in Scene units.', modalities: ['3d'] },
+    { id: 'iiif:translateZ', name: 'Translate Z', description: 'Z translation in Scene units.', modalities: ['3d'] },
+    { id: 'iiif:rotateX', name: 'Rotate X', description: 'Rotation in degrees around the Scene X axis.', modalities: ['3d'] },
+    { id: 'iiif:rotateY', name: 'Rotate Y', description: 'Rotation in degrees around the Scene Y axis.', modalities: ['3d'] },
+    { id: 'iiif:rotateZ', name: 'Rotate Z', description: 'Rotation in degrees around the Scene Z axis.', modalities: ['3d'] },
+    { id: 'iiif:scaleX', name: 'Scale X', description: 'Nonzero scale factor along X.', modalities: ['3d'] },
+    { id: 'iiif:scaleY', name: 'Scale Y', description: 'Nonzero scale factor along Y.', modalities: ['3d'] },
+    { id: 'iiif:scaleZ', name: 'Scale Z', description: 'Nonzero scale factor along Z.', modalities: ['3d'] },
+    { id: 'iiif:pointX', name: 'Point X', description: 'X coordinate of the target point in the Scene.', modalities: ['3d'] },
+    { id: 'iiif:pointY', name: 'Point Y', description: 'Y coordinate of the target point in the Scene.', modalities: ['3d'] },
+    { id: 'iiif:pointZ', name: 'Point Z', description: 'Z coordinate of the target point in the Scene.', modalities: ['3d'] },
+    { id: 'iiif:latitude', name: 'Latitude', description: 'Latitude of the location to publish on a map, in decimal degrees. Supply with longitude.' },
+    { id: 'iiif:longitude', name: 'Longitude', description: 'Longitude of the location to publish on a map, in decimal degrees. Supply with latitude.' },
+    { id: 'iiif:altitude', name: 'Altitude', description: 'Optional height in metres above or below the WGS 84 ellipsoid.' },
     { id: 'lod:thumbnailMode', name: 'Rendered Thumbnail Mode', required: false, description: 'How rendered thumbnails are selected (render pipeline only).', options: ['auto', 'any', 'all', 'pattern', 'list'] },
     { id: 'lod:thumbnailPattern', name: 'Rendered Thumbnail Pattern', required: false, description: 'Wildcard for rendered thumbnails (e.g. *_r0*.png).' },
     { id: 'lod:thumbnailFiles', name: 'Rendered Thumbnail Files', required: false, description: 'Comma-separated rendered thumbnail filenames for list mode.' },
@@ -477,10 +495,7 @@ const mapping = reactive({
 function getTagsForStandardAndModality(standardId, modalityId) {
   if (standardId === 'zenodo') return tagsByModality.zenodo
   if (['cidoc_crm', 'jsonld'].includes(standardId)) return tagsByModality['3d'].filter(tag => ['dc:title', 'dc:description', 'dc:creator'].includes(tag.id))
-  if (standardId === 'iiif' && modalityId !== '3d') return tagsByModality.iiif_3d.filter(tag => !/iiif:(translate|rotate|scale|point|modelFormat)/.test(tag.id))
-  const tagKey = standardId === 'iiif' ? `iiif_${modalityId}` : modalityId
-  if (tagsByModality[tagKey]) return tagsByModality[tagKey]
-  if (standardId === 'iiif') return tagsByModality.iiif_3d
+  if (standardId === 'iiif') return tagsByModality.iiif.filter(tag => !tag.modalities || tag.modalities.includes(modalityId))
   return tagsByModality[modalityId] || tagsByModality['3d']
 }
 
@@ -512,9 +527,6 @@ function getDefaultMappingForTag(tagId) {
   if (tagId === 'rights') {
     return { source: 'zenodo', field: 'metadata.license', value: '' }
   }
-  if (tagId === 'provider') {
-    return { source: 'static', field: '', value: 'WebHDP' }
-  }
   if (tagId === 'zenodo:upload_type') {
     return { source: 'options', field: '', value: 'dataset' }
   }
@@ -537,7 +549,7 @@ function normalizeMappingItem(item) {
   return {
     source: item?.source || 'skip',
     field: item?.field || '',
-    value: item?.value || ''
+    value: item?.value ?? ''
   }
 }
 
@@ -576,6 +588,16 @@ const modalityImportAliases = {
   'video': ['video']
 }
 
+const iiifImportAliases = {
+  'iiif:contentId': ['iiif:modelId'],
+  'iiif:sceneId': ['iiif:canvasId'],
+  'iiif:sceneLabel': ['iiif:canvasLabel'],
+  'iiif:canvasId': ['iiif:sceneId'],
+  'iiif:canvasLabel': ['iiif:sceneLabel'],
+  'iiif:timelineId': ['iiif:canvasId', 'iiif:sceneId'],
+  'iiif:timelineLabel': ['iiif:canvasLabel', 'iiif:sceneLabel']
+}
+
 function isTagMappingNode(node) {
   if (!node || typeof node !== 'object' || Array.isArray(node)) return false
   return Object.values(node).some(v => v && typeof v === 'object' && !Array.isArray(v) && Object.prototype.hasOwnProperty.call(v, 'source'))
@@ -611,8 +633,10 @@ function mergeImportedMapping(importedMapping) {
 
       const tags = getTagsForStandardAndModality(std.id, mod.id)
       tags.forEach(tag => {
-        if (importedModality[tag.id]) {
-          mapping[std.id][mod.id][tag.id] = normalizeMappingItem(importedModality[tag.id])
+        const sourceIds = [tag.id, ...(std.id === 'iiif' ? iiifImportAliases[tag.id] || [] : [])]
+        const item = sourceIds.map(id => importedModality[id]).find(Boolean)
+        if (item) {
+          mapping[std.id][mod.id][tag.id] = normalizeMappingItem(item)
           if (!firstMapped) firstMapped = { standard: std.id, modality: mod.id }
         }
       })

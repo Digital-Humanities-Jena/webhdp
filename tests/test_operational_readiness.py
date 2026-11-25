@@ -2,6 +2,7 @@ import os
 import sqlite3
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 from services.maintenance_service import disable_maintenance, enable_maintenance, maintenance_status
 from services.readiness_service import build_readiness_report
@@ -57,6 +58,51 @@ def test_readiness_blocks_when_sqlite_revision_is_behind_head(tmp_path, monkeypa
     assert report["checks"]["database"]["alembic_revision"] == "testrev"
     assert report["checks"]["database"]["expected_alembic_revision"] == "headrev"
     assert report["checks"]["database"]["error"] == "database migration revision is not at Alembic head"
+
+
+def test_running_app_readiness_checks_required_validator_only(tmp_path, monkeypatch):
+    db = tmp_path / "instance" / "hdp_web.db"
+    _create_db(db)
+    for directory in ("hdp-shared/sessions", "local_input", "local_output"):
+        (tmp_path / directory).mkdir(parents=True)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db}")
+    monkeypatch.delenv("BACKUP_ENABLED", raising=False)
+    monkeypatch.setenv("WEBHDP_INLINE_TASKS", "true")
+    from services.readiness_service import LocalEdmValidatorClient
+
+    health = {"ok": False, "status": "DOWN"}
+    calls = []
+
+    def health_check(client):
+        calls.append(client.base_url)
+        return health
+
+    monkeypatch.setattr(LocalEdmValidatorClient, "check_health", health_check)
+    app = SimpleNamespace(config={
+        "LOCAL_EDM_VALIDATOR_URL": "http://validator-in-docker:8080",
+        "ENABLE_LOCAL_EDM_VALIDATION": True,
+        "LOCAL_EDM_VALIDATOR_REQUIRED": False,
+    })
+    optional = build_readiness_report(app)
+    assert optional["ready"] and optional["checks"]["local_edm_validator"]["skipped"]
+    assert calls == []
+
+    app.config.update(ENABLE_LOCAL_EDM_VALIDATION=False, LOCAL_EDM_VALIDATOR_REQUIRED=True)
+    unavailable = build_readiness_report(app)
+    assert unavailable["blockers"] == ["local_edm_validator"]
+    assert calls == ["http://validator-in-docker:8080"]
+
+    health.update(ok=True, status="UP")
+    assert build_readiness_report(app)["ready"] is True
+    app.config["LOCAL_EDM_VALIDATOR_EXPECTED_METIS_SCHEMA_VERSION"] = "15"
+    info = {"ok": True, "summary": {"metis_schema_version": "14"}}
+    monkeypatch.setattr(LocalEdmValidatorClient, "get_info", lambda self: info)
+    mismatch = build_readiness_report(app)
+    assert mismatch["blockers"] == ["local_edm_validator"]
+    assert "expected 15, reported 14" in mismatch["checks"]["local_edm_validator"]["error"]
+    info["summary"]["metis_schema_version"] = "15"
+    assert build_readiness_report(app)["ready"] is True
 
 
 def test_readiness_blocks_when_sqlite_schema_is_stamped_but_incomplete(tmp_path, monkeypatch):

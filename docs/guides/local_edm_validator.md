@@ -26,14 +26,16 @@ Template validation:
 LOD generation:
 
 1. Native pipeline LOD generation renders the EDM attachment when that format is enabled and a Zenodo draft is available.
-2. For new EDM output, WebHDP calls local-edm-validator when `ENABLE_LOCAL_EDM_VALIDATION` or `LOCAL_EDM_VALIDATOR_REQUIRED` is true. A retry can reuse an intact artifact validated with the current XSD release.
+2. For new EDM output, WebHDP calls local-edm-validator when `ENABLE_LOCAL_EDM_VALIDATION` or `LOCAL_EDM_VALIDATOR_REQUIRED` is true. A retry can reuse an intact artifact when its report matches the current XSD release and any configured validator identity.
 3. The pipeline records validation evidence and writes `edm.xml` only after the requested checks pass.
 4. The local `.hdpc` `source_files` row for `edm.xml` stores the full report and first error message for audit and troubleshooting.
 
 Admin status:
 
 1. `GET /api/v1/admin/edm-validator/status` calls `/actuator/health` and `/actuator/info`.
-2. Settings -> EDM Config shows the configured enable flag, endpoint, reachability, response time, version, commit/source ref, build time, and image tag. The admin status API probes the endpoint even when workflow validation is disabled and returns the required flag separately.
+2. **Settings → EDM Config** shows whether the validator is required, enabled, or disabled, along with reachability, endpoint, and build details. The admin status API probes the endpoint regardless of those flags and returns both flags and their effective `active` value.
+
+Deployment readiness checks the validator only when it is required. An unhealthy service or a mismatch with the expected identity makes `GET /api/v1/readiness` return HTTP 503. The liveness endpoint `GET /api/v1/health` continues to report whether WebHDP is running.
 
 The same flags govern explicit template validation, EDM mapping tests, and session EDM validation samples. A render-only template preview does not call the standalone validator. The administrator's local-storage Tools output preview calls it only on explicit request. When both flags are false, normal EDM checks still run XML, XSD, and business validation in WebHDP. Schematron runs in the standalone validator only. When requested, a rejected or unavailable standalone check prevents successful generation of new EDM output.
 
@@ -49,18 +51,17 @@ LOCAL_EDM_VALIDATOR_CONTINUE_ON_ERROR=true
 EMIT_EUROPEANA_3D_ADVISORY_FIELDS=false
 ```
 
-Use `http://localhost:18080` only when WebHDP itself runs directly on the host
-instead of inside Docker. The managed Compose overlay sets
-`LOCAL_EDM_VALIDATOR_URL=http://local-edm-validator:8080` for backend and worker
-containers.
+Use `http://localhost:18080` when WebHDP runs directly on the same host as the validator. Leave `LOCAL_EDM_VALIDATOR_URL` unset for the managed Compose validator. The general backend and Celery worker use the overlay's Docker address and the model publication worker defaults to that same address. If an older `.env` sets the host gateway for the managed validator, remove that assignment. Set an explicit URL for a validator running outside this Compose project.
+
+The managed overlay verifies that the validator reports EDM schema `20260720`, Metis Schema `15`, and the configured source revision. External deployments can set `LOCAL_EDM_VALIDATOR_EXPECTED_EDM_SCHEMA_VERSION`, `LOCAL_EDM_VALIDATOR_EXPECTED_METIS_SCHEMA_VERSION`, and `LOCAL_EDM_VALIDATOR_EXPECTED_SOURCE_REF` to verify those values. A missing or mismatched configured value requires revalidation of draft EDM attachments. Saved reports preserve the identity returned by the validation request. Published metadata downloads continue to use their original validation evidence.
 
 Managed Compose overlay variables:
 
 ```bash
 LOCAL_EDM_VALIDATOR_REPO=./external_code/local-edm-validator
 LOCAL_EDM_VALIDATOR_SOURCE_REPOSITORY=https://github.com/Digital-Humanities-Jena/local-edm-validator.git
-LOCAL_EDM_VALIDATOR_SOURCE_REF=a7b3ad461e6d35de7d8f5cee5531a43768d2e158
-LOCAL_EDM_VALIDATOR_IMAGE=local-edm-validator:webhdp-a7b3ad461e6d-edm-20260720
+LOCAL_EDM_VALIDATOR_SOURCE_REF=443227fa3d715e398f21e6b2dd07bab3ee841349
+LOCAL_EDM_VALIDATOR_IMAGE=local-edm-validator:webhdp-443227fa3d71-edm-20260720
 LOCAL_EDM_VALIDATOR_PORT=18080
 ```
 
@@ -91,7 +92,7 @@ make local-edm-validator-verify
 docker compose -f docker-compose.yml -f docker-compose.edm-validator.yml up -d --build
 ```
 
-The setup script checks out validator commit `a7b3ad461e6d35de7d8f5cee5531a43768d2e158`
+The setup script checks out validator commit `443227fa3d715e398f21e6b2dd07bab3ee841349`
 and initializes its Metis Schema `v15` submodule at `a1201cd7e6be618bec67f8258348d8bddb93059b`.
 The build uses that source for the first XSD pass and for the RDF bindings
 used by problem-pattern analysis. Run setup again before rebuilding an existing
@@ -156,6 +157,8 @@ Expected status response shape:
   "success": true,
   "data": {
     "enabled": true,
+    "required": true,
+    "active": true,
     "url": "http://local-edm-validator:8080",
     "continue_on_error": true,
     "health": {
@@ -168,9 +171,9 @@ Expected status response shape:
       "summary": {
         "version": "1.0.0-local",
         "repository": "https://github.com/Digital-Humanities-Jena/local-edm-validator",
-        "source_ref": "a7b3ad4",
+        "source_ref": "443227f",
         "image_tag": "local-edm-validator:local",
-        "git_commit_short": "a7b3ad4",
+        "git_commit_short": "443227f",
         "build_time": "2026-11-25T10:00:00Z",
         "edm_schema_version": "20260720",
         "metis_schema_version": "15"

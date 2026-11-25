@@ -46,7 +46,7 @@
     <div class="flex items-center justify-between">
       <div class="space-x-4 text-sm text-gray-700">
         <label class="inline-flex items-center space-x-2"><input v-model="targets.edm" type="checkbox" class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" /><span>EDM</span></label>
-        <label class="inline-flex items-center space-x-2"><input v-model="targets.iiif" type="checkbox" class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" /><span>IIIF</span></label>
+        <label class="inline-flex items-center space-x-2"><input v-model="targets.iiif" type="checkbox" class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" /><span>{{ IIIF_PRESENTATION_LABEL }}</span></label>
         <label class="inline-flex items-center space-x-2"><input v-model="targets.mets" type="checkbox" class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" /><span>METS</span></label>
       </div>
       <button @click="run" :disabled="!canRun || running" class="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:opacity-50">
@@ -60,14 +60,14 @@
         <p>Main file key: <span class="font-semibold">{{ result.main_file_key || 'n/a' }}</span></p>
       </div>
 
-      <div v-for="target in ['edm','iiif','mets']" :key="target" class="rounded border p-4" v-if="result.outputs?.[target]">
+      <div v-for="target in previewTargets" :key="target" class="rounded border p-4">
         <div class="flex items-center justify-between">
           <h3 class="text-sm font-semibold text-gray-900 uppercase">{{ target }}</h3>
           <span
             class="text-xs font-semibold"
             :class="badgeClass(result.outputs[target])"
           >
-            {{ badgeLabel(result.outputs[target]) }}
+            {{ badgeLabel(result.outputs[target], target) }}
           </span>
         </div>
         <p v-if="!result.outputs[target].ok" class="mt-2 text-xs text-red-700">{{ result.outputs[target].error }}</p>
@@ -121,9 +121,10 @@
             </div>
           </div>
 
+          <IiifManifestPreview v-if="target === 'iiif'" :content="result.outputs[target].content" />
           <details class="rounded border bg-gray-50">
             <summary class="cursor-pointer px-3 py-2 text-[11px] font-semibold text-gray-700">Rendered Output</summary>
-            <pre class="max-h-72 overflow-auto border-t p-2 text-[11px] text-gray-700">{{ result.outputs[target].preview?.text || '' }}</pre>
+            <pre class="max-h-72 overflow-auto border-t p-2 text-[11px] text-gray-700">{{ (target === 'iiif' && result.outputs[target].content) || result.outputs[target].preview?.text || '' }}</pre>
           </details>
 
           <details class="rounded border bg-white">
@@ -141,6 +142,8 @@ import { computed, onMounted, ref } from 'vue'
 import { useToast } from '@/composables/useToast'
 import msfService from '@/services/msf.service'
 import toolsService from '@/services/tools.service'
+import IiifManifestPreview from '@/components/workflow/IiifManifestPreview.vue'
+import { IIIF_PRESENTATION_LABEL } from '@/utils/iiifPresentation'
 
 const { success, error: showError } = useToast()
 
@@ -156,16 +159,17 @@ const targets = ref({ edm: true, iiif: true, mets: true })
 
 const running = ref(false)
 const result = ref(null)
+const previewTargets = computed(() => Object.keys(targets.value).filter(target => result.value?.outputs?.[target]))
 
 const canRun = computed(() => {
   const selectedTargets = Object.values(targets.value).filter(Boolean).length
   return isEnabled.value && !!selectedMsfPath.value && selectedTargets > 0
 })
 
-const badgeLabel = (output) => {
+const badgeLabel = (output, target) => {
   if (!output?.ok) return 'error'
   if (output?.validation?.valid === false) return 'invalid'
-  if (output?.validation?.valid === true) return 'valid'
+  if (output?.validation?.valid === true) return target === 'iiif' ? 'checks passed' : 'valid'
   return 'ok'
 }
 

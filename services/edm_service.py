@@ -12,6 +12,9 @@ import fnmatch
 from services.local_edm_validator_client import (
     LocalEdmValidatorClient,
     LocalEdmValidatorClientError,
+    expected_validator_identity,
+    normalize_validator_identity,
+    validator_identity_mismatches,
 )
 
 logger = logging.getLogger(__name__)
@@ -1297,6 +1300,7 @@ class EdmService:
         remote_status: Any = "unknown",
     ) -> Dict[str, Any]:
         data = data if isinstance(data, dict) else {}
+        identity = normalize_validator_identity(data.get("validatorIdentity"))
         result = {
             "valid": True,
             "errors": [],
@@ -1311,6 +1315,8 @@ class EdmService:
             "total_duration_millis": data.get("totalDurationMillis"),
             "raw": data,
         }
+        if identity:
+            result["validator_identity"] = identity
 
         timings_by_step = {}
         for timing in result["step_timings"]:
@@ -1436,14 +1442,23 @@ class EdmService:
                 ),
             )
             result = self._normalize_local_validator_report(data, remote_status=200)
+            mismatches = validator_identity_mismatches(
+                expected_validator_identity(current_app.config), result.get("validator_identity"),
+            )
+            if mismatches:
+                result.update(valid=False, status="unavailable")
+                result["errors"].append(
+                    "Local EDM Validator reported a different build or schema: " + ", ".join(mismatches)
+                )
         except (LocalEdmValidatorClientError, TypeError, ValueError, AttributeError) as e:
             logger.error("Local EDM validation failed: %s", e)
             result = {
                 "valid": False,
-                "errors": [f"Connection to Local EDM Validator failed: {str(e)}"],
+                "errors": [str(e)],
                 "warnings": [],
                 "infos": [],
-                "remote_status": "connection_failed",
+                "status": "unavailable",
+                "remote_status": getattr(e, "remote_status", "invalid_response"),
                 "validator": "local-edm-validator",
                 "validation_results": [],
                 "problem_patterns": [],

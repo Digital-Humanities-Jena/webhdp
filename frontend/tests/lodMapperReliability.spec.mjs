@@ -40,6 +40,42 @@ describe('LOD preview reliability', () => {
     expect(wrapper.get('[role="alert"]').text()).toContain('Validation is unavailable')
     wrapper.unmount()
   })
+  it('imports legacy IIIF identifiers and exports container-specific fields', async () => {
+    wrapper.unmount()
+    const legacyId = { source: 'static', value: 'https://example.org/objects/1/legacy' }
+    const sceneId = { source: 'static', value: 'https://example.org/objects/1/scene' }
+    wrapper = mount(LodMapper, { props: {
+      msfPath: '/session/msf.csv',
+      templateId: 7,
+      initialMapping: { iiif: {
+        '3d': { 'iiif:canvasId': legacyId, 'iiif:sceneId': sceneId, 'iiif:pointZ': { source: 'static', value: 0 } },
+        image: { 'iiif:sceneId': legacyId, 'iiif:modelId': { source: 'static', value: 'https://example.org/photo.jpg' } },
+        sound: { 'iiif:canvasId': legacyId },
+      } },
+    } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('Scene ID')
+    expect(wrapper.text()).not.toContain('Canvas Width')
+    api.post.mockResolvedValue({ success: true, data: { json: '{}', validation: { valid: true } } })
+    await button('Test Mapping').trigger('click')
+    await flushPromises()
+    const mapping = api.post.mock.calls.at(-1)[1].mapping_config
+    expect(mapping['iiif:sceneId']).toMatchObject(sceneId)
+    expect(mapping['iiif:pointZ'].value).toBe(0)
+    expect(mapping['iiif:canvasId']).toBeUndefined()
+
+    await button('Image').trigger('click')
+    expect(wrapper.text()).toContain('Canvas Width')
+    expect(wrapper.get('#lod-iiif-image-iiif-canvasId-value').element.value).toBe(legacyId.value)
+    expect(wrapper.get('#lod-iiif-image-iiif-contentId-value').element.value).toBe('https://example.org/photo.jpg')
+    expect(wrapper.text()).toContain('Latitude')
+    await button('Sound').trigger('click')
+    expect(wrapper.text()).toContain('Timeline ID')
+    expect(wrapper.get('#lod-iiif-sound-iiif-timelineId-value').element.value).toBe(legacyId.value)
+    expect(wrapper.get('#lod-iiif-sound-iiif-canvasId-value').element.value).toBe(legacyId.value)
+    expect(wrapper.text()).not.toContain('Canvas Width')
+    wrapper.unmount()
+  })
   it('keeps known metadata errors distinct from a concurrent validator outage', async () => {
     await button('EDM-XML').trigger('click')
     api.post.mockResolvedValue({ success: true, data: { xml: '<invalid/>', validation: {

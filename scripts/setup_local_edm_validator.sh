@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEFAULT_REPO_URL="https://github.com/Digital-Humanities-Jena/local-edm-validator.git"
-DEFAULT_REF="a7b3ad461e6d35de7d8f5cee5531a43768d2e158"
+DEFAULT_REF="443227fa3d715e398f21e6b2dd07bab3ee841349"
 EDM_SCHEMA_VERSION="20260720"
 TARGET_DIR="${LOCAL_EDM_VALIDATOR_REPO:-$ROOT_DIR/external_code/local-edm-validator}"
 METIS_SCHEMA_PATH="metis-sandbox-rest/webhdp-metis-schema"

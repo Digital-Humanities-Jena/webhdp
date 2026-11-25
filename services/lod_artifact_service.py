@@ -8,11 +8,19 @@ import os
 from pathlib import Path
 from flask import current_app, has_app_context
 from services.edm_service import EDM_SCHEMA_VERSION
+from services.local_edm_validator_client import expected_validator_identity, validator_identity_mismatches
 from services.lod_reliability import FORMATS, assert_public_document, atomic_write, digest, pinned_templates
 
 FILENAMES = dict(edm='edm.xml', iiif='iiif.json', mets='mets.xml', cidoc_crm='cidoc-crm.xml', jsonld='metadata.jsonld')
 EDM_POLICY_KEYS = ('LOCAL_EDM_VALIDATOR_REQUIRED', 'ENABLE_LOCAL_EDM_VALIDATION', 'ENABLE_METIS_VALIDATION',
-                   'LOCAL_EDM_VALIDATOR_URL', 'METIS_SANDBOX_URL', 'ENABLE_XSD_VALIDATION')
+                   'LOCAL_EDM_VALIDATOR_URL', 'METIS_SANDBOX_URL', 'ENABLE_XSD_VALIDATION',
+                   'expected_validator_identity')
+
+
+def _requests_validator(config):
+    return config.get('LOCAL_EDM_VALIDATOR_REQUIRED', False) or config.get(
+        'ENABLE_LOCAL_EDM_VALIDATION', config.get('ENABLE_METIS_VALIDATION', True),
+    )
 
 
 def lod_record_is_finalized(record_status):
@@ -71,7 +79,11 @@ def load_record_manifest(hdpc_path, record_id):
 
 
 def validation_policy():
-    policy = {key: current_app.config.get(key) for key in EDM_POLICY_KEYS} if has_app_context() else {}
+    policy = {}
+    if has_app_context():
+        policy = {key: current_app.config.get(key) for key in EDM_POLICY_KEYS if key != 'expected_validator_identity'}
+        if _requests_validator(current_app.config) and (expected := expected_validator_identity(current_app.config)):
+            policy['expected_validator_identity'] = expected
     from services.iiif_validation import PROFILE_VERSION
     policy['iiif_profile'] = PROFILE_VERSION
     return policy
@@ -82,11 +94,10 @@ def _generation_fingerprint(specification, policy):
 
 
 def _policy_changed_for_format(captured, current, standard):
-    if standard == 'edm' or not isinstance(captured, dict):
+    if not isinstance(captured, dict):
         return captured != current
-    captured_shared = {key: value for key, value in captured.items() if key not in EDM_POLICY_KEYS}
-    current_shared = {key: value for key, value in current.items() if key not in EDM_POLICY_KEYS}
-    return captured_shared != current_shared
+    keys = {'edm': EDM_POLICY_KEYS, 'iiif': ('iiif_profile',)}.get(standard, ())
+    return any(captured.get(key) != current.get(key) for key in keys)
 
 
 def policy_error(manifest, standard, status):
@@ -98,8 +109,18 @@ def policy_error(manifest, standard, status):
     if (captured is not None and _policy_changed_for_format(captured, policy, standard)) or legacy_changed:
         return 'Validation requirements changed. Revalidate metadata before continuing.'
     report = status.get('validation') or {}
-    if standard == 'edm' and policy.get('LOCAL_EDM_VALIDATOR_REQUIRED') and ((report.get('details') or {}).get('remote') or {}).get('valid') is not True:
-        return 'Required EDM validation is missing. Revalidate metadata before continuing.'
+    if standard == 'edm':
+        details = report.get('details') or {}
+        remote = details.get('remote') or {}
+        expected = policy.get('expected_validator_identity') or {}
+        request_remote = _requests_validator(current_app.config) if has_app_context() else False
+        schema_version = (details.get('xsd') or {}).get('schema_version')
+        if (schema_version is not None or (request_remote and expected)) and schema_version != EDM_SCHEMA_VERSION:
+            return 'The EDM schema release changed or is missing from the report. Revalidate metadata before continuing.'
+        if policy.get('LOCAL_EDM_VALIDATOR_REQUIRED') and remote.get('valid') is not True:
+            return 'Required EDM validation is missing. Revalidate metadata before continuing.'
+        if request_remote and validator_identity_mismatches(expected, remote.get('validator_identity')):
+            return 'The saved EDM validator build or schema differs from the configured release. Revalidate metadata before continuing.'
     return None
 
 
@@ -261,7 +282,9 @@ def generate_artifacts(output_dir, specification, register, progress=None, *, hd
                         template_id = (specification.get('templates') or {}).get(standard, {}).get('id') or (specification.get('template_ids') or {}).get(standard) or metadata.get(f'{standard}_template_id')
                         if standard == 'edm':
                             generation = current_app.edm_service.generate_edm_xml_with_report(metadata, record, template_id, validate=False, **kwargs)
-                            generation['validation'] = current_app.edm_service.validate_edm_document(generation['content'], metadata=metadata, include_remote=current_app.config.get('LOCAL_EDM_VALIDATOR_REQUIRED', False) or current_app.config.get('ENABLE_LOCAL_EDM_VALIDATION', current_app.config.get('ENABLE_METIS_VALIDATION', True)))
+                            generation['validation'] = current_app.edm_service.validate_edm_document(
+                                generation['content'], metadata=metadata, include_remote=_requests_validator(current_app.config),
+                            )
                         elif standard == 'iiif':
                             generation = current_app.iiif_service.generate_iiif_manifest_with_report(metadata, record, template_id, validate=False, **kwargs)
                             generation['validation'] = generation.get('validation') or current_app.iiif_service.validate_iiif_manifest(generation['content'])
@@ -275,6 +298,7 @@ def generate_artifacts(output_dir, specification, register, progress=None, *, hd
                         raise ValueError(f'{label} validation failed. Review the validation report and retry.')
                     issue = policy_error(manifest, standard, {'validation': validation})
                     if issue:
+                        status['validation'] = validation
                         raise ValueError(issue)
                     content = generation['content']
                     assert_public_document(content)

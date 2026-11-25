@@ -5,6 +5,9 @@ services:
       - ENABLE_LOCAL_EDM_VALIDATION=${ENABLE_LOCAL_EDM_VALIDATION:-true}
       - LOCAL_EDM_VALIDATOR_REQUIRED=${LOCAL_EDM_VALIDATOR_REQUIRED:-true}
       - LOCAL_EDM_VALIDATOR_CONTINUE_ON_ERROR=${LOCAL_EDM_VALIDATOR_CONTINUE_ON_ERROR:-true}
+      - LOCAL_EDM_VALIDATOR_EXPECTED_EDM_SCHEMA_VERSION=${LOCAL_EDM_VALIDATOR_EXPECTED_EDM_SCHEMA_VERSION-20260720}
+      - LOCAL_EDM_VALIDATOR_EXPECTED_METIS_SCHEMA_VERSION=${LOCAL_EDM_VALIDATOR_EXPECTED_METIS_SCHEMA_VERSION-15}
+      - LOCAL_EDM_VALIDATOR_EXPECTED_SOURCE_REF=${LOCAL_EDM_VALIDATOR_EXPECTED_SOURCE_REF-${LOCAL_EDM_VALIDATOR_SOURCE_REF:-443227fa3d715e398f21e6b2dd07bab3ee841349}}
     depends_on:
       local-edm-validator:
         condition: service_healthy
@@ -15,6 +18,9 @@ services:
       - ENABLE_LOCAL_EDM_VALIDATION=${ENABLE_LOCAL_EDM_VALIDATION:-true}
       - LOCAL_EDM_VALIDATOR_REQUIRED=${LOCAL_EDM_VALIDATOR_REQUIRED:-true}
       - LOCAL_EDM_VALIDATOR_CONTINUE_ON_ERROR=${LOCAL_EDM_VALIDATOR_CONTINUE_ON_ERROR:-true}
+      - LOCAL_EDM_VALIDATOR_EXPECTED_EDM_SCHEMA_VERSION=${LOCAL_EDM_VALIDATOR_EXPECTED_EDM_SCHEMA_VERSION-20260720}
+      - LOCAL_EDM_VALIDATOR_EXPECTED_METIS_SCHEMA_VERSION=${LOCAL_EDM_VALIDATOR_EXPECTED_METIS_SCHEMA_VERSION-15}
+      - LOCAL_EDM_VALIDATOR_EXPECTED_SOURCE_REF=${LOCAL_EDM_VALIDATOR_EXPECTED_SOURCE_REF-${LOCAL_EDM_VALIDATOR_SOURCE_REF:-443227fa3d715e398f21e6b2dd07bab3ee841349}}
     depends_on:
       local-edm-validator:
         condition: service_healthy
@@ -137,8 +143,8 @@ services:
       dockerfile: metis-sandbox-rest/Dockerfile.local
       labels:
         org.opencontainers.image.source: ${LOCAL_EDM_VALIDATOR_SOURCE_REPOSITORY:-https://github.com/Digital-Humanities-Jena/local-edm-validator.git}
-        org.opencontainers.image.revision: ${LOCAL_EDM_VALIDATOR_SOURCE_REF:-a7b3ad461e6d35de7d8f5cee5531a43768d2e158}
-    image: ${LOCAL_EDM_VALIDATOR_IMAGE:-local-edm-validator:webhdp-a7b3ad461e6d-edm-20260720}
+        org.opencontainers.image.revision: ${LOCAL_EDM_VALIDATOR_SOURCE_REF:-443227fa3d715e398f21e6b2dd07bab3ee841349}
+    image: ${LOCAL_EDM_VALIDATOR_IMAGE:-local-edm-validator:webhdp-443227fa3d71-edm-20260720}
     ports:
       - "127.0.0.1:${LOCAL_EDM_VALIDATOR_PORT:-18080}:8080"
     cpus: 0.75
@@ -149,11 +155,11 @@ services:
       SPRING_CONFIG_ADDITIONAL_LOCATION: file:/config/application.yml
       JDK_JAVA_OPTIONS: -Xms500m -Xmx1g
       INFO_APP_SOURCE_REPOSITORY: ${LOCAL_EDM_VALIDATOR_SOURCE_REPOSITORY:-https://github.com/Digital-Humanities-Jena/local-edm-validator.git}
-      INFO_APP_SOURCE_REF: ${LOCAL_EDM_VALIDATOR_SOURCE_REF:-a7b3ad461e6d35de7d8f5cee5531a43768d2e158}
-      INFO_APP_IMAGE_TAG: ${LOCAL_EDM_VALIDATOR_IMAGE:-local-edm-validator:webhdp-a7b3ad461e6d-edm-20260720}
+      INFO_APP_SOURCE_REF: ${LOCAL_EDM_VALIDATOR_SOURCE_REF:-443227fa3d715e398f21e6b2dd07bab3ee841349}
+      INFO_APP_IMAGE_TAG: ${LOCAL_EDM_VALIDATOR_IMAGE:-local-edm-validator:webhdp-443227fa3d71-edm-20260720}
     labels:
       org.opencontainers.image.source: ${LOCAL_EDM_VALIDATOR_SOURCE_REPOSITORY:-https://github.com/Digital-Humanities-Jena/local-edm-validator.git}
-      org.opencontainers.image.revision: ${LOCAL_EDM_VALIDATOR_SOURCE_REF:-a7b3ad461e6d35de7d8f5cee5531a43768d2e158}
+      org.opencontainers.image.revision: ${LOCAL_EDM_VALIDATOR_SOURCE_REF:-443227fa3d715e398f21e6b2dd07bab3ee841349}
     volumes:
       - ${LOCAL_EDM_VALIDATOR_REPO:-./external_code/local-edm-validator}/metis-sandbox-rest/docker/local/application.yml:/config/application.yml:ro
     depends_on:

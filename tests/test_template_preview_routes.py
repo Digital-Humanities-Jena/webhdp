@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from flask import Flask
 from flask_jwt_extended import JWTManager, create_access_token
@@ -5,10 +7,11 @@ from lxml import etree
 
 from database.database import db, init_db
 from database.lod_template_bootstrap import ensure_default_lod_templates
-from database.models import LodTemplate
+from database.models import LodStandard, LodTemplate
 from database.seed_edm_templates import MODEL_3D_TEMPLATE
 from routes.template_routes import template_bp
 from services.edm_service import EdmService
+from services.iiif_service import IiifService
 
 
 @pytest.fixture
@@ -26,6 +29,7 @@ def preview_app(tmp_path, monkeypatch):
     JWTManager(app)
     app.register_blueprint(template_bp, url_prefix="/templates")
     app.edm_service = EdmService()
+    app.iiif_service = IiifService()
     monkeypatch.setattr("routes.template_routes.check_admin_access", lambda: True)
     with app.app_context():
         db.create_all()
@@ -125,3 +129,29 @@ def test_new_3d_template_renders_webresource_elements_in_schema_order(preview_ap
 def test_preview_requires_authentication(preview_app):
     app, _, template_id = preview_app
     assert app.test_client().post("/templates/preview", json={**_preview_data(), "template_id": template_id}).status_code == 401
+
+
+def test_saved_and_unsaved_iiif_templates_share_presentation_4_preview(preview_app, monkeypatch):
+    app, headers, _ = preview_app
+    with app.app_context():
+        template = LodTemplate.query.filter_by(standard=LodStandard.IIIF, is_default=True).one()
+        template_id, content = template.id, template.content
+
+    client = app.test_client()
+    data = _preview_data()
+    saved = client.post("/templates/preview", json={**data, "template_id": template_id}, headers=headers)
+    raw_data = {**data, "standard": "iiif", "content": content}
+    raw = client.post("/templates/preview", json=raw_data, headers=headers)
+    assert saved.status_code == raw.status_code == 200
+    manifest = json.loads(raw.json["data"]["json"])
+    assert manifest == json.loads(saved.json["data"]["json"])
+    assert manifest["@context"] == "http://iiif.io/api/presentation/4/context.json"
+    assert manifest["items"][0]["type"] == "Scene"
+    validation = client.post("/templates/validate", json={"standard": "iiif", "json": manifest}, headers=headers)
+    assert validation.json["data"]["valid"] is True
+    manifest["@context"] = "http://iiif.io/api/presentation/3/context.json"
+    invalid = client.post("/templates/validate", json={"standard": "iiif", "json": manifest}, headers=headers)
+    assert invalid.json["data"]["valid"] is False
+
+    monkeypatch.setattr("routes.template_routes.check_admin_access", lambda: False)
+    assert client.post("/templates/preview", json=raw_data, headers=headers).status_code == 403

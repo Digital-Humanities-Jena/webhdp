@@ -42,11 +42,14 @@ test.describe('Local EDM Validator browser coverage', () => {
       })
     })
     let reportsSchemaVersions = true
+    let validatorRequired = false
     await page.route(apiV1('/admin/edm-validator/status'), async (route) => {
       await fulfillJson(route, {
         success: true,
         data: {
-          enabled: true,
+          enabled: !validatorRequired,
+          required: validatorRequired,
+          active: true,
           url: 'http://local-edm-validator:8080',
           continue_on_error: true,
           health: {
@@ -72,6 +75,7 @@ test.describe('Local EDM Validator browser coverage', () => {
     await page.goto('/settings/edm')
 
     await expect(page.getByRole('heading', { name: 'Local EDM Validator' })).toBeVisible()
+    await expect(page.getByText('Enabled', { exact: true })).toBeVisible()
     await expect(page.getByText('http://local-edm-validator:8080')).toBeVisible()
     await expect(page.getByText('Reachable')).toBeVisible()
     await expect(page.getByText('1.0.0-local')).toBeVisible()
@@ -83,9 +87,11 @@ test.describe('Local EDM Validator browser coverage', () => {
     await expect(page.getByText('15', { exact: true })).toBeVisible()
 
     reportsSchemaVersions = false
+    validatorRequired = true
     await page.getByRole('button', { name: 'Refresh' }).click()
     await expect(page.getByText('EDM Schema', { exact: true })).toHaveCount(0)
     await expect(page.getByText('Metis Schema', { exact: true })).toHaveCount(0)
+    await expect(page.getByText('Required', { exact: true })).toBeVisible()
     await expect(page.getByText('Reachable')).toBeVisible()
   })
 

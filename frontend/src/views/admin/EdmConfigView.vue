@@ -45,8 +45,8 @@
             <dl v-else class="grid grid-cols-1 gap-4 sm:grid-cols-4">
               <div class="rounded-md bg-gray-50 p-4">
                 <dt class="text-xs font-semibold uppercase tracking-wide text-gray-500">Feature</dt>
-                <dd :class="['mt-1 text-sm font-semibold', validatorStatus?.enabled ? 'text-green-700' : 'text-gray-600']">
-                  {{ validatorStatus?.enabled ? 'Enabled' : 'Disabled' }}
+                <dd :class="['mt-1 text-sm font-semibold', validatorFeatureStatus === 'Disabled' ? 'text-gray-600' : 'text-green-700']">
+                  {{ validatorFeatureStatus }}
                 </dd>
               </div>
               <div class="rounded-md bg-gray-50 p-4 sm:col-span-2">
@@ -206,6 +206,11 @@ const newLicenseKey = ref('')
 const newLicenseUri = ref('')
 const validatorStatus = ref(null)
 const validatorStatusError = ref('')
+
+const validatorFeatureStatus = computed(() => {
+  if (validatorStatus.value?.required) return 'Required'
+  return (validatorStatus.value?.active ?? validatorStatus.value?.enabled) ? 'Enabled' : 'Disabled'
+})
 const statusLoading = ref(false)
 const validatorInfoSummary = computed(() => {
   const summary = validatorStatus.value?.info?.summary

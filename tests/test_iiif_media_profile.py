@@ -17,13 +17,14 @@ def application_context():
 
 @pytest.fixture
 def image_manifest():
-    # An independent Presentation 3 image fixture; it is not produced by the generator.
-    return {'@context': 'http://iiif.io/api/presentation/3/context.json',
+    # An independent Presentation 4 image fixture.
+    return {'@context': 'http://iiif.io/api/presentation/4/context.json',
             'id': 'https://example.org/manifest', 'type': 'Manifest', 'label': {'en': ['Image']},
             'items': [{'id': 'https://example.org/canvas/1', 'type': 'Canvas', 'width': 800, 'height': 600,
                        'items': [{'id': 'https://example.org/page/1', 'type': 'AnnotationPage',
                                   'items': [{'id': 'https://example.org/annotation/1', 'type': 'Annotation',
-                                             'motivation': 'painting', 'target': 'https://example.org/canvas/1',
+                                             'motivation': ['painting'],
+                                             'target': {'id': 'https://example.org/canvas/1', 'type': 'Canvas'},
                                              'body': {'id': 'https://example.org/photo.jpg', 'type': 'Image',
                                                       'format': 'image/jpeg', 'width': 800, 'height': 600}}]}]}]}
 
@@ -37,7 +38,7 @@ def test_independent_image_manifest_passes(image_manifest):
     (lambda m: m['items'][0].update(height=0), 'height'),
     (lambda m: m['items'][0].update(width=True), 'width'),
     (lambda m: m['items'][0].update(width=10 ** 1000), 'width'),
-    (lambda m: m['items'][0]['items'][0]['items'][0].update(target='https://example.org/wrong'), 'target'),
+    (lambda m: m['items'][0]['items'][0]['items'][0]['target'].update(id='https://example.org/wrong'), 'target'),
     (lambda m: m['items'][0]['items'][0]['items'][0]['body'].update(type='Model'), 'compatible'),
     (lambda m: m.update(id='file:///private/manifest'), 'HTTP(S)'),
     (lambda m: m.update(label={'en': ['']}), 'language map'),
@@ -69,7 +70,7 @@ def test_validation_checks_later_entries(image_manifest, nested):
 
 
 @pytest.mark.parametrize('filename, kind, painted', [('model.glb', 'Model', True), ('photo.jpg', 'Image', True),
-                                                    ('audio.wav', 'Sound', False), ('film.mp4', 'Video', False),
+                                                    ('audio.wav', 'Audio', False), ('film.mp4', 'Video', False),
                                                     ('scan.pdf', 'Text', False), ('notes.doc', 'Text', False), ('notes.docx', 'Text', False)])
 def test_generation_respects_media_without_inventing_duration(filename, kind, painted):
     service = IiifService()
@@ -79,7 +80,8 @@ def test_generation_respects_media_without_inventing_duration(filename, kind, pa
     canvas = manifest['items'][0]
     assert service.validate_iiif_manifest(content)['valid']
     if painted:
-        assert canvas['items'][0]['items'][0]['body'][0]['type'] == kind
+        assert canvas['type'] == ('Scene' if kind == 'Model' else 'Canvas')
+        assert canvas['items'][0]['items'][0]['body']['type'] == kind
     else:
         assert canvas['rendering'][0]['type'] == kind
         assert 'duration' not in canvas
@@ -89,13 +91,29 @@ def test_audio_with_duration_is_painted_and_invalid_duration_is_rejected():
     service = IiifService()
     record = {'id': 123, 'links': {'html': 'https://zenodo.org/records/123'}, 'files': [{'key': 'oral.wav'}]}
     content = service._ensure_minimum_viable_iiif('{}', {'title': 'Oral history', 'iiif_duration': 12.5}, record)
-    canvas = json.loads(content)['items'][0]
-    assert canvas['duration'] == 12.5
-    assert canvas['items'][0]['items'][0]['body'][0]['type'] == 'Sound'
+    timeline = json.loads(content)['items'][0]
+    assert timeline['type'] == 'Timeline'
+    assert timeline['duration'] == 12.5
+    assert timeline['items'][0]['items'][0]['body']['type'] == 'Audio'
     assert service.validate_iiif_manifest(content)['valid']
+    timeline['items'][0]['items'][0]['body']['type'] = 'Sound'
+    manifest = {**json.loads(content), 'items': [timeline]}
+    assert not service.validate_iiif_manifest(json.dumps(manifest))['valid']
     for value in (0, -1, True, float('nan'), 'unknown'):
         with pytest.raises(ValueError, match='duration'):
             service._ensure_minimum_viable_iiif('{}', {'iiif_duration': value}, record)
+
+
+def test_timed_video_uses_spatial_and_temporal_canvas_dimensions():
+    service = IiifService()
+    metadata = {'iiif_width': 1920, 'iiif_height': 1080, 'iiif_duration': 20.5}
+    record = {'id': 123, 'files': [{'key': 'film.mp4'}]}
+    content = service._ensure_minimum_viable_iiif('{}', metadata, record)
+    canvas = json.loads(content)['items'][0]
+    assert canvas['type'] == 'Canvas'
+    assert [canvas[key] for key in ('width', 'height', 'duration')] == [1920, 1080, 20.5]
+    assert canvas['items'][0]['items'][0]['body']['type'] == 'Video'
+    assert service.validate_iiif_manifest(content)['valid']
 
 
 @pytest.mark.parametrize('field, value', [('iiif_translate_x', 'unknown'), ('iiif_point_z', float('inf')),
@@ -111,7 +129,33 @@ def test_non_model_media_ignores_legacy_model_placement():
     content = service._ensure_minimum_viable_iiif('{}', {'iiif_translate_x': 'unknown', 'iiif_point_z': 8},
                   {'id': 123, 'files': [{'key': 'image.jpg'}]})
     annotation = json.loads(content)['items'][0]['items'][0]['items'][0]
-    assert annotation['body'][0]['type'] == 'Image'
-    assert 'transform' not in annotation['body'][0]
-    assert isinstance(annotation['target'][0], str)
+    assert annotation['body']['type'] == 'Image'
+    assert 'transform' not in annotation['body']
+    assert annotation['target']['type'] == 'Canvas'
     assert service.validate_iiif_manifest(content)['valid']
+
+
+def test_iiif_uses_mapped_content_provider_rights_and_geographic_place():
+    service = IiifService()
+    metadata = {'iiif_content_id': 'https://example.org/display.jpg', 'provider': 'The Museum',
+                'license': 'https://rightsstatements.org/vocab/InC/1.0/',
+                'iiif_longitude': '0', 'iiif_latitude': '50.93', 'iiif_altitude': -5}
+    result = service.generate_iiif_manifest_with_report(metadata, {'id': 123, 'files': [{'key': 'image.jpg'}]},
+                                                        template_content='{}')
+    manifest = json.loads(result['content'])
+    assert manifest['navPlace']['features'][0]['geometry'] == {'type': 'Point', 'coordinates': [0, 50.93, -5]}
+    assert manifest['provider'] == [{'id': f"{manifest['id']}#provider", 'type': 'Agent', 'label': {'en': ['The Museum']}}]
+    assert manifest['rights'] == metadata['license']
+    annotation = manifest['items'][0]['items'][0]['items'][0]
+    assert annotation['body']['id'] == metadata['iiif_content_id']
+    assert annotation['target']['type'] == 'Canvas'
+
+    manifest['navPlace']['features'][0]['geometry']['coordinates'][1] = 100
+    assert not service.validate_iiif_manifest(json.dumps(manifest))['valid']
+
+
+@pytest.mark.parametrize('metadata', [{'iiif_latitude': 10}, {'iiif_longitude': 181, 'iiif_latitude': 10}])
+def test_iiif_rejects_incomplete_or_out_of_range_geographic_coordinates(metadata):
+    with pytest.raises(ValueError, match='IIIF longitude'):
+        IiifService().generate_iiif_manifest_with_report(metadata, {'id': 123, 'files': [{'key': 'model.glb'}]},
+                                                         template_content='{}')

@@ -58,7 +58,7 @@ const isPipelineConstructorRoute = computed(() => route.name === 'PipelineConfig
 const navigation = [
   { name: 'Pipelines', href: '/settings/pipelines', icon: AdjustmentsHorizontalIcon },
   { name: 'EDM Config', href: '/settings/edm', icon: CircleStackIcon },
-  { name: 'EDM Templates', href: '/settings/edm-templates', icon: DocumentDuplicateIcon },
+  { name: 'EDM and IIIF Templates', href: '/settings/edm-templates', icon: DocumentDuplicateIcon },
   { name: 'Cloud Testing', href: '/settings/cloud-testing', icon: CloudIcon },
   { name: 'Storage Priority', href: '/settings/storage', icon: ServerIcon },
   { name: 'Login MFA', href: '/settings/mfa', icon: ShieldCheckIcon },

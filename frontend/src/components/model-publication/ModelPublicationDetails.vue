@@ -73,7 +73,7 @@ const sourceSteps = [
 const steps = computed(() => props.practice ? [...sourceSteps,
   { title: 'Prepare files for download', description: 'Save the model, preview, spreadsheet, and mapped metadata in WebHDP.' },
 ] : [...sourceSteps,
-  { title: 'Validate metadata files', description: 'Generate Europeana EDM, IIIF, METS/MODS, CIDOC-CRM RDF/XML and JSON-LD.' },
+  { title: 'Validate metadata files', description: 'Generate Europeana EDM, IIIF Presentation 4.0 RC, METS/MODS, CIDOC-CRM RDF/XML and JSON-LD.' },
   { title: 'Create a reviewable Sandbox draft', description: 'Upload the GLB and its metadata files, then verify each attachment against the local file.' },
 ])
 const stages = { preparing_model: 0, mapping_metadata: 1, creating_draft: 2, generating_metadata: 2, preparing_downloads: 2, uploading: 3 }

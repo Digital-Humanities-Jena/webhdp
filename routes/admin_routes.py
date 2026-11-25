@@ -1244,12 +1244,14 @@ def get_edm_validator_status():
         current_app.config.get("ENABLE_METIS_VALIDATION", True),
     )
     client = LocalEdmValidatorClient()
+    required = bool(current_app.config.get("LOCAL_EDM_VALIDATOR_REQUIRED", True))
     health = client.check_health()
     info = client.get_info()
     return APIResponse.success(
         data={
             "enabled": bool(enabled),
-            "required": bool(current_app.config.get("LOCAL_EDM_VALIDATOR_REQUIRED", True)),
+            "required": required,
+            "active": bool(enabled or required),
             "url": client.base_url,
             "continue_on_error": bool(current_app.config.get("LOCAL_EDM_VALIDATOR_CONTINUE_ON_ERROR", True)),
             "health": health,

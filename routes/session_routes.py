@@ -5006,7 +5006,21 @@ def record_lod_recovery(session_id, local_record_id):
                 return APIResponse.validation_error('The export is missing. Retry generation.')
             if digest(content) != status.get('sha256'):
                 return APIResponse.validation_error('The export changed after validation. Retry generation.')
-            return send_file(io.BytesIO(content), as_attachment=True, download_name=artifact.name, mimetype='application/octet-stream')
+            mimetype = 'application/ld+json' if requested_format == 'iiif' else 'application/octet-stream'
+            response = send_file(io.BytesIO(content), as_attachment=True, download_name=artifact.name, mimetype=mimetype)
+            if requested_format == 'iiif':
+                from services.iiif_validation import CONTEXT, V3_CONTEXT
+                try:
+                    context = json.loads(content).get('@context')
+                except (AttributeError, ValueError):
+                    context = None
+                if isinstance(context, list) and context:
+                    context = context[-1]
+                for profile in (CONTEXT, V3_CONTEXT):
+                    if context in (profile, profile.replace('http:', 'https:', 1)):
+                        response.mimetype_params['profile'] = profile
+                        break
+            return response
         if request.method == 'POST':
             if not row or finalized:
                 return APIResponse.validation_error('Only an existing unpublished draft can regenerate metadata')

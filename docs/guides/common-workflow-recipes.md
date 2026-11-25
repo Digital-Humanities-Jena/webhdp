@@ -77,18 +77,18 @@ for input contracts, report review, and component verification.
 
 ## Review metadata by media type
 
-IIIF represents models as `Model`, images as `Image`, audio as `Sound`, video as
-`Video`, and documents as `Text`. Supply positive width and height together when
-the presentation aspect ratio matters. Otherwise the generator uses a square
-virtual frame, not measured asset dimensions. Supply the actual duration in
-seconds for audio/video painting; with no duration, the source is offered through
-`rendering`. PDFs are rendering links, with a cover image when available.
+IIIF Presentation 4.0 RC uses a `Scene` for a 3D `Model`, a `Timeline` for timed
+`Audio`, and a `Canvas` for images and timed video. Supply positive width and
+height together for the Canvas aspect ratio, or use the default square frame.
+Supply the actual duration in seconds for audio and video. Media with an unknown
+duration and documents are offered through `rendering`, with a cover image when
+available.
 
 CIDOC-CRM RDF/XML and JSON-LD describe the digital dataset and its file
 relationships. They do not automatically model a physical heritage object,
 production history, provenance events, or a complete CRM application profile.
-METS/MODS checks XML and the local schemas. IIIF checks the supported local
-Presentation 3 profile, media extents, and annotation targets. Referenced-file
+METS/MODS checks XML and the local schemas. IIIF checks the local Presentation
+4.0 RC profile, media extents, 3D placements, and annotation targets. Referenced-file
 availability and viewer behavior still need separate review. EDM can additionally
 require the configured external validator; **Unverified** means that a required
 check could not complete, not that the metadata passed.

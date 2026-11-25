@@ -186,9 +186,20 @@
           <progress v-if="lodBusy" aria-label="Metadata validation in progress" class="mt-2 w-full" />
           <ul v-if="lodReport?.available" class="mt-3 space-y-3">
             <li v-for="(item, standard) in lodReport.formats" :key="standard" class="rounded-lg border p-3">
-              <span class="font-medium">{{ standard.toUpperCase() }}</span>
-              <span class="ml-2 text-sm" :class="item.success ? 'text-green-700' : 'text-red-700'">{{ item.status === 'generated' ? 'Validated' : item.status === 'skipped_disabled' ? 'Disabled' : item.status === 'revalidation_required' ? 'Revalidation required' : item.validation?.status === 'unverified' ? 'Unverified · validator unavailable' : 'Needs attention' }}</span>
+              <span class="font-medium">{{ standard === 'iiif' ? 'IIIF manifest' : standard.toUpperCase() }}</span>
+              <span class="ml-2 text-sm" :class="item.success ? 'text-green-700' : 'text-red-700'">{{ item.status === 'generated' ? (standard === 'iiif' ? 'Checks passed' : 'Validated') : item.status === 'skipped_disabled' ? 'Disabled' : item.status === 'revalidation_required' ? 'Revalidation required' : item.validation?.status === 'unverified' ? 'Unverified · validator unavailable' : 'Needs attention' }}</span>
               <button v-if="item.status === 'generated'" type="button" :disabled="lodBusy" class="ml-3 text-sm text-indigo-700 underline" @click="downloadLod(standard)">Download {{ standard.toUpperCase() }}</button>
+              <button v-if="standard === 'iiif' && item.status === 'generated'" type="button" :disabled="lodBusy || iiifPreviewLoading" :aria-expanded="Boolean(iiifPreview)" class="ml-3 text-sm text-indigo-700 underline disabled:opacity-50" @click="toggleIiifPreview">
+                {{ iiifPreviewLoading ? 'Loading IIIF manifest…' : iiifPreview ? 'Hide IIIF manifest' : 'Preview IIIF manifest' }}
+              </button>
+              <p v-if="standard === 'iiif' && iiifPreviewError" role="alert" class="mt-2 text-sm text-red-700">{{ iiifPreviewError }}</p>
+              <div v-if="standard === 'iiif' && iiifPreview" class="mt-3 space-y-2">
+                <IiifManifestPreview :content="iiifPreview" />
+                <details>
+                  <summary class="cursor-pointer text-sm text-indigo-700">Manifest JSON</summary>
+                  <pre class="mt-2 max-h-72 overflow-auto rounded bg-slate-50 p-2 text-xs">{{ iiifPreview }}</pre>
+                </details>
+              </div>
               <p v-if="item.error" class="mt-1 text-sm text-red-700">{{ item.error }}</p>
               <p v-if="item.minimum_viable_applied" class="mt-1 text-sm text-amber-700">Required fields were completed using record data or defaults. Review the export before sharing.</p>
               <details v-if="item.adjustments?.length" class="mt-2 text-sm"><summary class="cursor-pointer">Generated additions and corrections ({{ item.adjustments.length }})</summary><ul class="mt-2 space-y-2 break-words"><li v-for="(adjustment, index) in item.adjustments" :key="index">{{ adjustment.field }} · {{ adjustment.action }}<span v-if="adjustment.value != null">: {{ adjustment.value }}</span></li></ul></details>
@@ -420,6 +431,7 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import DerivativeReview from '@/components/workflow/DerivativeReview.vue'
+import IiifManifestPreview from '@/components/workflow/IiifManifestPreview.vue'
 import { useRoute } from 'vue-router'
 import api from '@/services/api'
 import submissionService from '@/services/submission.service.js'
@@ -441,6 +453,9 @@ const previewLoaded = ref(false)
 const lodReport = ref(null)
 const lodError = ref('')
 const lodBusy = ref(false)
+const iiifPreview = ref('')
+const iiifPreviewError = ref('')
+const iiifPreviewLoading = ref(false)
 const downloadingFile = ref('')
 const reconciliationBusy = ref(false)
 const reconciliationDraftId = ref('')
@@ -508,9 +523,37 @@ async function loadLod(retry = false, refreshDetail = true) {
     lodError.value = err?.error?.message || err?.message || 'Metadata report is unavailable. Refresh to reconnect.'
   } finally { lodBusy.value = false }
 }
+function getLodExport(standard, responseType) {
+  return api.get(`/sessions/${Number(route.params.sessionId)}/records/${Number(route.params.recordId)}/lod`, {
+    params: { format: standard }, responseType, suppressGlobalError: true
+  })
+}
+async function toggleIiifPreview() {
+  if (iiifPreview.value || iiifPreviewLoading.value) {
+    iiifPreview.value = ''
+    return
+  }
+  iiifPreviewError.value = ''
+  iiifPreviewLoading.value = true
+  const report = lodReport.value
+  try {
+    const text = await getLodExport('iiif', 'text')
+    if (report !== lodReport.value) return
+    if (typeof text !== 'string') throw new Error('Expected a IIIF manifest')
+    iiifPreview.value = text
+  } catch {
+    if (report === lodReport.value) iiifPreviewError.value = 'The IIIF manifest could not be loaded. Refresh the report and try again.'
+  } finally {
+    iiifPreviewLoading.value = false
+  }
+}
+watch(lodReport, () => {
+  iiifPreview.value = ''
+  iiifPreviewError.value = ''
+})
 async function downloadLod(standard) {
   try {
-    const blob = await api.get(`/sessions/${Number(route.params.sessionId)}/records/${Number(route.params.recordId)}/lod`, { params: { format: standard }, responseType: 'blob' })
+    const blob = await getLodExport(standard, 'blob')
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url

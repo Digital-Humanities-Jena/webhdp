@@ -115,6 +115,7 @@ def test_draft_validator_policy_change_keeps_unrelated_downloads(recovery):
     for standard in ('iiif', 'mets', 'cidoc_crm', 'jsonld'):
         assert report['formats'][standard]['status'] == 'generated'
         assert client.get(f'{url}?format={standard}', headers=headers).status_code == 200
+    assert client.get(f'{url}?format=iiif', headers=headers).mimetype == 'application/ld+json'
 
 
 def test_legacy_fingerprint_without_captured_policy_still_marks_all_drift(recovery):

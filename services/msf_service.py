@@ -1417,7 +1417,7 @@ class MSFService:
             "edm:object": "thumbnail_path",
             "dc:identifier": "_external_identifier",
             "dc:source": "_source",
-            # IIIF-focused mappings (3D profile)
+            # IIIF Presentation mappings
             "label": "title",
             "summary": "description",
             "rights": "license",
@@ -1427,8 +1427,11 @@ class MSFService:
             "iiif:canvasLabel": "iiif_canvas_label",
             "iiif:sceneId": "iiif_scene_id",
             "iiif:sceneLabel": "iiif_scene_label",
+            "iiif:timelineId": "iiif_timeline_id",
+            "iiif:timelineLabel": "iiif_timeline_label",
             "iiif:annotationPageId": "iiif_annotation_page_id",
             "iiif:annotationId": "iiif_annotation_id",
+            "iiif:contentId": "iiif_content_id",
             "iiif:modelId": "iiif_model_id",
             "iiif:modelFormat": "iiif_model_format",
             "iiif:modelLabel": "iiif_model_label",
@@ -1447,10 +1450,10 @@ class MSFService:
             "iiif:pointX": "iiif_point_x",
             "iiif:pointY": "iiif_point_y",
             "iiif:pointZ": "iiif_point_z",
-            # Legacy aliases kept for backward compatibility with older mappings.
-            "iiif:latitude": "iiif_point_x",
-            "iiif:longitude": "iiif_point_y",
-            "iiif:altitude": "iiif_point_z",
+            # Earth coordinates describe navPlace, separate from local Scene placement.
+            "iiif:latitude": "iiif_latitude",
+            "iiif:longitude": "iiif_longitude",
+            "iiif:altitude": "iiif_altitude",
             "iiif:heading": "iiif_heading",
             # Zenodo-focused mappings
             "zenodo:title": "title",
@@ -1551,6 +1554,9 @@ class MSFService:
                         metadata[key] = thumbnail_files
                 else:
                     metadata[key] = value
+
+        if metadata.get("iiif_model_id") and not metadata.get("iiif_content_id"):
+            metadata["iiif_content_id"] = metadata["iiif_model_id"]
 
         if derived_cho_created_value and not self._normalize_mapped_scalar(metadata.get("cho_created")):
             metadata["cho_created"] = derived_cho_created_value

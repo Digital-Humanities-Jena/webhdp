@@ -8,6 +8,8 @@ Third-party dependencies, standards documents, schemas, and external tools retai
 
 Python, Node.js, Docker image, and system packages are resolved from their respective package registries or base images. Their license terms are not replaced by the WebHDP license. Lockfiles and manifests are included for reproducibility only.
 
+The frontend build publishes the Google Draco glTF decoder and Binomial Basis Universal transcoder from the pinned Three.js package. Their Apache 2.0 license texts ship with the frontend under `/model-decoders/`. [Draco license](https://github.com/google/draco/blob/gltf_2.0_draco_extension/LICENSE) · [Basis Universal license](https://github.com/BinomialLLC/basis_universal/blob/v1_60/LICENSE)
+
 ## Local EDM Validator
 
 The local EDM validator source is not vendored in this repository. WebHDP uses a pinned external checkout from:

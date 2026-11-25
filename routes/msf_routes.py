@@ -34,7 +34,7 @@ from database.models import User, UserRole
 from exceptions import AppException, SecurityError, ValidationError
 from routes.access_helpers import get_current_user_from_jwt, get_session_with_permission
 from services.session_access_service import MOUNTED_INPUT_ORIGIN, can_use_mounted_inputs
-from routes.lod_mapping_helpers import build_pipeline_aligned_lod_metadata, infer_row_fallback_title
+from routes.lod_mapping_helpers import build_pipeline_aligned_lod_metadata, infer_row_fallback_title, merge_non_empty_metadata
 from security import resolve_child_path, sanitize_upload_filename
 from services.account_upload_quota import UploadQuotaError, admit_upload, attach_upload_to_session, upload_size
 from services.cloud_upload_service import CloudUploadService, STORAGE_MODE_LOCAL
@@ -643,32 +643,6 @@ def _count_filename_normalizations(df, filename_column: str | None) -> int:
     return int(changed)
 
 
-def _extract_standard_mapping(draft_metadata: Dict[str, Any], standard: str) -> Dict[str, Any]:
-    lod_mapping = draft_metadata.get("lod_mapping")
-    if not isinstance(lod_mapping, dict):
-        return {}
-    standard_node = lod_mapping.get(standard)
-    if not isinstance(standard_node, dict):
-        return {}
-
-    modality_node = None
-    if "3d" in standard_node and isinstance(standard_node.get("3d"), dict):
-        modality_node = standard_node.get("3d")
-    else:
-        for value in standard_node.values():
-            if isinstance(value, dict):
-                modality_node = value
-                break
-    if not isinstance(modality_node, dict):
-        return {}
-
-    return {
-        tag: config
-        for tag, config in modality_node.items()
-        if isinstance(config, dict) and config.get("source") != "skip"
-    }
-
-
 def _build_highlight_cells(issues: List[Dict[str, Any]], preview_rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     preview_row_numbers = {int(row.get("__row_number")) for row in preview_rows if row.get("__row_number") is not None}
     highlights: List[Dict[str, Any]] = []
@@ -1108,9 +1082,11 @@ def _analyze_workflow_session_msf(
         "mets": mets_service,
     }
     ensure_default_lod_templates()
+    from services.submission_pipeline_service import _extract_standard_mapping, _infer_lod_modality
+    modality = _infer_lod_modality(sample_filename, sample_metadata)
 
     for standard, service in standard_services.items():
-        mapping_config = _extract_standard_mapping(draft_metadata, standard)
+        mapping_config = _extract_standard_mapping(draft_metadata.get("lod_mapping"), standard, modality)
         metadata_for_standard = sample_metadata
         if mapping_config:
             metadata_for_standard = build_pipeline_aligned_lod_metadata(
@@ -1120,10 +1096,9 @@ def _analyze_workflow_session_msf(
                 mapping_config=mapping_config,
                 msf_profile=profile,
             )
-            metadata_for_standard = normalize_zenodo_metadata(
+            metadata_for_standard = merge_non_empty_metadata(
                 metadata_for_standard,
-                apply_defaults=True,
-                fallback_title=fallback_title,
+                normalize_zenodo_metadata(metadata_for_standard, apply_defaults=True, fallback_title=fallback_title),
             )
             metadata_for_standard["edm_provider"] = str(
                 draft_metadata.get("edm_provider") or metadata_for_standard.get("provider") or "WebHDP"
@@ -1183,6 +1158,8 @@ def _analyze_workflow_session_msf(
                 "metadata": metadata_for_standard,
                 content_key: generation["content"],
             }
+            if standard == "iiif":
+                lod_samples[standard]["validation"] = validation
 
             if generation.get("minimum_viable_applied"):
                 issues.append(

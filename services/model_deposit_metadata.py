@@ -11,6 +11,7 @@ import pandas as pd
 
 from constants import MSF_ALLOWED_EXTENSIONS
 from services.edm_service import EdmService
+from services.iiif_publication import published_manifest_id
 from services.lod_artifact_service import FILENAMES, generate_artifacts
 from services.lod_reliability import FORMATS, MetadataRows, assert_public_document, snapshot_templates, source_identity
 from services.msf_service import MSFService
@@ -163,12 +164,11 @@ def generate_deposit_metadata(
         raise ValueError("Metadata requires the filename of a Zenodo attachment.")
     reserved = (draft.get("metadata") or {}).get("prereserve_doi") or {}
     format_metadata = {standard: dict(values) for standard, values in metadata["formats"].items()}
-    service = EdmService()
     record = {"id": remote_id, "links": {"html": "https://sandbox.zenodo.org" if is_sandbox else "https://zenodo.org"}}
-    manifest_url = service.generate_content_url(remote_id, FILENAMES["iiif"], is_sandbox=is_sandbox)
+    manifest_url = published_manifest_id(remote_id, is_sandbox=is_sandbox)
     format_metadata["iiif"].update(
         iiif_manifest_id=manifest_url,
-        iiif_canvas_id=f"{service.get_record_html_url(record)}/canvas/1",
+        iiif_canvas_id=f"{EdmService().get_record_html_url(record)}/canvas/1",
         iiif_annotation_page_id=f"{manifest_url}#page-1",
         iiif_annotation_id=f"{manifest_url}#annotation-1",
     )

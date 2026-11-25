@@ -9,7 +9,7 @@ from flask import Flask
 from flask_jwt_extended import JWTManager, create_access_token
 
 from database.database import db
-from database.models import LodStandard, LodTemplate, Session as DBSession, User, UserRole
+from database.models import LodStandard, LodTemplate, Session as DBSession, User, UserMetadata, UserRole
 from routes.msf_routes import msf_bp
 
 
@@ -138,6 +138,17 @@ def test_workflow_msf_analysis_reports_issues_and_applies_fixes(tmp_path):
         db.session.add(session_row)
         db.session.commit()
         session_id = session_row.id
+        db.session.add(UserMetadata(
+            session_id=session_id,
+            field_name="zenodo_metadata_draft",
+            field_value=json.dumps({"lod_mapping": {"iiif": {"3d": {
+                "iiif:sceneId": {"source": "static", "value": "https://example.org/iiif/model/scene/1"},
+                "iiif:pointX": {"source": "static", "value": 2},
+                "iiif:latitude": {"source": "static", "value": 50},
+                "iiif:longitude": {"source": "static", "value": 0},
+            }}}}),
+        ))
+        db.session.commit()
 
     client = app.test_client()
     headers = {"Authorization": f"Bearer {token}"}
@@ -158,6 +169,14 @@ def test_workflow_msf_analysis_reports_issues_and_applies_fixes(tmp_path):
     assert "filename_normalization" in issue_ids
     assert analysis["recommended_fixes"]
     assert set(analysis["lod_samples"].keys()) == {"edm", "iiif", "mets"}
+    iiif_sample = analysis["lod_samples"]["iiif"]
+    assert iiif_sample["valid"] is True
+    manifest = json.loads(iiif_sample["json"])
+    assert manifest["navPlace"]["features"][0]["geometry"]["coordinates"] == [0, 50]
+    scene = manifest["items"][0]
+    assert scene["id"] == "https://example.org/iiif/model/scene/1"
+    assert scene["items"][0]["items"][0]["target"]["selector"][0]["x"] == 2
+    assert iiif_sample["validation"]["details"]["scene_count"] == 1
     assert "Template rendering returned empty result" not in (analysis["lod_samples"]["edm"].get("errors") or [])
     assert "METS Template rendering returned empty result" not in (analysis["lod_samples"]["mets"].get("errors") or [])
 
@@ -183,8 +202,6 @@ def test_workflow_msf_analysis_reports_issues_and_applies_fixes(tmp_path):
     assert apply_result["patched_msf_path"].startswith(str(uploads_dir))
 
     with app.app_context():
-        from database.models import UserMetadata
-
         profile_record = UserMetadata.query.filter_by(
             session_id=session_id,
             field_name="msf_profile",

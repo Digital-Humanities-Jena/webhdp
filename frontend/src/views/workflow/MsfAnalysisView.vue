@@ -629,7 +629,7 @@
                     <div v-if="activeSample" class="mt-4 space-y-4">
                       <div class="flex flex-wrap gap-3">
                         <span :class="activeSample.valid ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'" class="px-2.5 py-1 rounded-full text-xs font-semibold uppercase">
-                          {{ activeSample.valid ? 'Valid' : 'Invalid' }}
+                          {{ activeSample.valid ? (activeStandard === 'iiif' ? 'Checks passed' : 'Valid') : 'Invalid' }}
                         </span>
                         <span :class="activeSample.minimum_viable_applied ? 'bg-amber-100 text-amber-800' : 'bg-gray-100 text-gray-700'" class="px-2.5 py-1 rounded-full text-xs font-semibold uppercase">
                           {{ activeSample.minimum_viable_applied ? 'Minimum viable applied' : 'Template output used as-is' }}
@@ -650,6 +650,7 @@
                         </ul>
                       </div>
 
+                      <IiifManifestPreview v-if="activeStandard === 'iiif'" :content="activeSampleContent" />
                       <pre class="bg-gray-950 text-green-300 rounded-lg p-4 overflow-x-auto text-xs max-h-[420px]">{{ activeSampleContent }}</pre>
                     </div>
                   </div>
@@ -782,6 +783,7 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import StepIndicator from '@/components/workflow/StepIndicator.vue'
+import IiifManifestPreview from '@/components/workflow/IiifManifestPreview.vue'
 import { useWorkflowStore } from '@/stores/workflow'
 import api from '@/services/api'
 import msfService from '@/services/msf.service'

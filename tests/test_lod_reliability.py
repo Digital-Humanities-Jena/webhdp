@@ -6,7 +6,7 @@ from flask import Flask
 
 from services.edm_service import EDM_SCHEMA_VERSION, EdmService
 from services.lod_reliability import MetadataRows, assert_public_document, atomic_write, digest, public_url
-from services.lod_artifact_service import generate_artifacts
+from services.lod_artifact_service import generate_artifacts, policy_error, validation_policy
 from services.linked_data_service import generate_linked_data, validate_linked_data
 
 
@@ -130,6 +130,41 @@ def test_edm_retry_revalidates_older_schema_without_regenerating_other_formats(t
     assert updated['formats']['iiif']['reused'] is True
     assert retried['formats']['edm']['reused'] is True
     assert app.edm_service.validate_edm_document.call_count == 2
+
+
+def test_edm_retry_and_attachment_policy_compare_saved_validator_build(tmp_path):
+    app = services_app()
+    app.config.update(
+        LOCAL_EDM_VALIDATOR_REQUIRED=True,
+        LOCAL_EDM_VALIDATOR_EXPECTED_SOURCE_REF="first-build",
+    )
+    spec = specification()
+    report = {"valid": True, "details": {
+        "xsd": {"schema_version": EDM_SCHEMA_VERSION},
+        "remote": {"valid": True, "validator_identity": {"source_ref": "first-build"}},
+    }}
+    app.edm_service.validate_edm_document.return_value = report
+    register = Mock()
+    with app.app_context():
+        _, initial = generate_artifacts(str(tmp_path), spec, register)
+        assert initial["formats"]["edm"]["success"]
+        _, unchanged = generate_artifacts(str(tmp_path), spec, register)
+        assert unchanged["formats"]["edm"]["reused"]
+        app.config["LOCAL_EDM_VALIDATOR_EXPECTED_SOURCE_REF"] = "replacement-build"
+        assert policy_error(initial, "edm", initial["formats"]["edm"])
+        manifest_for_current_policy = {"request": spec, "validation_policy": validation_policy()}
+        assert "differs from the configured release" in policy_error(
+            manifest_for_current_policy, "edm", initial["formats"]["edm"],
+        )
+        assert policy_error(initial, "iiif", initial["formats"]["iiif"]) is None
+        _, stale = generate_artifacts(str(tmp_path), spec, register)
+        assert stale["formats"]["edm"]["success"] is False
+        assert stale["formats"]["iiif"]["reused"]
+        report["details"]["remote"]["validator_identity"]["source_ref"] = "replacement-build"
+        _, updated = generate_artifacts(str(tmp_path), spec, register)
+        assert updated["formats"]["edm"]["success"]
+        assert updated["formats"]["iiif"]["reused"]
+        assert app.edm_service.validate_edm_document.call_count == 3
 
 
 def test_graph_validation_rejects_missing_relationships_and_remote_context():

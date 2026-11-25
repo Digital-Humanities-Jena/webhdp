@@ -226,6 +226,15 @@ def test_extract_standard_mapping_accepts_audio_alias_for_sound():
     assert extracted == mapping["iiif"]["audio"]
 
 
+def test_iiif_modality_fallback_keeps_only_shared_mappings():
+    shared = {"provider": {"source": "static", "value": "Museum"}}
+    scene = {"iiif:contentId": {"source": "static", "value": "https://example.org/model.glb"}}
+    mapping = {"iiif": {"3d": {**shared, **scene}}}
+
+    assert _extract_standard_mapping(mapping, "iiif", "sound") == shared
+    assert _extract_standard_mapping(mapping, "iiif", "3d") == {**shared, **scene}
+
+
 def test_collect_generated_output_files_reads_existing_render_outputs_from_disk():
     with tempfile.TemporaryDirectory() as temp_dir:
         output_dir = os.path.join(temp_dir, "model_one")

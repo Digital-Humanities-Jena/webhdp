@@ -25,7 +25,7 @@ server {
     gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript;
 
     location ^~ /embed/records/ {
-        add_header Content-Security-Policy "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors ${OEMBED_FRAME_ANCESTORS}; img-src 'self' data: blob: https://zenodo.org https://sandbox.zenodo.org; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https://zenodo.org https://sandbox.zenodo.org; form-action 'self'" always;
+        add_header Content-Security-Policy "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors ${OEMBED_FRAME_ANCESTORS}; img-src 'self' data: blob: https://zenodo.org https://sandbox.zenodo.org; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' https://zenodo.org/api/records/ https://sandbox.zenodo.org/api/records/; form-action 'self'" always;
         try_files $uri $uri/ /index.html;
     }
 

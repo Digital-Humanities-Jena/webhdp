@@ -3,7 +3,7 @@ import logging
 from database.database import db
 from database.models import LodStandard, LodTemplate
 from database.seed_edm_templates import seed_templates as seed_edm_templates
-from database.seed_iiif_templates import seed_iiif_templates
+from database.seed_iiif_templates import IIIF_TEMPLATE_NAME, legacy_bundled_iiif_default, seed_iiif_templates
 from database.seed_mets_mods_templates import seed_mets_templates
 
 logger = logging.getLogger(__name__)
@@ -56,25 +56,15 @@ def _repair_edm_template_namespaces() -> int:
     return updated
 
 
-def _repair_default_iiif_v3_template() -> int:
-    """Upgrade the bundled IIIF template from the old v4 Scene draft to v3 Canvas."""
-    updated = 0
-    iiif_templates = LodTemplate.query.filter_by(standard=LodStandard.IIIF).all()
-    for template in iiif_templates:
-        content = template.content or ""
-        if (
-            "http://iiif.io/api/presentation/4/context.json" not in content
-            and '"type": "Scene"' not in content
-            and "IIIF v4 3D Scene" not in (template.name or "")
-        ):
-            continue
-        if template.is_default or template.name == "IIIF v4 3D Scene":
-            seed_iiif_templates()
-            updated += 1
-            break
-    if updated:
-        logger.info("Patched bundled IIIF template to Presentation v3 Canvas output")
-    return updated
+def _repair_bundled_iiif_template() -> bool:
+    """Upgrade the previously bundled default in place, retaining its saved template ID."""
+    templates = LodTemplate.query.filter_by(standard=LodStandard.IIIF)
+    if templates.filter_by(name=IIIF_TEMPLATE_NAME).first():
+        return False
+    if legacy_bundled_iiif_default() is None:
+        return False
+    seed_iiif_templates()
+    return True
 
 
 def _repair_mets_file_identifiers() -> int:
@@ -111,7 +101,7 @@ def ensure_default_lod_templates() -> dict[str, list[str]]:
             seeded.append(LodStandard.METS.value)
         if _repair_edm_template_namespaces():
             repaired.append(LodStandard.EDM.value)
-        if _repair_default_iiif_v3_template():
+        if _repair_bundled_iiif_template():
             repaired.append(LodStandard.IIIF.value)
         if _repair_mets_file_identifiers():
             repaired.append(LodStandard.METS.value)

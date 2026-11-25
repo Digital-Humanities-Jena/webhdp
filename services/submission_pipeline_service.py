@@ -348,6 +348,10 @@ def _extract_standard_mapping(lod_mapping: Any, standard_id: str, modality_id: s
 
     fallback_3d = standard_node.get("3d")
     if _looks_like_tag_mapping(fallback_3d):
+        if standard_id == "iiif":
+            shared_fields = {"label", "summary", "rights", "provider", "lod:thumbnailMode",
+                             "lod:thumbnailPattern", "lod:thumbnailFiles"}
+            return {tag: field for tag, field in fallback_3d.items() if tag in shared_fields}
         return fallback_3d
 
     return {}

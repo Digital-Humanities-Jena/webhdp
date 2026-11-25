@@ -1,3 +1,5 @@
+import pytest
+import requests
 from flask import Flask
 
 from services.local_edm_validator_client import LocalEdmValidatorClient
@@ -181,3 +183,66 @@ def test_local_edm_validator_info_includes_reported_schema_versions():
 
     assert summary["edm_schema_version"] == "20260720"
     assert summary["metis_schema_version"] == "15"
+
+
+@pytest.mark.parametrize(("error", "remote_status"), [
+    (requests.exceptions.ConnectTimeout("timed out"), "timeout"),
+    (requests.exceptions.ConnectionError("unreachable"), "connection_failed"),
+])
+def test_validator_outage_leaves_locally_valid_metadata_unverified(monkeypatch, error, remote_status):
+    app = Flask(__name__)
+    service = EdmService()
+
+    def fail(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(requests.Session, "post", fail)
+    for check in ("validate_xml", "validate_with_xsd", "validate_with_schematron", "validate_edm_business_rules"):
+        monkeypatch.setattr(service, check, lambda xml: {"valid": True})
+
+    with app.app_context():
+        result = service.validate_edm_document("<rdf/>", include_remote=True)
+
+    assert result["valid"] is False
+    assert result["status"] == "unverified"
+    assert result["details"]["remote"]["remote_status"] == remote_status
+
+
+def test_validation_records_identity_from_same_request_and_checks_policy(monkeypatch):
+    app = Flask(__name__)
+    response = {
+        "validationResults": [
+            {"step": "VALIDATE_EXTERNAL", "status": "PASSED"},
+            {"step": "VALIDATE_INTERNAL", "status": "PASSED"},
+        ],
+        "validatorIdentity": {
+            "edmSchemaVersion": "20260720", "metisSchemaVersion": "15",
+            "sourceRef": "git-commit", "buildVersion": "12-SNAPSHOT",
+        },
+    }
+    monkeypatch.setattr(LocalEdmValidatorClient, "validate_record", lambda *args, **kwargs: response)
+    monkeypatch.setattr(LocalEdmValidatorClient, "get_info", lambda self: pytest.fail("unexpected Actuator request"))
+    service = EdmService()
+    with app.app_context():
+        result = service.validate_with_local_edm_validator("<rdf/>")
+        assert result["valid"] is True
+        assert result["validator_identity"] == {
+            "edm_schema_version": "20260720", "metis_schema_version": "15", "source_ref": "git-commit",
+            "build_version": "12-SNAPSHOT",
+        }
+        app.config.update(
+            LOCAL_EDM_VALIDATOR_EXPECTED_EDM_SCHEMA_VERSION="20260720",
+            LOCAL_EDM_VALIDATOR_EXPECTED_METIS_SCHEMA_VERSION="15",
+            LOCAL_EDM_VALIDATOR_EXPECTED_SOURCE_REF="git-commit",
+        )
+        assert service.validate_with_local_edm_validator("<rdf/>")["valid"] is True
+        response["validatorIdentity"]["sourceRef"] = "stale-commit"
+        stale = service.validate_with_local_edm_validator("<rdf/>")
+        assert stale["valid"] is False
+        assert stale["status"] == "unavailable"
+        assert "source_ref expected git-commit, reported stale-commit" in stale["errors"][0]
+        del response["validatorIdentity"]
+        assert service.validate_with_local_edm_validator("<rdf/>")["valid"] is False
+        for key in ("EDM_SCHEMA_VERSION", "METIS_SCHEMA_VERSION", "SOURCE_REF"):
+            app.config.pop(f"LOCAL_EDM_VALIDATOR_EXPECTED_{key}")
+        assert service.validate_with_local_edm_validator("<rdf/>")["valid"] is True

@@ -445,6 +445,7 @@ def health_check():
             "environment": env,
             "config": {
                 "enable_local_edm_validation": app.config.get("ENABLE_LOCAL_EDM_VALIDATION", True),
+                "local_edm_validator_required": app.config.get("LOCAL_EDM_VALIDATOR_REQUIRED", True),
                 "local_edm_validator_url": app.config.get("LOCAL_EDM_VALIDATOR_URL"),
                 "enable_metis_validation": app.config.get("ENABLE_METIS_VALIDATION", True),
                 "enable_xsd_validation": True,

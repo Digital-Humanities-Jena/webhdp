@@ -11,13 +11,57 @@ import time
 from typing import Any, Dict, Optional
 
 import requests
-from flask import current_app
+from flask import current_app, has_app_context
 
 logger = logging.getLogger(__name__)
+
+VALIDATOR_IDENTITY_FIELDS = {
+    "edm_schema_version": "edmSchemaVersion",
+    "metis_schema_version": "metisSchemaVersion",
+    "source_ref": "sourceRef",
+    "build_version": "buildVersion",
+}
+
+
+def expected_validator_identity(config):
+    return {
+        field: value
+        for field in ("edm_schema_version", "metis_schema_version", "source_ref")
+        if (value := str(config.get(f"LOCAL_EDM_VALIDATOR_EXPECTED_{field.upper()}") or "").strip())
+    }
+
+
+def normalize_validator_identity(payload):
+    if not isinstance(payload, dict):
+        return {}
+    return {
+        field: str(value).strip()
+        for field, response_key in VALIDATOR_IDENTITY_FIELDS.items()
+        if isinstance(value := payload.get(response_key), (str, int))
+        and not isinstance(value, bool) and str(value).strip()
+    }
+
+
+def validator_identity_mismatches(expected, actual, *, allow_short_source_ref=False):
+    actual = actual if isinstance(actual, dict) else {}
+    mismatches = []
+    for field, version in expected.items():
+        reported = actual.get(field)
+        if reported == version:
+            continue
+        if (field == "source_ref" and allow_short_source_ref and isinstance(reported, str)
+                and len(reported) >= 7 and version.startswith(reported)):
+            continue
+        mismatches.append(f"{field} expected {version}, reported {reported or 'missing'}")
+    return mismatches
 
 
 class LocalEdmValidatorClientError(Exception):
     """Raised when the local EDM validator request cannot be completed."""
+
+    def __init__(self, message, *, remote_status="unavailable"):
+        super().__init__(message)
+        self.remote_status = remote_status
 
 
 class LocalEdmValidatorClient:
@@ -25,25 +69,19 @@ class LocalEdmValidatorClient:
 
     DEFAULT_BASE_URL = "http://localhost:18080"
 
-    def __init__(self, base_url: Optional[str] = None):
+    def __init__(self, base_url: Optional[str] = None, *, config=None):
         if base_url:
             self.base_url = base_url.rstrip("/")
         else:
-            try:
-                configured_url = current_app.config.get("LOCAL_EDM_VALIDATOR_URL")
-                legacy_url = (
-                    current_app.config.get("METIS_SANDBOX_URL")
-                    or current_app.config.get("METIS_SANDBOX_API_URL")
-                )
-                if legacy_url and (
-                    not configured_url
-                    or str(configured_url).rstrip("/") == self.DEFAULT_BASE_URL
-                ):
-                    configured_url = legacy_url
-                configured_url = configured_url or self.DEFAULT_BASE_URL
-                self.base_url = str(configured_url).rstrip("/")
-            except RuntimeError:
-                self.base_url = self.DEFAULT_BASE_URL
+            if config is None:
+                config = current_app.config if has_app_context() else {}
+            configured_url = config.get("LOCAL_EDM_VALIDATOR_URL")
+            legacy_url = config.get("METIS_SANDBOX_URL") or config.get("METIS_SANDBOX_API_URL")
+            if legacy_url and (
+                not configured_url or str(configured_url).rstrip("/") == self.DEFAULT_BASE_URL
+            ):
+                configured_url = legacy_url
+            self.base_url = str(configured_url or self.DEFAULT_BASE_URL).rstrip("/")
 
         self.session = requests.Session()
         self.session.headers.update({"accept": "application/json"})
@@ -91,27 +129,39 @@ class LocalEdmValidatorClient:
             response = self.session.post(url, data=data, files=files, timeout=request_timeout)
             if response.status_code == 429:
                 raise LocalEdmValidatorClientError(
-                    "Local EDM Validator rate limit exceeded. Please try again later."
+                    "Local EDM Validator rate limit exceeded. Please try again later.",
+                    remote_status="rate_limited",
                 )
             response.raise_for_status()
             return response.json()
         except requests.exceptions.HTTPError as exc:
             logger.error("Local EDM Validator HTTP error: %s", exc)
             try:
-                error_data = response.json()
+                error_data = exc.response.json()
                 message = error_data.get("message") or error_data.get("error") or str(exc)
             except Exception:
-                message = response.text[:300] if "response" in locals() else str(exc)
-            raise LocalEdmValidatorClientError(f"Local EDM Validator error: {message}") from exc
+                message = exc.response.text[:300] if exc.response is not None else str(exc)
+            raise LocalEdmValidatorClientError(
+                f"Local EDM Validator error: {message}",
+                remote_status=exc.response.status_code if exc.response is not None else "unavailable",
+            ) from exc
+        except requests.exceptions.Timeout as exc:
+            raise LocalEdmValidatorClientError(
+                f"Local EDM Validator timed out: {exc}", remote_status="timeout",
+            ) from exc
+        except requests.exceptions.JSONDecodeError as exc:
+            raise LocalEdmValidatorClientError(
+                f"Local EDM Validator returned invalid JSON: {exc}", remote_status="invalid_response",
+            ) from exc
         except requests.exceptions.RequestException as exc:
             logger.error("Local EDM Validator request error: %s", exc)
             raise LocalEdmValidatorClientError(
-                f"Failed to connect to Local EDM Validator: {exc}"
+                f"Failed to connect to Local EDM Validator: {exc}", remote_status="connection_failed",
             ) from exc
         except ValueError as exc:
             logger.error("Local EDM Validator returned invalid JSON: %s", exc)
             raise LocalEdmValidatorClientError(
-                f"Local EDM Validator returned invalid JSON: {exc}"
+                f"Local EDM Validator returned invalid JSON: {exc}", remote_status="invalid_response",
             ) from exc
 
     def check_health(self, timeout: float = 2.0) -> Dict[str, Any]:
@@ -126,6 +176,8 @@ class LocalEdmValidatorClient:
                 payload = response.json()
             except ValueError:
                 payload = {"raw": response.text[:300]}
+            if not isinstance(payload, dict):
+                payload = {}
             status_text = str(payload.get("status") or "").upper()
             return {
                 "ok": response.status_code == 200 and status_text in {"UP", "OK", "HEALTHY"},
@@ -154,6 +206,8 @@ class LocalEdmValidatorClient:
                 payload = response.json()
             except ValueError:
                 payload = {"raw": response.text[:300]}
+            if not isinstance(payload, dict):
+                payload = {}
 
             return {
                 "ok": response.status_code == 200,

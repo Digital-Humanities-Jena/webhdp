@@ -3601,8 +3601,22 @@ def output_preview_local():
 
         if "iiif" in target_set:
             try:
+                from services.submission_pipeline_service import _extract_standard_mapping, _infer_lod_modality
+
+                iiif_metadata = metadata
+                modality = _infer_lod_modality(main_file_key, zenodo_record.get("metadata") or {})
+                iiif_mapping = _extract_standard_mapping(mapping_config, "iiif", modality)
+                if mapping_config and iiif_mapping is not mapping_config:
+                    iiif_metadata = build_pipeline_aligned_lod_metadata(
+                        msf_service=msf_service,
+                        row=row,
+                        zenodo_record=zenodo_record,
+                        mapping_config=iiif_mapping,
+                        msf_profile=profile,
+                        zenodo_mapping=_extract_standard_mapping(mapping_config, "zenodo", modality),
+                    )
                 iiif_result = iiif_service.generate_iiif_manifest_with_report(
-                    metadata=metadata,
+                    metadata=iiif_metadata,
                     zenodo_record=zenodo_record.copy(),
                     template_id=data.get("iiif_template_id"),
                     main_file_key=main_file_key or None,

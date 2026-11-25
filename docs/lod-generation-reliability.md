@@ -4,25 +4,40 @@ LOD Generation 1.2.0 produces EDM, IIIF, METS/MODS, CIDOC-CRM RDF/XML, and JSON-
 
 ## Format profiles and limits
 
-IIIF uses the `presentation-3-media-2` local profile. Every Canvas,
-AnnotationPage, Annotation, body, and target is checked, including later entries
-in arrays. Resource types must match media formats; Canvas extents are positive
-and finite, width and height are supplied together, and annotations target their
-own Canvas. Sound and video painting require actual positive durations. Unknown
-duration and documents use rendering links, optionally with a cover image.
-The default 1000 × 1000 Canvas is a virtual frame, not an asset measurement.
-Mapped dimensions describe the presentation aspect ratio. Model placement uses
-scene-space coordinates; geographic latitude/longitude is not repurposed as a
-Canvas PointSelector.
+New IIIF exports use the Presentation 4.0 release candidate. WebHDP paints a
+3D `Model` into a `Scene`, timed `Audio` into a `Timeline`, and images or timed
+video into a `Canvas`. Supply width and height together for a custom Canvas
+aspect ratio. The fallback 1000 × 1000 dimensions describe the presentation
+frame. Provide the actual duration in seconds for timed media. Viewable documents
+and media with unknown duration are offered through `rendering`. Machine-readable
+datasets and archives use `seeAlso`. An available cover image appears on the
+Canvas. Use scene X, Y, and Z coordinates for 3D placement. Map latitude
+and longitude together to publish a geographic point through `navPlace`.
+Optional altitude is measured in metres relative to the WGS 84 ellipsoid.
+[IIIF Presentation 4.0 data model](https://iiif.io/api/presentation/4.0/model/)
 
-The local IIIF profile covers generated painting and rendering structures,
-including supported model placement. It does not establish remote availability,
-JSON-LD extension semantics, full Presentation API conformance for arbitrary
-templates, or interoperability with a particular viewer. Multi-page template
-content beyond the generated first Canvas is validated but not repaired.
-Validate the intended viewer separately before publication. The profile version
-is part of the captured validation policy, so earlier cached results need
-revalidation after a profile change.
+The `presentation-4-rc-media-1` validation profile checks local manifest
+structure, media types, Canvas and Timeline extents, Scene placement and painting
+targets. This includes later containers, annotation pages and annotations.
+Check referenced files and the intended viewer independently. The IIIF release
+candidate's published JSON-LD context is still empty, so local checks validate
+the draft's JSON structure. [IIIF Presentation 4.0 context](https://iiif.io/api/presentation/4/context.json)
+
+Hosted deployments can set `IIIF_PUBLIC_BASE_URL` to use WebHDP's public manifest
+endpoint. It serves the deposited bytes with IIIF response headers once the
+record and its files are public on Zenodo. Choose a compatible viewer from the
+[IIIF 4.0 viewer matrix](https://iiif.io/api/cookbook/recipe/matrix-v4/).
+
+On retry, the updated IIIF profile regenerates older IIIF exports in open drafts.
+The other formats keep their existing validation and cache eligibility. Finalized
+records retain access to the manifests they originally validated, subject to the
+same record identity and file integrity checks.
+
+Retries with an unchanged older bundled template use the updated bundle. WebHDP
+can also convert older custom templates whose painting bodies and targets map
+unambiguously to Presentation 4. If a template has ambiguous or unsupported
+structures, the error identifies what needs to be updated. Preview the edited
+template in Settings and start a new metadata generation to use it.
 
 CIDOC-CRM/JSON-LD use the `digital-dataset-1` profile: a digital dataset with its
 title, public record link, and file relationships. The paired serializations are

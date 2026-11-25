@@ -3,7 +3,7 @@
   <div class="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
     <div class="px-4 py-6 sm:px-0">
       <div class="flex items-center justify-between mb-6">
-        <h1 class="text-2xl font-semibold text-gray-900">EDM Templates</h1>
+        <h1 class="text-2xl font-semibold text-gray-900">EDM and IIIF Templates</h1>
         <button
           @click="openCreateModal"
           class="inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
@@ -36,6 +36,7 @@
               <div class="flex-1 min-w-0">
                 <div class="flex items-center space-x-3">
                   <h3 class="text-sm font-medium text-indigo-600 truncate">{{ template.name }}</h3>
+                  <span class="text-xs font-medium text-slate-600">{{ template.standard === 'iiif' ? 'IIIF' : 'EDM' }}</span>
                   <span v-if="template.is_default" class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-green-100 text-green-800 uppercase tracking-wider">
                     Default
                   </span>
@@ -71,13 +72,13 @@
             </div>
 
             <div class="bg-white px-6 pt-5 pb-4 h-[75vh] flex flex-col">
-              <div class="flex flex-1 gap-6 overflow-hidden">
+              <div class="flex flex-1 flex-col gap-6 overflow-y-auto md:flex-row md:overflow-hidden">
                 <!-- Left: Form & Editor -->
-                <div class="flex-1 flex flex-col gap-6 overflow-y-auto pr-2">
+                <div class="flex min-w-0 flex-1 flex-col gap-6 md:overflow-y-auto md:pr-2">
                   <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
                     <div>
                       <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Template Name</label>
-                      <input v-model="form.name" type="text" placeholder="e.g. Standard EDM v2.4" class="block w-full border border-gray-300 rounded-lg shadow-sm py-2 px-3 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
+                      <input v-model="form.name" type="text" class="block w-full border border-gray-300 rounded-lg shadow-sm py-2 px-3 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
                     </div>
                     <div class="flex items-end pb-2">
                       <label class="flex items-center cursor-pointer group">
@@ -87,15 +88,24 @@
                     </div>
                   </div>
 
-                  <div>
-                    <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Description</label>
-                    <input v-model="form.description" type="text" placeholder="Briefly describe what this template is for..." class="block w-full border border-gray-300 rounded-lg shadow-sm py-2 px-3 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
+                  <div class="grid grid-cols-1 gap-6 sm:grid-cols-2">
+                    <label class="text-xs font-semibold text-gray-700">
+                      Standard
+                      <select :value="form.standard" class="mt-2 block w-full rounded-lg border-gray-300 text-sm" @change="changeStandard($event.target.value)">
+                        <option value="edm">Europeana EDM</option>
+                        <option value="iiif">{{ IIIF_PRESENTATION_LABEL }}</option>
+                      </select>
+                    </label>
+                    <label class="text-xs font-semibold text-gray-700">
+                      Description
+                      <input v-model="form.description" type="text" class="mt-2 block w-full rounded-lg border-gray-300 text-sm">
+                    </label>
                   </div>
 
                   <div class="flex-1 flex flex-col min-h-0">
-                    <div class="flex justify-between items-center mb-2">
-                      <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wider">Content (Jinja2 XML)</label>
-                      <div class="flex items-center space-x-2">
+                    <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
+                      <label :for="isIiif ? 'iiif-template-content' : undefined" class="block text-xs font-semibold text-gray-500 uppercase tracking-wider">Content (Jinja2 {{ isIiif ? 'JSON' : 'XML' }})</label>
+                      <div class="flex flex-wrap items-center gap-2">
                         <button @click="toggleSampleData" :class="['text-xs px-3 py-1 rounded-full transition-colors', useSampleData ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-700 hover:bg-gray-200']">
                           {{ useSampleData ? '📋 Showing Sample Data' : '📝 Use Sample Data' }}
                         </button>
@@ -108,24 +118,27 @@
                           </svg>
                           {{ isEditorExpanded ? 'Minimize' : 'Expand Editor' }}
                         </button>
-                        <button @click="validateTemplate" :disabled="validating" :class="['text-xs px-3 py-1 rounded-full transition-colors flex items-center shadow-sm', activeRightTab === 'validation' ? 'bg-amber-100 text-amber-700' : 'bg-amber-600 text-white hover:bg-amber-700']">
+                        <button @click="validateTemplate" :disabled="working" :class="['text-xs px-3 py-1 rounded-full transition-colors flex items-center shadow-sm', activeRightTab === 'validation' ? 'bg-amber-100 text-amber-700' : 'bg-amber-600 text-white hover:bg-amber-700']">
                            <svg v-if="validating" class="animate-spin -ml-1 mr-1.5 h-3 w-3 text-current" fill="none" viewBox="0 0 24 24">
                              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                            </svg>
                            Validate
                         </button>
-                        <button @click="preview" class="text-xs bg-indigo-600 text-white px-3 py-1 rounded-full hover:bg-indigo-700 transition-colors shadow-sm">
+                        <button @click="preview" :disabled="working" class="text-xs bg-indigo-600 text-white px-3 py-1 rounded-full hover:bg-indigo-700 transition-colors shadow-sm">
                           Preview Render
                         </button>
                       </div>
                     </div>
                     <!-- CodeMirror Editor Container -->
-                    <div ref="editorContainer" :class="['flex-1 border border-gray-300 rounded-xl shadow-inner overflow-hidden bg-gray-900 transition-all duration-300', isEditorExpanded ? 'h-[600px] min-h-[500px]' : 'h-full min-h-[300px]']"></div>
+                    <textarea v-if="isIiif" id="iiif-template-content" v-model="form.content" spellcheck="false"
+                      class="w-full resize-y rounded-xl border border-gray-300 bg-slate-900 p-4 font-mono text-sm leading-relaxed text-slate-100"
+                      :class="isEditorExpanded ? 'min-h-[500px]' : 'min-h-[300px]'" />
+                    <div v-else ref="editorContainer" :class="['flex-1 border border-gray-300 rounded-xl shadow-inner overflow-hidden bg-gray-900 transition-all duration-300', isEditorExpanded ? 'h-[600px] min-h-[500px]' : 'h-full min-h-[300px]']"></div>
                   </div>
 
                   <!-- Snippets Bar -->
-                  <div class="border-t border-gray-100 pt-4">
+                  <div v-if="!isIiif" class="border-t border-gray-100 pt-4">
                     <h4 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Quick Snippets</h4>
                     <div class="flex flex-wrap gap-2">
                       <button
@@ -142,7 +155,7 @@
                 </div>
 
                 <!-- Right: Helpers & Preview -->
-                <div class="w-1/3 bg-gray-50 border border-gray-100 rounded-xl flex flex-col overflow-hidden">
+                <div class="flex w-full shrink-0 flex-col overflow-hidden rounded-xl border border-gray-100 bg-gray-50 md:w-1/3">
                   <!-- Tabs for Guide/Validation -->
                   <div class="flex border-b border-gray-200">
                     <button @click="activeRightTab = 'guide'" :class="['flex-1 py-3 text-xs font-bold uppercase tracking-widest transition-all', activeRightTab === 'guide' ? 'bg-white text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100']">
@@ -154,11 +167,19 @@
                         {{ validationResults.valid ? 'OK' : 'ERR' }}
                       </span>
                     </button>
+                    <button @click="activeRightTab = 'preview'" :class="['flex-1 py-3 text-xs font-bold uppercase tracking-widest transition-all', activeRightTab === 'preview' ? 'bg-white text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100']">
+                      Preview
+                    </button>
                   </div>
 
                   <div class="flex-1 overflow-y-auto p-5">
                     <!-- Guide Tab -->
-                    <div v-if="activeRightTab === 'guide'">
+                    <div v-if="activeRightTab === 'guide' && isIiif" class="space-y-3 text-sm text-slate-700">
+                      <h4 class="font-bold text-slate-900">{{ IIIF_PRESENTATION_LABEL }}</h4>
+                      <p>Use the Jinja2 <code>tojson</code> filter to serialize values such as the title. Render with sample data to check the resulting manifest.</p>
+                      <p>WebHDP uses Scenes for 3D models, Timelines for timed audio, and Canvases for images and timed video.</p>
+                    </div>
+                    <div v-else-if="activeRightTab === 'guide'">
                       <div class="flex items-center mb-4">
                         <svg class="h-5 w-5 text-indigo-500 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -198,22 +219,23 @@
                           </svg>
                           Validation Report
                         </h4>
-                        <button @click="validateTemplate" class="text-xs text-indigo-600 hover:underline font-medium">Re-run</button>
+                        <button @click="validateTemplate" :disabled="working" class="text-xs text-indigo-600 hover:underline font-medium">Re-run</button>
                       </div>
 
-                      <div v-if="!validationResults && !validating" class="text-center py-12">
+                      <p v-if="renderError" role="alert" class="text-sm text-red-700">{{ renderError }}</p>
+                      <div v-else-if="!validationResults && !validating" class="text-center py-12">
                         <svg class="mx-auto h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
                         </svg>
                         <p class="mt-4 text-sm text-gray-500">Run validation to check your template.</p>
-                        <button @click="validateTemplate" class="mt-4 inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700">
+                        <button @click="validateTemplate" :disabled="working" class="mt-4 inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700">
                           Start Validation
                         </button>
                       </div>
 
                       <div v-if="validating" class="flex flex-col items-center py-12">
                         <div class="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-600 mb-4"></div>
-                        <p class="text-sm text-gray-500">Processing EDM rules...</p>
+                        <p class="text-sm text-gray-500">Checking the rendered {{ isIiif ? 'manifest' : 'EDM document' }}…</p>
                       </div>
 
                       <div v-if="validationResults" class="space-y-4">
@@ -226,13 +248,13 @@
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
                           </svg>
                           <div>
-                            <p class="font-bold text-sm">{{ validationResults.valid ? 'Strictly Compliant' : 'Issues Found' }}</p>
-                            <p class="text-xs opacity-80">{{ validationResults.valid ? 'No structural or business rule violations detected.' : 'Please address the errors below to ensure EDM validity.' }}</p>
+                            <p class="font-bold text-sm">{{ validationResults.valid ? 'Available checks passed' : 'Issues Found' }}</p>
+                            <p v-if="validationResults.details?.scope" class="text-xs opacity-80">{{ validationResults.details.scope }}</p>
                           </div>
                         </div>
 
                         <!-- Error List -->
-                        <div v-if="validationResults.errors.length > 0" class="space-y-3">
+                        <div v-if="validationResults.errors?.length" class="space-y-3">
                           <h5 class="text-[10px] uppercase text-red-500 font-bold tracking-widest pl-1">Errors</h5>
                           <div v-for="(error, idx) in validationResults.errors" :key="idx" class="p-3 bg-white border-l-4 border-red-500 rounded-r-lg shadow-sm text-xs text-gray-700">
                             {{ error }}
@@ -240,7 +262,7 @@
                         </div>
 
                         <!-- Warning List -->
-                        <div v-if="validationResults.warnings.length > 0" class="space-y-3">
+                        <div v-if="validationResults.warnings?.length" class="space-y-3">
                           <h5 class="text-[10px] uppercase text-amber-500 font-bold tracking-widest pl-1">Warnings</h5>
                           <div v-for="(warn, idx) in validationResults.warnings" :key="idx" class="p-3 bg-white border-l-4 border-amber-500 rounded-r-lg shadow-sm text-xs text-gray-700">
                             {{ warn }}
@@ -271,10 +293,10 @@
                         </div>
 
                         <!-- Details (Collapsed) -->
-                        <div class="mt-6 border-t border-gray-100 pt-4">
+                        <div v-if="Object.keys(validationDetails).length" class="mt-6 border-t border-gray-100 pt-4">
                            <h5 class="text-[10px] uppercase text-gray-400 font-bold tracking-widest mb-3">Validation Details</h5>
                            <div class="space-y-2">
-                             <div v-for="(res, type) in validationResults.details" :key="type" class="flex items-center justify-between text-[11px] p-2 bg-gray-100 rounded-lg">
+                             <div v-for="(res, type) in validationDetails" :key="type" class="flex items-center justify-between text-[11px] p-2 bg-gray-100 rounded-lg">
                                <span class="capitalize text-gray-600">{{ formatValidationStep(type) }}</span>
                                <span :class="validationDetailPassed(res) ? 'text-green-600 font-bold' : 'text-red-600 font-bold'">
                                  {{ validationDetailPassed(res) ? 'PASSED' : 'FAILED' }}
@@ -283,6 +305,15 @@
                            </div>
                         </div>
                       </div>
+                    </div>
+                    <div v-else class="space-y-3">
+                      <p v-if="rendering" role="status" class="text-sm text-gray-500">Rendering template…</p>
+                      <p v-else-if="renderError" role="alert" class="text-sm text-red-700">{{ renderError }}</p>
+                      <template v-else-if="renderedOutput">
+                        <IiifManifestPreview v-if="isIiif" :content="renderedOutput" :admin-sample-url="adminSampleUrl" />
+                        <pre class="max-h-96 overflow-auto rounded bg-slate-950 p-3 text-xs text-slate-100">{{ renderedOutput }}</pre>
+                      </template>
+                      <p v-else class="text-sm text-gray-500">Render the template to inspect the generated document.</p>
                     </div>
                   </div>
                 </div>
@@ -325,16 +356,20 @@ import { ref, onMounted, reactive, nextTick, watch, onUnmounted, shallowRef, com
 
 import api from '@/services/api'
 import { useToast } from '@/composables/useToast'
+import IiifManifestPreview from '@/components/workflow/IiifManifestPreview.vue'
+import { IIIF_ADMIN_SAMPLE_ID, IIIF_PRESENTATION_LABEL } from '@/utils/iiifPresentation'
+import iiifSampleAsset from '@/assets/iiif-preview.glb?url&no-inline'
 
 // CodeMirror imports
 import { EditorState } from '@codemirror/state'
 import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter } from '@codemirror/view'
 import { xml } from '@codemirror/lang-xml'
 import { autocompletion } from '@codemirror/autocomplete'
-import { syntaxHighlighting, defaultHighlightStyle, HighlightStyle } from '@codemirror/language'
+import { syntaxHighlighting, HighlightStyle } from '@codemirror/language'
 import { tags as t } from '@lezer/highlight'
 
 const toast = useToast()
+const adminSampleUrl = new URL(iiifSampleAsset, window.location.href).href
 
 const loading = ref(true)
 const saving = ref(false)
@@ -343,9 +378,17 @@ const showModal = ref(false)
 const isEditing = ref(false)
 const useSampleData = ref(false)
 const isEditorExpanded = ref(false)
-const activeRightTab = ref('guide') // 'guide' or 'validation'
+const activeRightTab = ref('guide')
 const validationResults = ref(null)
 const validating = ref(false)
+const rendering = ref(false)
+const working = computed(() => rendering.value || validating.value)
+const renderedOutput = ref('')
+const renderError = ref('')
+let renderEpoch = 0
+const validationDetails = computed(() => Object.fromEntries(
+    Object.entries(validationResults.value?.details || {}).filter(([, detail]) => typeof detail?.valid === 'boolean')
+))
 const localValidatorResult = computed(() => validationResults.value?.details?.remote || null)
 const localValidatorSteps = computed(() => {
     const result = localValidatorResult.value
@@ -377,8 +420,10 @@ const form = reactive({
     name: '',
     description: '',
     content: '',
+    standard: 'edm',
     is_default: false
 })
+const isIiif = computed(() => form.standard === 'iiif')
 
 const placeholders = {
     "Basic Metadata (Step 3)": [
@@ -495,6 +540,13 @@ const defaultTemplate = `<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-sy
 
 </rdf:RDF>`
 
+const defaultIiifTemplate = `{
+  "@context": "http://iiif.io/api/presentation/4/context.json",
+  "type": "Manifest",
+  "label": {{ helpers.lang_map(metadata.title) | tojson }},
+  "items": []
+}`
+
 // Autocompletion for metadata placeholders
 function edmCompletions(context) {
     let word = context.matchBefore(/\{\{?\s*[\w.]*/)
@@ -589,17 +641,6 @@ function initEditor() {
     })
 }
 
-function updateEditorContent(content) {
-    if (editorView.value) {
-        const currentContent = editorView.value.state.doc.toString()
-        if (currentContent !== content) {
-            editorView.value.dispatch({
-                changes: { from: 0, to: currentContent.length, insert: content }
-            })
-        }
-    }
-}
-
 function insertAtCursor(text) {
     if (!editorView.value) return
 
@@ -627,9 +668,7 @@ async function loadTemplates() {
     loading.value = true
     try {
         const res = await api.get('/templates')
-        if (res.success) {
-            templates.value = res.data.templates
-        }
+        if (res.success) templates.value = (res.data.templates || []).filter(template => !template.standard || ['edm', 'iiif'].includes(template.standard))
     } catch (e) {
         console.error(e)
         toast.error("Failed to load templates")
@@ -644,8 +683,10 @@ function openCreateModal() {
     form.id = null
     form.name = ''
     form.description = ''
+    form.standard = 'edm'
     form.content = defaultTemplate
     form.is_default = false
+    activeRightTab.value = 'guide'
     showModal.value = true
     nextTick(() => initEditor())
 }
@@ -656,12 +697,15 @@ function editTemplate(template) {
     form.name = template.name
     form.description = template.description
     form.content = template.content
+    form.standard = template.standard || 'edm'
     form.is_default = template.is_default
+    activeRightTab.value = 'guide'
     showModal.value = true
     nextTick(() => initEditor())
 }
 
 function closeModal() {
+    resetRender()
     showModal.value = false
     if (editorView.value) {
         editorView.value.destroy()
@@ -669,14 +713,28 @@ function closeModal() {
     }
 }
 
+function changeStandard(standard) {
+    const starter = isIiif.value ? defaultIiifTemplate : defaultTemplate
+    const replaceStarter = !form.content.trim() || form.content === starter
+    if (editorView.value) {
+        editorView.value.destroy()
+        editorView.value = null
+    }
+    form.standard = standard
+    if (replaceStarter) form.content = isIiif.value ? defaultIiifTemplate : defaultTemplate
+    activeRightTab.value = 'guide'
+    nextTick(initEditor)
+}
+
 async function saveTemplate() {
     saving.value = true
     try {
+        const payload = { ...form, format: isIiif.value ? 'json' : 'xml' }
         if (isEditing.value) {
-            await api.put(`/templates/${form.id}`, form)
+            await api.put(`/templates/${form.id}`, payload)
             toast.success("Template updated successfully")
         } else {
-            await api.post('/templates', form)
+            await api.post('/templates', payload)
             toast.success("Template created successfully")
         }
         await loadTemplates()
@@ -699,109 +757,116 @@ async function deleteTemplate(id) {
     }
 }
 
-async function preview() {
-    try {
-       const sampleMeta = useSampleData.value ? {
-           title: "Heritage Artifact Collection",
-           description: "A comprehensive collection of 3D scanned heritage artifacts from the museum archive.",
-           creators: [{name: "Dr. Maria Schmidt"}, {name: "Prof. John Williams"}],
-           upload_type: "dataset",
-           license: "cc-by",
-           publication_date: "2024-06-15"
-       } : {
-           title: "Test Title",
-           description: "Test Description",
-           creators: [{name: "Author 1"}],
-           upload_type: "dataset",
-           license: "cc-by"
-       }
+function resetRender() {
+    renderEpoch++
+    renderedOutput.value = ''
+    renderError.value = ''
+    validationResults.value = null
+    rendering.value = false
+    validating.value = false
+}
 
-       const res = await api.post('/templates/preview', {
-           content: form.content,
-           metadata: sampleMeta,
-           zenodo: { id: 12345, metadata: { prereserve_doi: { doi: "10.5072/12345" } }, links: { html: "http://zenodo.org/record/12345" } }
-       })
-       if(res.success) {
-           console.log(res.data.xml)
-           toast.info("Rendered XML logged to console. Check browser inspector.")
-       }
-    } catch (e) {
-        toast.error("Render Error: " + (e.error?.message || e.message))
+watch([() => form.standard, () => form.content, useSampleData], resetRender, { flush: 'sync' })
+
+function sampleMetadata() {
+    const shared = { upload_type: 'dataset', license: 'cc-by', language: 'en', country: 'EU' }
+    return useSampleData.value ? {
+        ...shared,
+        title: 'Heritage Artifact Collection',
+        description: 'A comprehensive collection of 3D scanned heritage artifacts from the museum archive.',
+        creators: [{ name: 'Dr. Maria Schmidt' }, { name: 'Prof. John Williams' }],
+        publication_date: '2024-06-15',
+    } : {
+        ...shared,
+        title: 'Test Title',
+        description: 'Test Description',
+        creators: [{ name: 'Author 1' }],
+    }
+}
+
+async function renderSample(standard, metadata) {
+    const sampleHost = window.location.hostname
+    const hasPublicSampleOrigin = sampleHost.includes('.') && !/^[\d.]+$/.test(sampleHost) && !sampleHost.includes(':')
+    const sampleUrl = standard === 'iiif'
+        ? (hasPublicSampleOrigin ? adminSampleUrl : IIIF_ADMIN_SAMPLE_ID)
+        : 'https://zenodo.org/api/records/12345/files/sample_model.glb/content'
+    const file = {
+        key: 'sample_model.glb',
+        filename: 'sample_model.glb',
+        content_url: sampleUrl,
+        url: sampleUrl,
+        links: { content: sampleUrl },
+        viewer_url: '',
+        mime_type: 'model/gltf-binary',
+        format: 'model/gltf-binary',
+        content_type: '3D',
+        edm_type: '3D',
+        is_3d: true,
+        size: 0,
+    }
+    const response = await api.post('/templates/preview', {
+        standard,
+        content: form.content,
+        metadata,
+        zenodo: {
+            id: 12345,
+            metadata: { prereserve_doi: { doi: '10.5072/12345' } },
+            links: { html: 'https://zenodo.org/records/12345' },
+            files: [file],
+        },
+        main_file: file,
+        main_file_key: file.key,
+    }, { suppressGlobalError: true })
+    const output = response.data?.[standard === 'iiif' ? 'json' : 'xml']
+    if (!response.success || !output) throw new Error(response.error?.message || 'The template did not render a document.')
+    return typeof output === 'string' ? output : JSON.stringify(output, null, 2)
+}
+
+async function preview() {
+    if (working.value) return
+    resetRender()
+    const epoch = renderEpoch
+    activeRightTab.value = 'preview'
+    rendering.value = true
+    try {
+        const output = await renderSample(form.standard, sampleMetadata())
+        if (epoch === renderEpoch) renderedOutput.value = output
+    } catch (error) {
+        if (epoch === renderEpoch) renderError.value = error.error?.message || error.message
+    } finally {
+        if (epoch === renderEpoch) rendering.value = false
     }
 }
 
 async function validateTemplate() {
+    if (working.value) return
+    const epoch = ++renderEpoch
     validating.value = true
     validationResults.value = null
+    renderError.value = ''
     activeRightTab.value = 'validation'
+    const standard = form.standard
+    const metadata = sampleMetadata()
 
     try {
-        const sampleMeta = useSampleData.value ? {
-            title: "Heritage Artifact Collection",
-            description: "A comprehensive collection of 3D scanned heritage artifacts from the museum archive.",
-            creators: [{name: "Dr. Maria Schmidt"}, {name: "Prof. John Williams"}],
-            upload_type: "dataset",
-            license: "cc-by",
-            publication_date: "2024-06-15",
-            language: "en",
-            country: "EU"
-        } : {
-            title: "Test Title",
-            description: "Test Description",
-            creators: [{name: "Author 1"}],
-            upload_type: "dataset",
-            license: "cc-by",
-            language: "en",
-            country: "EU"
+        const rendered = renderedOutput.value || await renderSample(standard, metadata)
+        if (epoch !== renderEpoch) return
+        renderedOutput.value = rendered
+        const payload = standard === 'iiif' ? { standard, json: rendered } : { xml: rendered, metadata }
+        const response = await api.post('/templates/validate', payload, { suppressGlobalError: true })
+        if (epoch !== renderEpoch) return
+        if (!response.success || typeof response.data?.valid !== 'boolean') {
+            throw new Error(response.error?.message || 'Validation is unavailable.')
         }
-        const sampleMainFile = {
-            key: "sample_model.glb",
-            filename: "sample_model.glb",
-            content_url: "https://zenodo.org/api/records/12345/files/sample_model.glb/content",
-            url: "https://zenodo.org/api/records/12345/files/sample_model.glb/content",
-            viewer_url: "",
-            mime_type: "model/gltf-binary",
-            format: "model/gltf-binary",
-            content_type: "3D",
-            edm_type: "3D",
-            is_3d: true,
-            size: 0
-        }
-
-        // 1. Preview first to get the XML
-        const previewRes = await api.post('/templates/preview', {
-            content: form.content,
-            metadata: sampleMeta,
-            zenodo: { id: 12345, metadata: { prereserve_doi: { doi: "10.5072/12345" } }, links: { html: "http://zenodo.org/record/12345" } },
-            main_file: sampleMainFile,
-            main_file_key: sampleMainFile.key
-        })
-
-        if (!previewRes.success) {
-            throw new Error(previewRes.error?.message || "Preview failed")
-        }
-
-        const xml = previewRes.data.xml
-
-        // 2. Validate the XML
-        const validateRes = await api.post('/templates/validate', { xml, metadata: sampleMeta })
-
-        if (validateRes.success) {
-            validationResults.value = validateRes.data
-            if (validateRes.data.valid) {
-                toast.success("Validation passed!")
-            } else {
-                toast.warning("Validation found issues.")
-            }
-        }
-    } catch (e) {
-        toast.error("Validation Error: " + (e.error?.message || e.message))
-        activeRightTab.value = 'guide'
+        validationResults.value = response.data
+        if (response.data.valid) toast.success('Validation passed!')
+        else toast.warning('Validation found issues.')
+    } catch (error) {
+        if (epoch === renderEpoch) renderError.value = error.error?.message || error.message
     } finally {
-        validating.value = false
+        if (epoch === renderEpoch) validating.value = false
     }
 }
-
 
 onMounted(() => {
     loadTemplates()

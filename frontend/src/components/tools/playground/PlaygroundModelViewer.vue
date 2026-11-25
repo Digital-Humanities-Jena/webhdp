@@ -54,6 +54,12 @@ function ensureModelViewerRegistered() {
   if (window.customElements?.get('model-viewer')) {
     return Promise.resolve()
   }
+  // Set the local decoder locations before the first custom element is created.
+  window.ModelViewerElement ||= {}
+  Object.assign(window.ModelViewerElement, {
+    dracoDecoderLocation: new URL('/model-decoders/draco/', window.location.origin).href,
+    ktx2TranscoderLocation: new URL('/model-decoders/basis/', window.location.origin).href,
+  })
   if (!registrationPromise) {
     registrationPromise = new Promise((resolve, reject) => {
       const existingScript = document.querySelector('script[data-model-viewer-loader="true"]')

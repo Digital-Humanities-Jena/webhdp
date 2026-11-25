@@ -70,6 +70,10 @@ missing values and duplicate source names before defaults across all rows;
 successful preview validation applies to the selected row only. Review inferred
 titles and default creators even when structural validation passes.
 
+For IIIF Presentation 4.0 RC, use Scene fields for models, Timeline fields and
+duration for audio, and Canvas fields for images or timed video. Use the same
+mapping test to inspect the generated manifest and its validation report.
+
 For task-oriented guidance and each format's validation limits, see
 [Common Workflow Recipes](../guides/common-workflow-recipes.md) and
 [Reliable Metadata Generation](../lod-generation-reliability.md).

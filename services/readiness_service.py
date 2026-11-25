@@ -13,6 +13,11 @@ from alembic.config import Config as AlembicConfig
 from alembic.script import ScriptDirectory
 
 from services.backup_service import BackupError, BackupService
+from services.local_edm_validator_client import (
+    LocalEdmValidatorClient,
+    expected_validator_identity,
+    validator_identity_mismatches,
+)
 from services.maintenance_service import maintenance_status
 
 
@@ -154,6 +159,27 @@ def _check_backup(root: Path, backup_dir: str | None, max_age_seconds: int, requ
     }
 
 
+def _check_edm_validator(config) -> dict[str, Any]:
+    if not _truthy(config.get("LOCAL_EDM_VALIDATOR_REQUIRED")):
+        return {"ok": True, "skipped": True, "required": False}
+    client = LocalEdmValidatorClient(config=config)
+    health = client.check_health()
+    result = {"ok": health["ok"], "required": True, "status": health.get("status")}
+    if not health["ok"]:
+        result["error"] = "Required local EDM validator did not report healthy"
+        return result
+
+    expected = expected_validator_identity(config)
+    if expected:
+        info = client.get_info()
+        identity = dict(info.get("summary") or {}) if info.get("ok") else {}
+        identity["source_ref"] = identity.get("git_commit") or identity.get("source_ref")
+        differences = validator_identity_mismatches(expected, identity, allow_short_source_ref=True)
+        if differences:
+            result.update(ok=False, error="Required local EDM validator identity differs: " + ", ".join(differences))
+    return result
+
+
 def build_readiness_report(app=None, *, strict_backups: bool = False) -> dict[str, Any]:
     root = Path(os.getcwd()).resolve()
     config = app.config if app is not None else {}
@@ -174,6 +200,10 @@ def build_readiness_report(app=None, *, strict_backups: bool = False) -> dict[st
         "local_output": _check_path(os.environ.get("LOCAL_OUTPUT_HOST_PATH") or root / "local_output", min_free_bytes=min_free_bytes),
         "backup": _check_backup(root, backup_dir, max_backup_age, backup_required),
         "redis": _check_redis(os.environ.get("CELERY_BROKER_URL") or config.get("CELERY_BROKER_URL") or ""),
+        # The host-side maintenance CLI may run outside the application's Docker network.
+        "local_edm_validator": _check_edm_validator(config) if app is not None else {
+            "ok": True, "skipped": True, "reason": "checked by the running application's readiness endpoint",
+        },
         "maintenance": maintenance_status(root),
     }
     blockers = [name for name, check in checks.items() if name != "maintenance" and not check.get("ok")]

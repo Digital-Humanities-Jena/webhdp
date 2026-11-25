@@ -114,6 +114,7 @@ def test_all_exports_use_actual_sandbox_files_and_validate(tmp_path, extension):
         assert content_url.encode() in output
         assert f'/api/records/6789/files/{linked_name}/content'.encode() in output
     iiif = json.loads((tmp_path / attachments['iiif']).read_text())
+    assert iiif['@context'] == 'http://iiif.io/api/presentation/4/context.json'
     assert iiif['id'] == 'https://sandbox.zenodo.org/api/records/6789/files/iiif.json/content'
     assert iiif['rights'] == 'http://creativecommons.org/licenses/by/4.0/'
     assert iiif['metadata'] == [
@@ -123,9 +124,13 @@ def test_all_exports_use_actual_sandbox_files_and_validate(tmp_path, extension):
     assert iiif['thumbnail'][0]['id'] == 'https://sandbox.zenodo.org/api/records/6789/files/preview.png/content'
     assert content_url in json.dumps(iiif)
     if extension == '.zip':
-        assert iiif['items'][0]['rendering'][0]['format'] == 'application/zip'
+        assert iiif['items'][0]['type'] == 'Canvas'
+        assert iiif['items'][0]['seeAlso'][0]['format'] == 'application/zip'
+        assert iiif['items'][0]['seeAlso'][0]['type'] == 'Dataset'
+        assert 'rendering' not in iiif['items'][0]
     else:
-        assert iiif['items'][0]['items'][0]['items'][0]['body'][0]['format'] == 'model/gltf-binary'
+        assert iiif['items'][0]['type'] == 'Scene'
+        assert iiif['items'][0]['items'][0]['items'][0]['body']['format'] == 'model/gltf-binary'
 
     rdf_xml = Graph().parse(tmp_path / attachments['cidoc_crm'], format='xml')
     jsonld = Graph().parse(tmp_path / attachments['jsonld'], format='json-ld')

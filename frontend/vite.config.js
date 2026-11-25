@@ -4,6 +4,40 @@ import { fileURLToPath, URL } from 'node:url'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
+import { createRequire } from 'node:module'
+
+const require = createRequire(import.meta.url)
+
+function webhdpModelDecodersPlugin() {
+  const assets = new Map([
+    ['draco/draco_decoder.js', 'three/examples/jsm/libs/draco/gltf/draco_decoder.js'],
+    ['draco/draco_wasm_wrapper.js', 'three/examples/jsm/libs/draco/gltf/draco_wasm_wrapper.js'],
+    ['draco/draco_decoder.wasm', 'three/examples/jsm/libs/draco/gltf/draco_decoder.wasm'],
+    ['basis/basis_transcoder.js', 'three/examples/jsm/libs/basis/basis_transcoder.js'],
+    ['basis/basis_transcoder.wasm', 'three/examples/jsm/libs/basis/basis_transcoder.wasm'],
+  ].map(([name, path]) => [`/model-decoders/${name}`, require.resolve(path)]))
+
+  return {
+    name: 'webhdp-model-decoders',
+    configureServer(server) {
+      server.middlewares.use((request, response, next) => {
+        const url = request.url?.split('?')[0]
+        const source = assets.get(url)
+        if (!source || !['GET', 'HEAD'].includes(request.method)) return next()
+        const content = readFileSync(source)
+        const type = url.endsWith('.wasm') ? 'application/wasm' : url.endsWith('.js') ? 'text/javascript' : 'text/plain'
+        response.setHeader('Content-Type', type)
+        response.setHeader('Content-Length', content.length)
+        response.end(request.method === 'HEAD' ? undefined : content)
+      })
+    },
+    generateBundle() {
+      for (const [url, source] of assets) {
+        this.emitFile({ type: 'asset', fileName: url.slice(1), source: readFileSync(source) })
+      }
+    },
+  }
+}
 
 function manualVendorChunks(id) {
   const normalizedId = id.split('\\').join('/')
@@ -91,6 +125,7 @@ export default defineConfig({
         }
       }
     }),
+    webhdpModelDecodersPlugin(),
     webhdpPwaPrecachePlugin(),
   ],
   resolve: {

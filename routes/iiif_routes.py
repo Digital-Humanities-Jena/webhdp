@@ -3,12 +3,15 @@ import logging
 import os
 import json
 from typing import Any, Dict
-from flask import Blueprint, current_app, request
+import requests
+from flask import Blueprint, Response, current_app, request
 from flask_jwt_extended import jwt_required
 from api_utils import APIResponse
 from database.models import Session as DBSession, UserMetadata
 from routes.access_helpers import get_session_with_permission
+from services.iiif_publication import ENVIRONMENTS, RECORD_ID, fetch_published_manifest, manifest_content_type, public_base_url
 from services.iiif_service import IiifService
+from services.lod_reliability import digest
 from services.msf_service import MSFService
 from .lod_mapping_helpers import build_pipeline_aligned_lod_metadata, record_for_metadata_row
 
@@ -16,6 +19,41 @@ logger = logging.getLogger(__name__)
 iiif_bp = Blueprint("iiif", __name__)
 iiif_service = IiifService()
 msf_service = MSFService()
+
+
+@iiif_bp.route("/<environment>/<record_id>/manifest.json", methods=["GET", "HEAD", "OPTIONS"])
+def published_manifest(environment, record_id):
+    def public_response(content=None, status=200, content_type=None):
+        response = Response(content, status=status, content_type=content_type)
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Methods"] = "GET, HEAD, OPTIONS"
+        response.headers["Access-Control-Expose-Headers"] = "Content-Type, ETag"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.vary.add("Accept")
+        response.cache_control.no_cache = True
+        return response
+
+    if environment not in ENVIRONMENTS or not RECORD_ID.fullmatch(record_id):
+        return public_response(status=404)
+    try:
+        if not public_base_url():
+            return public_response(status=404)
+        if request.method == "OPTIONS":
+            return public_response(status=204)
+        result = fetch_published_manifest(environment, record_id)
+    except (requests.RequestException, ValueError, RecursionError):
+        return public_response(status=502)
+    if result is None:
+        return public_response(status=404)
+
+    content, profile = result
+    negotiated = manifest_content_type(profile, request.accept_mimetypes if request.headers.get("Accept") else None)
+    if not negotiated:
+        return public_response(status=406)
+    response = public_response(content, content_type=negotiated)
+    response.cache_control.public = True
+    response.set_etag(digest(content))
+    return response.make_conditional(request)
 
 
 def _get_session_msf_profile(session_row: DBSession | None) -> Dict[str, Any]:
@@ -85,6 +123,8 @@ def test_mapping():
         requested_row_index = data.get("row_index")
         zenodo_record = data.get("zenodo_record", {})
         mapping_config = data.get("mapping_config", {})
+        if not isinstance(mapping_config, dict):
+            return APIResponse.validation_error("mapping_config must be an object")
         template_id = data.get("template_id")
         session_row, error_response = _resolve_authorized_session(session_id)
         if error_response:
@@ -113,6 +153,9 @@ def test_mapping():
 
         row = df.iloc[row_index]
         zenodo_record, main_file_key = record_for_metadata_row(row, msf_profile, zenodo_record)
+        from services.submission_pipeline_service import _extract_standard_mapping, _infer_lod_modality
+        modality = _infer_lod_modality(main_file_key, zenodo_record.get("metadata") or {})
+        mapping_config = _extract_standard_mapping(mapping_config, "iiif", modality)
 
         # 2. Apply Mapping (pipeline-aligned merge semantics)
         metadata, provenance = build_pipeline_aligned_lod_metadata(

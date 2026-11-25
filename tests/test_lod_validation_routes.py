@@ -1,8 +1,10 @@
+import json
 from types import SimpleNamespace
 import pandas as pd
 from flask import Flask
 from flask_jwt_extended import JWTManager, create_access_token
 
+from database.database import db
 from routes import edm_routes, iiif_routes, mets_routes, msf_routes, tools_routes
 from routes.edm_routes import edm_bp
 from routes.iiif_routes import iiif_bp
@@ -63,14 +65,14 @@ class _PreviewIiifService:
     def generate_iiif_manifest_with_report(self, **kwargs):
         return {
             "content": """{
-  "@context": "http://iiif.io/api/presentation/3/context.json",
+  "@context": "http://iiif.io/api/presentation/4/context.json",
   "id": "https://example.org/manifest.json",
   "type": "Manifest",
   "label": {"en": ["Artifact"]},
   "items": [
     {
-      "id": "https://example.org/canvas/1",
-      "type": "Canvas",
+      "id": "https://example.org/scene/1",
+      "type": "Scene",
       "items": [
         {
           "id": "https://example.org/page/1",
@@ -81,23 +83,13 @@ class _PreviewIiifService:
               "type": "Annotation",
               "motivation": ["painting"],
               "body": {
-                "type": "SpecificResource",
-                "source": [
-                  {
-                    "id": "https://example.org/files/artifact.glb",
-                    "type": "Model",
-                    "format": "model/gltf-binary"
-                  }
-                ]
+                "id": "https://example.org/files/artifact.glb",
+                "type": "Model",
+                "format": "model/gltf-binary"
               },
               "target": {
-                "type": "SpecificResource",
-                "source": [
-                  {
-                    "id": "https://example.org/canvas/1",
-                    "type": "Canvas"
-                  }
-                ]
+                "id": "https://example.org/scene/1",
+                "type": "Scene"
               }
             }
           ]
@@ -115,7 +107,7 @@ class _PreviewIiifService:
             "valid": True,
             "errors": [],
             "warnings": ["Manifest has no thumbnail."],
-            "details": {"canvas_count": 1},
+            "details": {"profile": "presentation-4-rc-media-1", "scene_count": 1},
         }
 
 
@@ -250,6 +242,37 @@ def test_mets_test_mapping_returns_validation_and_repair_flag(tmp_path, monkeypa
     assert payload["data"]["minimum_viable_applied"] is True
 
 
+def test_iiif_mapping_preview_uses_audio_modality_and_timeline(tmp_path, monkeypatch):
+    app = _make_app()
+    app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///:memory:"
+    db.init_app(app)
+    with app.app_context():
+        db.create_all()
+    app.register_blueprint(iiif_bp, url_prefix="/api/v1/iiif")
+    session = SimpleNamespace(id=1, session_dir=str(tmp_path), hdpc_path="")
+    monkeypatch.setattr(iiif_routes, "_resolve_authorized_session", lambda sid: (session, None))
+    msf_path = tmp_path / "input.csv"
+    msf_path.write_text("filename,title,seconds\nrecording.wav,Oral history,15.25\n", encoding="utf-8")
+    response = app.test_client().post("/api/v1/iiif/test-mapping", headers=_auth_headers(app), json={
+        "msf_path": str(msf_path), "session_id": 1, "row_index": 0,
+        "zenodo_record": {"id": 123, "files": [{"key": "recording.wav"}]},
+        "mapping_config": {"iiif": {
+            "3d": {"iiif:sceneId": {"source": "static", "value": "https://example.org/models/1"}},
+            "sound": {
+                "iiif:duration": {"source": "msf", "field": "seconds"},
+                "iiif:timelineId": {"source": "static", "value": "https://example.org/timelines/1"},
+            },
+        }},
+    })
+    assert response.status_code == 200
+    preview = response.json["data"]
+    assert preview["validation"]["valid"], preview["validation"]
+    assert preview["validation"]["details"]["timeline_count"] == 1
+    timeline = json.loads(preview["json"])["items"][0]
+    assert timeline["id"] == "https://example.org/timelines/1"
+    assert timeline["duration"] == 15.25
+
+
 def test_edm_test_mapping_returns_validation_and_repair_flag(tmp_path, monkeypatch):
     app = _make_app()
     app.register_blueprint(edm_bp, url_prefix="/api/v1/edm")
@@ -307,17 +330,22 @@ def test_output_preview_local_returns_structured_validation_sections(tmp_path, m
         "get_storage_mode",
         staticmethod(lambda: STORAGE_MODE_LOCAL),
     )
-    monkeypatch.setattr(
-        tools_routes,
-        "build_pipeline_aligned_lod_metadata",
-        lambda **kwargs: ({"title": "Artifact"}, {}) if kwargs.get("with_provenance") else {"title": "Artifact"},
-    )
+    metadata_inputs = []
+
+    def capture_metadata_inputs(**kwargs):
+        metadata_inputs.append(kwargs)
+        return {"title": "Artifact"}
+
+    monkeypatch.setattr(tools_routes, "build_pipeline_aligned_lod_metadata", capture_metadata_inputs)
+    iiif_mapping = {"iiif:pointX": {"source": "static", "value": 2}}
+    zenodo_mapping = {"zenodo:title": {"source": "static", "value": "Artifact"}}
 
     client = app.test_client()
     response = client.post(
         "/api/v1/tools/output-preview/local",
         headers=_auth_headers(app),
-        json={"msf_path": str(msf_path), "row_index": 0, "targets": ["edm", "iiif", "mets"]},
+        json={"msf_path": str(msf_path), "row_index": 0, "targets": ["edm", "iiif", "mets"],
+              "mapping_config": {"iiif": {"3d": iiif_mapping}, "zenodo": {"3d": zenodo_mapping}}},
     )
 
     assert response.status_code == 200
@@ -332,6 +360,8 @@ def test_output_preview_local_returns_structured_validation_sections(tmp_path, m
     iiif_output = payload["data"]["outputs"]["iiif"]
     assert iiif_output["minimum_viable_applied"] is False
     assert iiif_output["validation"]["sections"][0]["label"] == "IIIF"
+    assert metadata_inputs[-1]["mapping_config"] == iiif_mapping
+    assert metadata_inputs[-1]["zenodo_mapping"] == zenodo_mapping
 
     mets_output = payload["data"]["outputs"]["mets"]
     assert mets_output["minimum_viable_applied"] is True

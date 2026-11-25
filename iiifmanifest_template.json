@@ -1,68 +1,66 @@
 {
   "@context": "http://iiif.io/api/presentation/4/context.json",
-  "id": "{{ Zenodo url + path to manifest.json }}",
+  "id": "https://example.org/iiif/chess-pawn/manifest.json",
   "type": "Manifest",
-  "label": { "en": ["{{ Title }}"] },
-  "summary": { "en": ["{{ Description }}"] },
+  "label": { "en": ["Chess pawn placement"] },
+  "summary": { "en": ["A chess pawn is scaled, rotated and translated before being placed at a point in a 3D scene."] },
   "items": [
     {
-      "id": "https://example.org/iiif/scene1/page/p1/1",
+      "id": "https://example.org/iiif/chess-pawn/scene/1",
       "type": "Scene",
-      "label": { "en": ["A Scene"] },
+      "label": { "en": ["Chess pawn scene"] },
       "items": [
         {
-          "id": "https://example.org/iiif/scene1/page/p1/1",
+          "id": "https://example.org/iiif/chess-pawn/manifest.json#page-1",
           "type": "AnnotationPage",
           "items": [
             {
-              "id": "https://example.org/iiif/3d/anno1",
+              "id": "https://example.org/iiif/chess-pawn/manifest.json#annotation-1",
               "type": "Annotation",
               "motivation": ["painting"],
               "body": {
+                "id": "https://example.org/iiif/chess-pawn/manifest.json#annotation-1-body",
                 "type": "SpecificResource",
-                "source": [
-                  {
-					"id": "{{ Zenodo url + Filename }}",
-                    "type": "Model",
-                    "format": "model/gltf-binary"
-                  }
-                ],
+                "source": {
+                  "id": "https://fixtures.iiif.io/3d/thomas_flynn/chess/Pawn_black.glb",
+                  "type": "Model",
+                  "format": "model/gltf-binary",
+                  "label": { "en": ["Black chess pawn"] }
+                },
                 "transform": [
                   {
-                    "type": "TranslateTransform",
-                    "x": 0.0,
-                    "y": 0.0,
-                    "z": 0.0
+                    "type": "ScaleTransform",
+                    "x": 1.25,
+                    "y": 1.25,
+                    "z": 1.25
                   },
                   {
                     "type": "RotateTransform",
                     "x": 0,
-                    "y": 0,
+                    "y": 30,
                     "z": 0
                   },
                   {
-                    "type": "ScaleTransform",
-                    "x": 1,
-                    "y": 1,
-                    "z": 1
+                    "type": "TranslateTransform",
+                    "x": 0,
+                    "y": 0.2,
+                    "z": 0
                   }
                 ]
               },
               "target": {
+                "id": "https://example.org/iiif/chess-pawn/manifest.json#annotation-1-target",
                 "type": "SpecificResource",
-                "source": [
-                  {
-                    "id": "https://example.org/iiif/scene1/page/p1/1",
-                    "type": "Scene"
-                  }
-                ],
+                "source": {
+                  "id": "https://example.org/iiif/chess-pawn/scene/1",
+                  "type": "Scene"
+                },
                 "selector": [
                   {
-                    "type": "GeoPointSelector",
-                    "latitude": {{ Latitude }},
-                    "longitude": {{ Longitude }},
-					"altitude": {{ Orthometric Height }},
-                    "heading": {{ Heading Angle }}
+                    "type": "PointSelector",
+                    "x": 1.5,
+                    "y": 0,
+                    "z": -0.5
                   }
                 ]
               }

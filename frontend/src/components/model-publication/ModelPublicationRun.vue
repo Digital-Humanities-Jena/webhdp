@@ -171,7 +171,7 @@ const job = computed(() => {
 
 
 const steps = computed(() => props.practice ? ['Check and repair model', 'Match metadata', 'Prepare downloads'] : ['Check and repair model', 'Map metadata and generate files', 'Create Sandbox draft'])
-const formatLabels = { edm: 'EDM', iiif: 'IIIF', mets: 'METS/MODS', cidoc_crm: 'CIDOC CRM', jsonld: 'JSON-LD', msf: 'Source metadata spreadsheet', metadata: 'Mapped metadata' }
+const formatLabels = { edm: 'EDM', iiif: 'IIIF manifest', mets: 'METS/MODS', cidoc_crm: 'CIDOC CRM', jsonld: 'JSON-LD', msf: 'Source metadata spreadsheet', metadata: 'Mapped metadata' }
 const stageIndex = { preparing_model: 0, mapping_metadata: 1, creating_draft: 1, generating_metadata: 1, uploading: 2, preparing_downloads: 2 }
 const currentStep = computed(() => props.job.status === 'completed'
   ? steps.value.length

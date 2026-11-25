@@ -1,3 +1,5 @@
+import json
+
 from flask import Blueprint, request, current_app, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from database.models import LodTemplate, User, UserRole, LodStandard
@@ -54,11 +56,12 @@ def create_template():
         return APIResponse.validation_error("Name and Content are required")
 
     try:
+        standard = LodStandard(data.get('standard', 'edm'))
         template = LodTemplate(
             name=data['name'],
             description=data.get('description'),
-            standard=LodStandard(data.get('standard', 'edm')),
-            format=data.get('format', 'xml'),
+            standard=standard,
+            format=data.get('format', 'json' if standard == LodStandard.IIIF else 'xml'),
             content=data['content'],
             is_default=data.get('is_default', False)
         )
@@ -135,6 +138,24 @@ def preview_template():
     """Preview a template rendering with provided metadata"""
     # This endpoint can be used by admins (with dummy data) or users (with real draft data)
     data = request.get_json() or {}
+    if not isinstance(data, dict):
+        return APIResponse.validation_error("Template preview requires a JSON object")
+    template_id = data.get('template_id')
+    if template_id is not None:
+        if not str(template_id).isascii() or not str(template_id).isdecimal():
+            return APIResponse.validation_error("template_id must be an integer")
+        template = db.session.get(LodTemplate, int(template_id))
+        if not template:
+            return APIResponse.not_found("Template not found or empty")
+        if template.standard == LodStandard.IIIF:
+            return _preview_iiif_template(data, template.id)
+        if data.get("standard") == LodStandard.IIIF.value:
+            return APIResponse.validation_error("Choose a saved IIIF template")
+    elif data.get("standard") == LodStandard.IIIF.value:
+        if not check_admin_access():
+            return APIResponse.forbidden("Admin access required")
+        return _preview_iiif_template(data)
+
     if not data or 'template_id' not in data:
         # Allow checking via raw content too for Admin Editor?
         if 'content' in data:
@@ -204,11 +225,57 @@ def preview_template():
         return APIResponse.error(f"Preview failed: {str(e)}", 500)
 
 
+def _preview_iiif_template(data, template_id=None):
+    content = data.get("content") if template_id is None else None
+    if template_id is None and (not isinstance(content, str) or not content.strip()):
+        return APIResponse.validation_error("template_id or content is required")
+    metadata = data.get("metadata") or {}
+    zenodo_record = data.get("zenodo") or {}
+    if not isinstance(metadata, dict) or not isinstance(zenodo_record, dict):
+        return APIResponse.validation_error("metadata and zenodo must be JSON objects")
+    try:
+        generation = current_app.iiif_service.generate_iiif_manifest_with_report(
+            metadata=metadata,
+            zenodo_record=zenodo_record,
+            main_file_key=data.get("main_file_key"),
+            template_id=template_id,
+            template_content=content,
+            validate=False,
+        )
+        return APIResponse.success(data={
+            "standard": "iiif",
+            "json": generation["content"],
+            "adjustments": generation["adjustments"],
+            "minimum_viable_applied": generation["minimum_viable_applied"],
+        })
+    except ValueError as exc:
+        return APIResponse.validation_error(str(exc))
+    except Exception:
+        logger.exception("IIIF template preview failed")
+        return APIResponse.server_error("Failed to preview the IIIF template")
+
+
 @template_bp.route("/validate", methods=["POST"])
 @jwt_required()
 def validate_xml():
-    """Validate XML content against EDM schema requirements"""
-    data = request.get_json()
+    """Validate an EDM document or IIIF Presentation manifest."""
+    data = request.get_json() or {}
+    if not isinstance(data, dict):
+        return APIResponse.validation_error("Validation requires a JSON object")
+
+    if data.get("standard") == LodStandard.IIIF.value:
+        content = data.get("json")
+        if not isinstance(content, (str, dict)):
+            return APIResponse.validation_error("IIIF manifest JSON is required")
+        if isinstance(content, dict):
+            content = json.dumps(content)
+        version = data.get("presentation_version", "4.0")
+        if version == "3.0":
+            from services.iiif_validation import validate_legacy_v3_manifest
+            return APIResponse.success(data=validate_legacy_v3_manifest(content))
+        if version != "4.0":
+            return APIResponse.validation_error("Presentation version must be 4.0 or 3.0")
+        return APIResponse.success(data=current_app.iiif_service.validate_iiif_manifest(content))
 
     if not data or 'xml' not in data:
         return APIResponse.validation_error("xml content is required")

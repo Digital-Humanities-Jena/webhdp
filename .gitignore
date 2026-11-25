@@ -54,6 +54,8 @@ instance/*
 
 # Small fixtures required by setup/admin render and converter smoke tests.
 !test_model.glb
+!frontend/src/assets/iiif-preview.glb
+!frontend/e2e/fixtures/iiif-draco.glb
 !test_image.jpg
 !MSF.xlsx
 

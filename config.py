@@ -153,6 +153,9 @@ class Config:
         "LOCAL_EDM_VALIDATOR_CONTINUE_ON_ERROR",
         "true",
     ).lower() in ["true", "on", "1"]
+    LOCAL_EDM_VALIDATOR_EXPECTED_EDM_SCHEMA_VERSION = _env_value("LOCAL_EDM_VALIDATOR_EXPECTED_EDM_SCHEMA_VERSION")
+    LOCAL_EDM_VALIDATOR_EXPECTED_METIS_SCHEMA_VERSION = _env_value("LOCAL_EDM_VALIDATOR_EXPECTED_METIS_SCHEMA_VERSION")
+    LOCAL_EDM_VALIDATOR_EXPECTED_SOURCE_REF = _env_value("LOCAL_EDM_VALIDATOR_EXPECTED_SOURCE_REF")
     EMIT_EUROPEANA_3D_ADVISORY_FIELDS = os.environ.get(
         "EMIT_EUROPEANA_3D_ADVISORY_FIELDS",
         "false",
@@ -160,6 +163,7 @@ class Config:
 
     # Frontend URL for verification links
     FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost")
+    IIIF_PUBLIC_BASE_URL = _env_value("IIIF_PUBLIC_BASE_URL")
 
     # Mail configuration
     MAIL_SERVER = os.environ.get("MAIL_SERVER", "localhost")
